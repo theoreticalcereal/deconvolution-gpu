@@ -1,5 +1,5 @@
 process BLIND_DECON {
-    publishDir "${output_dir}/devoluted", mode: 'copy'
+    publishDir { "${output_dir}/devoluted" }, mode: 'copy'
 
     input:
     path deskewed_path
