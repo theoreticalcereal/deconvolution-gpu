@@ -1,32 +1,30 @@
-clc; clear;
+%% Configuration Parameters
 
-imagePath = '/archive/bioinformatics/Danuser_lab/Fiolka/MicroscopeDevelopment/omniOPM/Oil/U2OS/CLC/250417/Cell19/'
-%imagePath = '/archive/bioinformatics/Danuser_lab/Fiolka/MicroscopeDevelopment/ClearedTissue/Data/Bo-Jui/20200326_ctASLM2_Hannah'
-Cell_name= 'Top_Cell'; % e.g. Cell or Shear_Cell
-Cell_index= [19]; % specify the cell index wish to be processed
-%ch_number= 2; %specify channel numbers
-ChannelstoProcess= [0]; % specify the channels wish to be processed, start from 0, i.e. CH00
-timepoint= [0]; % specify the timepoint wish to be processed, leave it blank if you want to process all time points.
+% =========================================================================
+% INJECTED BY NEXTFLOW / PYTHON WRAPPER
+% The following variables are passed directly into the workspace:
+% imagePath, psfPath, psfFile, background, iter
+% DO NOT hardcode them here, or it will break the pipeline!
+% =========================================================================
 
-psfPath= '/archive/bioinformatics/Danuser_lab/Fiolka/MicroscopeDevelopment/SyntheticPSF/omniOPM/oil'; %/archive/bioinformatics/Danuser_lab/Fiolka/MicroscopeDevelopment/Lattice/simulatedPSFnOTF
-psf {1}= 'NA0.2_ill_488_det_520_NA1_40degree_0.118umxyz_BottomtoTop.tif'; % Shear30_1_PSF_NA1.1_ExpMyHexLattice_Sp1.2502_NA0.50,0.40_SAobjective_xy104nm_z300nm_xyview.tif
-%psfPath= '/archive/bioinformatics/Danuser_lab/Fiolka/MicroscopeDevelopment/ClearedTissue/Data/Bo-Jui/20200326_ctASLM2_Hannah';
-%psf {1}= 'NA0.2_ill_405_det_461_NA1_0.15umxyz_2.tif';
-%psf {1}= 'NA0.2_ill_488_det_520_NA1_0.15umxyz_2.tif';
-%psf {1}= 'NA0.2_ill_587_det_610_NA1_0.15umxyz_2.tif';
-%psf {1}= 'NA0.2_ill_640_det_680_NA1_0.15umxyz_2.tif'; %NA0.2_ill_488_det_520_NA1_0.15umxyz_2
-%psf {1}= 'NA0.16_ill_561_det_610_NA1_0.118umxyz.tif';
-%psf {3}= 'ill_488_NA0.2_ill_640_det_680_NA1_0.15umxyz.tif';
-%psf {4}= 'Sheared_45_1_PSF_lightsheet_ill488_det510_160xy_283z.tif';
-%psf {3}= 'Sheared_45_1_PSF_lightsheet_ill488_det510_160xy_283z.tif';
-%psf {4}= 'Sheared_45_1_PSF_lightsheet_ill488_det510_160xy_283z.tif';
+% Map the string 'psfFile' passed by Python to the cell array 'psf' expected by the script
+if exist('psfFile', 'var')
+    psf{1} = psfFile;
+end
 
-background= 0; % measure the background in the PSF data 
-
-iter=10; %number of iterations
-dir_Dec=fullfile(imagePath,strcat('DBv8_synPSFOPM_',num2str(iter),'_chop',num2str(background)));
-% dir_Dec=fullfile(imagePath,strcat('DBv5_unsheared_PSFExpMyHexLattice_Sp1.2502_iter',num2str(iter),'_chop',num2str(background)));
-mkdir(dir_Dec);
+% Set defaults for variables that might not be passed by the wrapper yet
+if ~exist('Cell_name', 'var')
+    Cell_name = 'Top_Cell'; 
+end
+if ~exist('Cell_index', 'var')
+    Cell_index = [19]; 
+end
+if ~exist('ChannelstoProcess', 'var')
+    ChannelstoProcess = [0]; 
+end
+if ~exist('timepoint', 'var')
+    timepoint = []; 
+end
 
 
 %% load PSF

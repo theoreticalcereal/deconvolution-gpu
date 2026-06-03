@@ -12,20 +12,27 @@
 %           Bo-Jui, 2025/5/9 @ Dallas
 %           Updated 2025/12/3: Added BigTIFF support to preserve full resolution
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
- 
-clc; clear;
+
 
 %% Configuration Parameters
-imagePath = '/archive/bioinformatics/Danuser_lab/Fiolka/MicroscopeDevelopment/Photoswitching/Padron_U2OS/Actin/251126';
-CellName = 'Cell'; % e.g., Cell or Shear_Cell
-CellIndex = [27]; % Specify cell indices to process
-ChannelsToProcess = [1]; % Specify channels to process (starting from 0, i.e., CH00)
-timepoints = [0]; % Specify timepoints to process; leave blank to process all
-dx = 0.15; % XY pixel size
-dz = 0.318; % z step size
-angle= 45; % light-sheet angle (to the coverslip)
-flip = 1; % If image moves from bottom to top, flip = 1; otherwise, flip = -1
-save = 0; % save shear image? if yes, save = 1, else save = 0
+
+% =========================================================================
+% INJECTED BY NEXTFLOW / PYTHON WRAPPER
+% the following variables are passed directly into the workspace:
+% imagePath, CellName, CellIndex, dx, dz, angle, flip
+% DO NOT hardcode them here or it will break the pipeline
+% =========================================================================
+
+% set defaults for variables that might not be passed by the python wrapper
+if ~exist('ChannelsToProcess', 'var')
+    ChannelsToProcess = [1]; % Specify channels to process (starting from 0)
+end
+if ~exist('timepoints', 'var')
+    timepoints = []; % Leave blank to process all
+end
+if ~exist('save', 'var')
+    save = 0; % save shear image? if yes, save = 1, else save = 0
+end
 
 tic;
 %% Processing Setup
