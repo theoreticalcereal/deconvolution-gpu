@@ -12,6 +12,8 @@ process BLIND_DECON {
 
     script:
     """
+    module load matlab/2022b
+    
     python3 ${projectDir}/scripts/decon_wrapper.py \
         --image_path ${image_path} \
         --psf_path ${psf_path} \
