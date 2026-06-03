@@ -15,8 +15,8 @@ process DESKEW {
 
     script:
     """
-    module load matlab/2022b
-    
+    module load matlab/2024a
+
     python3 ${projectDir}/scripts/deskew_wrapper.py \
         --image_path ${image_path} \
         --cell_name ${cell_name} \
