@@ -1,6 +1,6 @@
 process DESKEW {
     input:
-    path image_path
+    val image_path
     val cell_name
     val cell_index
     val channels

@@ -170,7 +170,7 @@ for c = 1:numFolders
             rotTop_ShearImage = uint16(rotTop_ShearImage);
             output_size_rotTop = size(rotTop_ShearImage,1)*size(rotTop_ShearImage,2)*size(rotTop_ShearImage,3)*2/(1024*1024*1024); %In GB)
                         
-            outputFolder2 = fullfile(imagePath, strcat('Top_shear',num2str(angle),'_mlv2_',cellNameWithIndex));
+            outputFolder2 = strcat('Top_shear',num2str(angle),'_mlv2_',cellNameWithIndex);
             mkdir(outputFolder2);
             
             disp("Saving the top-view image");
