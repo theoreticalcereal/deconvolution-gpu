@@ -1,6 +1,6 @@
 process DESKEW {
     input:
-    val image_path
+    path image_path
     val cell_name
     val cell_index
     val channels
@@ -11,7 +11,7 @@ process DESKEW {
     val flip
 
     output:
-    val "${image_path}/Top_shear${angle}_mlv2_${cell_name}${cell_index}", emit: deskewed_path
+    path "Top_shear*", emit: deskewed_path
 
     script:
     """
@@ -28,5 +28,4 @@ process DESKEW {
         --angle ${angle} \
         --flip ${flip}
     """
-
 }
