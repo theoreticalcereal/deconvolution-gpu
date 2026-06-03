@@ -29,8 +29,7 @@ workflow {
         params.dx,
         params.dz,
         params.angle,
-        params.flip,
-        params.output_dir
+        params.flip
     )
 
     BLIND_DECON(
@@ -39,5 +38,6 @@ workflow {
         params.psf_file,
         params.background,
         params.iter,
+        params.output_dir
     )
 }
