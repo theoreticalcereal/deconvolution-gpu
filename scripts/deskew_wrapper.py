@@ -1,3 +1,18 @@
+import os
+import sys
+
+# Define the exact cluster path to the MATLAB runtime engine binaries
+matlab_lib_path = "/home1/apps/MATLAB/R2022b/bin/glnxa64"
+
+# 1. Force the current running process to recognize the path
+if "LD_LIBRARY_PATH" in os.environ:
+    os.environ["LD_LIBRARY_PATH"] = matlab_lib_path + ":" + os.environ["LD_LIBRARY_PATH"]
+else:
+    os.environ["LD_LIBRARY_PATH"] = matlab_lib_path
+
+# 2. Tell Python's dynamic linker to look here (helps bypass SLURM stripping)
+if hasattr(os, "add_dll_directory"):
+    os.add_dll_directory(matlab_lib_path)
 import matlab.engine
 import argparse
 from pathlib import Path
