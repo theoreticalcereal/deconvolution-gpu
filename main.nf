@@ -17,7 +17,7 @@ params.psf_path = ''
 params.psf_file = ''
 params.background = 0
 params.iter = 10
-params.output_dir = '/archive/bioinformatics/Danuser_lab/Dean/wang_ricky'
+params.output_dir = '/work/bioinformatics/s249154/deconvolution-skeleton/output'
 
 workflow {
     DESKEW(
