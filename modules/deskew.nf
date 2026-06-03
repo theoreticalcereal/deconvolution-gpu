@@ -16,8 +16,6 @@ process DESKEW {
     script:
     """
     module load matlab/2022b
-    export MATLAB_ROOT="/home1/apps/MATLAB/R2022b"
-    export LD_LIBRARY_PATH="/home1/apps/MATLAB/R2022b/bin/glnxa64:\$LD_LIBRARY_PATH"
     python3 ${projectDir}/scripts/deskew_wrapper.py \
         --image_path ${image_path} \
         --cell_name ${cell_name} \
