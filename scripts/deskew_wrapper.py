@@ -14,6 +14,7 @@ def run_deskew(image_path, cell_name, cell_index, channels,
     eng.workspace['dz'] = dz
     eng.workspace['angle'] = angle
     eng.workspace['flip'] = flip
+    print(f"Running deskew with image: {image_path}, cell name: {cell_name}, cell index: {cell_index}, channels: {channels}, timepoints: {timepoints}, dx: {dx}, dz: {dz}, angle: {angle}, flip: {flip}")
     eng.run('deskew.m', nargout=0)
     eng.quit()
 

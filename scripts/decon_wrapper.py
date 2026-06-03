@@ -10,6 +10,7 @@ def run_decon(image_path, psf_path, psf_file, background, iter_count, output_dir
     eng.workspace['psfFile'] = psf_file
     eng.workspace['background'] = float(background)
     eng.workspace['iter'] = int(iter_count)
+    print(f"Running deconvolution with image: {image_path}, psf: {psf_path}/{psf_file}, background: {background}, iterations: {iter_count}")
     eng.run('blind_deconvolution.m', nargout=0)
     eng.quit()
 
