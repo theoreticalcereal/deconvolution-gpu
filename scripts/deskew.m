@@ -43,8 +43,23 @@ for c = 1:numFolders
     % Create folder for output
     cellNameWithIndex = strcat(CellName, num2str(CellIndex(c)));
         
-    % Determine number of images
-    numImages = numel(dir(fullfile(imagePath, cellNameWithIndex))) - 3;
+    % Determine input files robustly
+    inputDir = fullfile(imagePath, cellNameWithIndex);
+
+    tifFiles = dir(fullfile(inputDir, '*.tif'));
+    if isempty(tifFiles)
+        tifFiles = dir(fullfile(inputDir, '*.tiff'));
+    end
+
+    if isempty(tifFiles)
+        error('No TIFF files found in %s', inputDir);
+    end
+
+    % Optional: sort by name for deterministic processing
+    [~, idx] = sort({tifFiles.name});
+    tifFiles = tifFiles(idx);
+
+    numImages = numel(tifFiles);
     
     % Define timepoints range
     if isempty(timepoints)
@@ -60,10 +75,26 @@ for c = 1:numFolders
         for ch = 1:numChannels
             tic;
             
-            % Construct filename and read image stack
-            filename=strcat('1_CH',num2str(ChannelsToProcess(ch),'%02.0f'),'_',num2str((t),'%06.0f'),'.tif');
-            filepath = fullfile(imagePath, cellNameWithIndex, filename);
-            Image = readtiffstack(filepath);
+            filename = sprintf('1_CH%02d_%06d', ChannelsToProcess(ch), t);
+            candidates = {
+                fullfile(inputDir, [filename '.tif'])
+                fullfile(inputDir, [filename '.tiff'])
+            };
+
+            filepath = '';
+            for k = 1:numel(candidates)
+                if isfile(candidates{k})
+                    filepath = candidates{k};
+                    break;
+                    end
+            end
+
+if isempty(filepath)
+    error('Missing expected input file for cell %s, timepoint %d, channel %d', ...
+        cellNameWithIndex, t, ChannelsToProcess(ch));
+end
+
+Image = readtiffstack(filepath);
             
             % Image dimensions
             [ysize, xsize, zsize] = size(Image);

@@ -4,12 +4,17 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
-function [] = writetiffstack(image,path)
+function [] = writetiffstack(image, path)
 
-    [nx, ny, nz]= size(image);
-    imgType= class(image);
+    % This helper only writes 3D stacks: rows x cols x slices
+    if ndims(image) ~= 3
+        error('writetiffstack expects a 3D array.');
+    end
 
-    % Determine bits per sample based on data type
+    [nx, ny, nz] = size(image);
+    imgType = class(image);
+
+    % Map MATLAB class to TIFF bit depth
     switch imgType
         case {'uint8', 'int8'}
             bitsPerSample = 8;
@@ -20,44 +25,46 @@ function [] = writetiffstack(image,path)
         case {'uint64', 'int64', 'double'}
             bitsPerSample = 64;
         otherwise
-            bitsPerSample = 16;
+            error('Unsupported image class: %s', imgType);
     end
 
-    % Calculate estimated file size (bytes)
-    % Each slice: nx * ny * (bitsPerSample/8), plus overhead for tags
+    % Estimate output size so BigTIFF can be selected when needed
     bytesPerPixel = bitsPerSample / 8;
     estimatedSize = nx * ny * nz * bytesPerPixel;
+    threshold = 4.0 * 1024^3;
 
-    % Use BigTIFF format if file size exceeds 4GB
-    threshold = 4.0 * 1024^3; % 4.0 GB in bytes
     if estimatedSize > threshold
-        tiffFile = Tiff(path, 'w8'); % 'w8' creates BigTIFF format
+        tiffFile = Tiff(path, 'w8'); % BigTIFF
     else
-        tiffFile = Tiff(path, 'w');  % Standard TIFF format
+        tiffFile = Tiff(path, 'w');  % Standard TIFF
     end
 
-    tagstruct.Photometric= Tiff.Photometric.MinIsBlack;
+    tCleanup = onCleanup(@() tiffFile.close());
+
+    % Set TIFF tags once, then write each slice as a separate directory
+    tagstruct.Photometric = Tiff.Photometric.MinIsBlack;
     tagstruct.ImageLength = nx;
     tagstruct.ImageWidth = ny;
-    tagstruct.PlanarConfiguration= Tiff.PlanarConfiguration.Chunky;
+    tagstruct.PlanarConfiguration = Tiff.PlanarConfiguration.Chunky;
     tagstruct.Compression = Tiff.Compression.None;
-    tagstruct.BitsPerSample= bitsPerSample;
+    tagstruct.BitsPerSample = bitsPerSample;
 
-    % Set sample format based on data type
+    % Match TIFF sample format to MATLAB data type
     if contains(imgType, 'int') && ~contains(imgType, 'uint')
         tagstruct.SampleFormat = Tiff.SampleFormat.Int;
-    elseif contains(imgType, 'single') || contains(imgType, 'double')
+    elseif strcmp(imgType, 'single') || strcmp(imgType, 'double')
         tagstruct.SampleFormat = Tiff.SampleFormat.IEEEFP;
     else
         tagstruct.SampleFormat = Tiff.SampleFormat.UInt;
     end
 
-    for iz=1:nz
+    for iz = 1:nz
         tiffFile.setTag(tagstruct);
         tiffFile.write(image(:,:,iz));
+
+        % Create a new IFD for the next slice
         if iz < nz
             tiffFile.writeDirectory();
         end
     end
-    tiffFile.close();
 end

@@ -30,6 +30,9 @@ end
 %% load PSF
 for p=1: size(psf,2)
     filepath=fullfile(psfPath,psf{p});
+    if ~isfile(filepath)
+        error('Missing expected file: %s', filepath);
+    end
     PSFimage=readtiffstack(filepath);
   
 PSFimage=double(PSFimage);
@@ -57,8 +60,16 @@ ch_number= size(ChannelstoProcess,2);
 for c=1:numfolder
     
     names2=strcat(Cell_name,num2str(Cell_index(c)));
-    
-    numImages=size(dir(fullfile(imagePath,names2)),1)-3; % if Cell_name= 'Cell*',   numImages=size(dir(fullfile(imagePath,names2)),1)-3
+
+    % Determine input files robustly    
+    files = dir(fullfile(imagePath, names2, '*.tif'));
+    if isempty(files)
+        files = dir(fullfile(imagePath, names2, '*.tiff'));
+    end
+    if isempty(files)
+        error('No TIFF files found in %s', fullfile(imagePath, names2));
+    end
+    numImages = numel(files);
     if size(timepoint,2)==0
         t_st=0;
         %t_end=(size(names2,1)-2)/ch_number;
@@ -109,7 +120,7 @@ psfi=single(PSF{ch});
 [Dec,psfr]=deconvblind(E1,psfi,iter);
 %Dec=Dec(21:20+mImage,21:20+nImage);
 Dec=Dec(21:20+mImage,21:20+nImage,21:20+NumberImages);
-Dec=(Dec-min(Dec(:)))/(max(Dec(:)-min(Dec(:))));
+Dec = (Dec - min(Dec(:))) / (max(Dec(:)) - min(Dec(:)));
 Dec=Dec.*(maxE1-minE1)+minE1;
 %Dec=Dec./max(Dec(:));
 Dec=uint16(Dec);
@@ -140,8 +151,12 @@ Dec=uint16(Dec);
 %    end
 %    tiffFile.close();
     
-%% save retrived psf 
-psfr=psfr./max(psfr(:));
+%% save retrived psf safely
+mx = max(psfr(:));
+if mx == 0
+    error('Estimated PSF is all zeros.');
+end
+psfr = psfr ./ mx;
 psfr2=uint16(60000*psfr);
 
 PSFfolder=fullfile(dir_Dec,strcat('PSFr_',names2));
@@ -177,7 +192,7 @@ writetiffstack(psfr2, PSFname);
 %[Dec2,psfr3]=deconvblind(E1,psfr,iter);
 %Dec2=Dec2(21:20+mImage,21:20+nImage);
 Dec2=Dec2(21:20+mImage,21:20+nImage,21:20+NumberImages);
-Dec2=(Dec2-min(Dec2(:)))/(max(Dec2(:)-min(Dec2(:))));
+Dec2 = (Dec2 - min(Dec2(:))) / (max(Dec2(:)) - min(Dec2(:)));
 Dec2=Dec2.*(maxE1-minE1)+minE1;
 %Dec=Dec./max(Dec(:));
 Dec2=uint16(Dec2);
