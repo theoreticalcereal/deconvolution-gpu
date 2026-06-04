@@ -3,8 +3,6 @@ process BLIND_DECON {
 
     input:
     path deskewed_path
-    path psf_path
-    val psf_file
     val background
     val iter
     path output_dir
@@ -16,12 +14,15 @@ process BLIND_DECON {
     """
     module load matlab/2024a
 
-    python3 ${projectDir}/scripts/decon_wrapper.py \
-        --image_path ${deskewed_path} \
-        --psf_path ${projectDir}/scripts \
-        --psf_file ${psf_file} \
-        --background ${background} \
-        --iter ${iter} \
+    # Copy PSF file to work directory first
+    cp ${projectDir}/scripts/ctASLM2_510nm.tif .
+
+    python3 ${projectDir}/scripts/decon_wrapper.py \\
+        --image_path ${deskewed_path} \\
+        --psf_path . \\
+        --psf_file ctASLM2_510nm.tif \\
+        --background ${background} \\
+        --iter ${iter} \\
         --output_dir ${output_dir}
     """
 }
