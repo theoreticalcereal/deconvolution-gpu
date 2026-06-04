@@ -2,6 +2,9 @@ tic;
 
 %% Processing Setup
 numFolders = 1;
+if ~exist('ChannelsToProcess', 'var') || isempty(ChannelsToProcess)
+    ChannelsToProcess = [0];
+end
 numChannels = numel(ChannelsToProcess);
 
 for c = 1:numFolders
