@@ -19,6 +19,7 @@ def run_deskew(image_path, cell_name, cell_index, channels,
         f"dz={dz}; "
         f"angle={angle}; "
         f"flip={flip}; "
+        f"output_dir='{output_dir}'; "
         f"run('deskew.m');"
     )
 
