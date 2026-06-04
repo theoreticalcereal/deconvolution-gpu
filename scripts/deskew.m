@@ -1,31 +1,11 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %           Deskew the data by simply shifting the images laterally 
-%           Currently working on the images that move up and down (not left
-%           and right). If you want to process the data left and right,
-%           please rotate the data first.
-%           Note: 
-%           1. You can choose if you want to save the deskew(shear) images.
-%           2. BigTIFF format is automatically used for files larger than 4GB,
-%           preserving full resolution for all output images.
-%           3. Fixed some bugs about artificial strips in the topview. It
-%           was discovered by Tadamoto Isogai
 %           Bo-Jui, 2025/5/9 @ Dallas
-%           Updated 2025/12/3: Added BigTIFF support to preserve full resolution
+%           Updated 2025/12/3: Added BigTIFF support, memory-efficient rotation
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-
 
 %% Configuration Parameters
 
-
-% =========================================================================
-% INJECTED BY NEXTFLOW / PYTHON WRAPPER
-% The following variables are passed directly into the workspace:
-% imagePath, CellName, CellIndex, dx, dz, angle, flip, output_dir
-% DO NOT hardcode them here or it will break the pipeline
-% =========================================================================
-
-% Set defaults for variables that might not be passed by the wrapper
 if ~exist('ChannelsToProcess', 'var') || isempty(ChannelsToProcess)
     ChannelsToProcess = [0];
 end
@@ -38,7 +18,6 @@ if ~exist('output_dir', 'var') || isempty(output_dir)
     error('output_dir was not provided by the wrapper.');
 end
 
-
 tic;
 
 %% Processing Setup
@@ -47,12 +26,9 @@ numChannels = numel(ChannelsToProcess);
 
 for c = 1:numFolders
 
-    % Use the folder name passed from Nextflow directly.
     cellNameWithIndex = CellName;
-
     inputDir = fullfile(imagePath, cellNameWithIndex);
 
-    % Discover input files in the cell folder.
     tifFiles = dir(fullfile(inputDir, '*.tif'));
     if isempty(tifFiles)
         tifFiles = dir(fullfile(inputDir, '*.tiff'));
@@ -61,13 +37,11 @@ for c = 1:numFolders
         error('No TIFF files found in %s', inputDir);
     end
 
-    % Sort files for deterministic processing.
     [~, idx] = sort({tifFiles.name});
     tifFiles = tifFiles(idx);
 
     numImages = numel(tifFiles);
 
-    % Define timepoints range
     if isempty(timepoints)
         t_start = 0;
         t_end = round(numImages / numChannels) - 1;
@@ -76,15 +50,12 @@ for c = 1:numFolders
         t_end = max(timepoints);
     end
 
-    % Process each timepoint and channel
     for t = t_start:t_end
         for ch = 1:numChannels
             tic;
 
-            % Build the expected filename for this channel/timepoint.
             baseName = sprintf('CH%02d_%06d_registered_consistent', ChannelsToProcess(ch), t);
 
-            % Try both supported extensions.
             candidates = {
                 fullfile(inputDir, [baseName '.tif'])
                 fullfile(inputDir, [baseName '.tiff'])
@@ -104,7 +75,6 @@ for c = 1:numFolders
 
             Image = readtiffstack(filepath);
 
-            % Image dimensions
             [ysize, xsize, zsize] = size(Image);
             newdz = dz * cosd(angle);
 
@@ -115,7 +85,6 @@ for c = 1:numFolders
             max_yoffset = abs(round(flip * (1 - cz) * (newdz / dx)));
             ShearImage = zeros(ysize + 2 * max_yoffset, xsize, zsize, 'uint16');
 
-
             tic
             for z = 1:zsize
                 yoffset = round(flip * (z - cz) * (newdz / dx));
@@ -123,14 +92,12 @@ for c = 1:numFolders
             end
             toc
 
-            % Average adjacent slices to reduce artifact ringing in the top view.
             for z = 1:zsize-1
                 ShearImage(:,:,z) = (ShearImage(:,:,z) + ShearImage(:,:,z+1)) / 2;
             end
 
             toc
 
-            % Save the processed image stack
             disp("Saving the shear image");
             tic
             output_size = size(ShearImage,1) * size(ShearImage,2) * size(ShearImage,3) * 2 / (1024*1024*1024);
@@ -147,9 +114,8 @@ for c = 1:numFolders
 
             %% Rotation to top view
             disp("Rotating to top view ... ");
-            clear mipzy scaled_ShearImage scaled_mipzy rot_scaled_mipzy mask cropped_mipzy zy_view rotTop_ShearImage;
-    
-            % Compute MIP on the 3rd dimension (correct for 2D display)
+            clear mipzy scaled_ShearImage scaled_mipzy rot_scaled_mipzy zy_view rotTop_ShearImage;
+            
             mipzy = max(ShearImage, [], 3);
 
             figure(1)
@@ -157,7 +123,6 @@ for c = 1:numFolders
 
             scale_x = dz * sind(angle) / dx;
 
-            % Resize only in x-direction using single precision to save memory
             scaled_ShearImage = imresize3(single(ShearImage), ...
                 [size(ShearImage,1), size(ShearImage,2), round(size(ShearImage,3) * scale_x)], ...
                 'Method', 'linear');
@@ -167,30 +132,18 @@ for c = 1:numFolders
             figure(2)
             imagesc(scaled_mipzy); axis equal tight
 
-            % Crop the whole image in yz
-            zy_view = permute(scaled_ShearImage, [1, 3, 2]); % Swap dimensions to get ZY slices
+            zy_view = permute(scaled_ShearImage, [1, 3, 2]);
 
-            % Slice-by-slice rotation - NO cropping (just rotate each slice)
             tic
             rotTop_ShearImage = zeros(size(zy_view,1), size(zy_view,2), size(zy_view,3), 'uint16');
 
             for i = 1:size(zy_view, 3)
                 rotated_slice = imrotate(zy_view(:,:,i), -1 * flip * angle, 'bilinear', 'crop');
                 rotTop_ShearImage(:,:,i) = uint16(rotated_slice);
-    
                 clear rotated_slice
             end
             toc
 
-            % Convert to expected dimension order
-            rotTop_ShearImage = permute(rotTop_ShearImage, [1 3 2]);
-            toc
-
-            % Crop the entire volume after all slices are rotated
-            rotTop_ShearImage = rotTop_ShearImage(min_row:max_row, min_col:max_col, :);
-            toc
-
-            % Convert to expected dimension order
             rotTop_ShearImage = permute(rotTop_ShearImage, [1 3 2]);
 
             output_size_rotTop = size(rotTop_ShearImage,1) * size(rotTop_ShearImage,2) * size(rotTop_ShearImage,3) * 2 / (1024*1024*1024);
@@ -208,7 +161,6 @@ for c = 1:numFolders
             tic
             writetiffstack(rotTop_ShearImage, fullfile(outputFolder2, [baseName '.tif']));
 
-            % Write note file
             msg = 'z pixel = x(y) pixel. Full resolution preserved.';
             if output_size_rotTop > 4
                 msg = sprintf('%s BigTIFF format used for %.2f GB file.', msg, output_size_rotTop);
