@@ -16,10 +16,6 @@ process DESKEW {
     val output_dir
 
     output:
-    // FIX 2: emit the output_dir/Top_shear path as a val so BLIND_DECON
-    // can locate the staged files. Nextflow cannot glob an absolute path
-    // that lives outside the work dir, so we pass the known output path
-    // as a val instead of trying to stage it with path.
     val "${output_dir}/Top_shear", emit: deskewed_path
 
     script:
