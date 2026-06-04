@@ -99,7 +99,7 @@ for c = 1:numFolders
 
             outputFolder = fullfile(output_dir, strcat('shear', num2str(angle), '_mlv2_', cellNameWithIndex));
             if ~isfolder(outputFolder)
-                error('Output folder does not exist: %s', outputFolder);
+                mkdir(outputFolder);
             end
             if output_size > 4
                 disp(sprintf("File is larger than 4GB (%.2f GB), saving as BigTIFF format", output_size));
@@ -157,7 +157,7 @@ for c = 1:numFolders
 
             outputFolder2 = fullfile(output_dir, strcat('Top_shear', num2str(angle), '_mlv2_', cellNameWithIndex));
             if ~isfolder(outputFolder2)
-                error('Output folder does not exist: %s', outputFolder2);
+                mkdir(outputFolder);
             end
 
             disp("Saving the top-view image");
