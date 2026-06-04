@@ -30,6 +30,9 @@ for c = 1:numFolders
     numImages = numel(tifFiles);
 
     % Define timepoints range
+    if ~exist('timepoints', 'var') || isempty(timepoints)
+        timepoints = [];
+    end
     if isempty(timepoints)
         t_start = 0;
         t_end = round(numImages / numChannels) - 1;
