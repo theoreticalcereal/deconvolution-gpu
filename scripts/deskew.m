@@ -94,16 +94,12 @@ for c = 1:numFolders
             tic
             output_size = size(ShearImage,1) * size(ShearImage,2) * size(ShearImage,3) * 2 / (1024*1024*1024);
 
-            if save == 1
-                outputFolder = fullfile(imagePath, strcat('shear', num2str(angle), '_mlv2_', cellNameWithIndex));
-                mkdir(outputFolder);
-                if output_size > 4
-                    disp(sprintf("File is larger than 4GB (%.2f GB), saving as BigTIFF format", output_size));
-                end
-                writetiffstack(ShearImage, fullfile(outputFolder, [baseName '.tif']));
-            else
-                disp("Shear image saving is disabled (save=0)");
+            outputFolder = fullfile(imagePath, strcat('shear', num2str(angle), '_mlv2_', cellNameWithIndex));
+            mkdir(outputFolder);
+            if output_size > 4
+                disp(sprintf("File is larger than 4GB (%.2f GB), saving as BigTIFF format", output_size));
             end
+            writetiffstack(ShearImage, fullfile(outputFolder, [baseName '.tif']));
             toc
 
             disp("Rotating to top view ... ");
