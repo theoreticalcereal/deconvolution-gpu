@@ -21,7 +21,7 @@ process BLIND_DECON {
         --psf_path ${psf_path} \
         --psf_file ${psf_file} \
         --background ${background} \
-        --iterations ${iter} \
+        --iter ${iter} \
         --output_dir ${output_dir}
     """
 }
