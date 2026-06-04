@@ -6,7 +6,7 @@ include { BLIND_DECON } from './modules/blind_decon'
 
 params.image_path = ''
 params.cell_name = 'Cell'
-params.cell_index = '1'
+params.cell_index = ''
 params.channels = '0'
 params.timepoints = '0'
 params.dx = 0.167
