@@ -29,7 +29,8 @@ workflow {
         params.dx,
         params.dz,
         params.angle,
-        params.flip
+        params.flip,
+        params.output_dir
     )
 
     BLIND_DECON(
