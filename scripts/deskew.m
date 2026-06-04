@@ -147,8 +147,8 @@ for c = 1:numFolders
 
             %% Rotation to top view
             disp("Rotating to top view ... ");
-            clear mipzy scaled_ShearImage scaled_mipzy rot_scaled_mipzy mask cropped_mipzy zy_view cropped_rotate_zy rotTop_ShearImage;
-            
+            clear mipzy scaled_ShearImage scaled_mipzy rot_scaled_mipzy mask cropped_mipzy zy_view rotTop_ShearImage;
+    
             % Compute MIP on the 3rd dimension (correct for 2D display)
             mipzy = max(ShearImage, [], 3);
 
@@ -167,24 +167,10 @@ for c = 1:numFolders
             figure(2)
             imagesc(scaled_mipzy); axis equal tight
 
-            rot_scaled_mipzy = imrotate(scaled_mipzy, -1 * flip * angle, 'bilinear', 'crop');
-            figure(2)
-            imagesc(rot_scaled_mipzy); axis equal tight
-
-            % Find the bounding box of nonzero pixels
-            mask = rot_scaled_mipzy > 0;
-            [row, col] = find(mask);
-            min_row = min(row); max_row = max(row);
-            min_col = min(col); max_col = max(col);
-
-            cropped_mipzy = rot_scaled_mipzy(min_row:max_row, min_col:max_col);
-            figure(2)
-            imagesc(cropped_mipzy); axis equal tight
-
             % Crop the whole image in yz
             zy_view = permute(scaled_ShearImage, [1, 3, 2]); % Swap dimensions to get ZY slices
 
-            % Slice-by-slice rotation with 'crop' to avoid memory overflow and index errors
+            % Slice-by-slice rotation - NO cropping (just rotate each slice)
             tic
             rotTop_ShearImage = zeros(size(zy_view,1), size(zy_view,2), size(zy_view,3), 'uint16');
 
@@ -194,6 +180,10 @@ for c = 1:numFolders
     
                 clear rotated_slice
             end
+            toc
+
+            % Convert to expected dimension order
+            rotTop_ShearImage = permute(rotTop_ShearImage, [1 3 2]);
             toc
 
             % Crop the entire volume after all slices are rotated
