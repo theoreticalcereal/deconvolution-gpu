@@ -12,7 +12,7 @@ process DESKEW {
     val output_dir
 
     output:
-    path "Top_shear*", emit: deskewed_path
+    path "${output_dir}/Top_shear*", emit: deskewed_path
 
     script:
     """
