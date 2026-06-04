@@ -134,7 +134,7 @@ for c = 1:numFolders
             tic
             output_size = size(ShearImage,1) * size(ShearImage,2) * size(ShearImage,3) * 2 / (1024*1024*1024);
 
-            outputFolder = fullfile(output_dir, strcat('shear', num2str(angle), '_mlv2_', cellNameWithIndex));
+            outputFolder = fullfile(output_dir, 'shear');
             if ~isfolder(outputFolder)
                 mkdir(outputFolder);
             end
@@ -180,7 +180,7 @@ for c = 1:numFolders
 
             output_size_rotTop = size(rotTop_ShearImage,1) * size(rotTop_ShearImage,2) * size(rotTop_ShearImage,3) * 2 / (1024*1024*1024);
 
-            outputFolder2 = fullfile(output_dir, strcat('Top_shear', num2str(angle), '_mlv2_', cellNameWithIndex));
+            outputFolder2 = fullfile(output_dir, 'Top_shear');
             if ~isfolder(outputFolder2)
                 mkdir(outputFolder2);
             end
