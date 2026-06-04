@@ -16,6 +16,7 @@ def run_decon(image_path, psf_path, psf_file, background, iter_count, output_dir
         f"psfFile='{psf_file}'; "
         f"background={background}; "
         f"iter={iter_count}; "
+        f"output_dir='{output_dir}'; "
         f"run('blind_deconvolution.m');"
     )
 
