@@ -18,7 +18,7 @@ process BLIND_DECON {
 
     python3 ${projectDir}/scripts/decon_wrapper.py \
         --image_path ${deskewed_path} \
-        --psf_path ${psf_path} \
+        --psf_path ${projectDir}/scripts \
         --psf_file ${psf_file} \
         --background ${background} \
         --iter ${iter} \
