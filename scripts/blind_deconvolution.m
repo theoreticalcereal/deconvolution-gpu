@@ -62,9 +62,9 @@ for c=1:numfolder
     names2=strcat(Cell_name,num2str(Cell_index(c)));
 
     % Determine input files robustly    
-    files = dir(fullfile(imagePath, names2, '*.tif'));
+    files = dir(fullfile(imagePath, names2, '*.tiff'));
     if isempty(files)
-        files = dir(fullfile(imagePath, names2, '*.tiff'));
+        files = dir(fullfile(imagePath, names2, '*.tif'));
     end
     if isempty(files)
         error('No TIFF files found in %s', fullfile(imagePath, names2));
@@ -85,9 +85,24 @@ for c=1:numfolder
         
         tic
        
-       filename=strcat('1_CH',num2str(ChannelstoProcess(ch),'%02.0f'),'_',num2str((t),'%06.0f'),'.tif');
-       %filename=strcat('1_CH',num2str((ch-1),'%02.0f'),'_',num2str((t-1),'%06.0f'),'.tif');
-       filepath=fullfile(imagePath,names2,filename);
+       baseName = sprintf('CH%02d_%06d_registered_consistent', ChannelstoProcess(ch), t);
+
+        candidates = {
+            fullfile(imagePath, names2, [baseName '.tif'])
+            fullfile(imagePath, names2, [baseName '.tiff'])
+        };
+
+        filepath = '';
+        for k = 1:numel(candidates)
+            if isfile(candidates{k})
+                filepath = candidates{k};
+                break;
+            end
+        end
+
+if isempty(filepath)
+    error('Missing expected file: %s', baseName);
+end
 %       InfoImage=imfinfo(filepath);
 %       mImage=InfoImage(1).Height;
 %       nImage=InfoImage(1).Width;

@@ -75,10 +75,11 @@ for c = 1:numFolders
         for ch = 1:numChannels
             tic;
             
-            filename = sprintf('1_CH%02d_%06d', ChannelsToProcess(ch), t);
+            baseName = sprintf('CH%02d_%06d_registered_consistent', ChannelsToProcess(ch), t);
+
             candidates = {
-                fullfile(inputDir, [filename '.tif'])
-                fullfile(inputDir, [filename '.tiff'])
+                fullfile(inputDir, [baseName '.tif'])
+                fullfile(inputDir, [baseName '.tiff'])
             };
 
             filepath = '';
@@ -86,8 +87,12 @@ for c = 1:numFolders
                 if isfile(candidates{k})
                     filepath = candidates{k};
                     break;
-                    end
+                end
             end
+
+if isempty(filepath)
+    error('Missing expected file: %s', baseName);
+end
 
 if isempty(filepath)
     error('Missing expected input file for cell %s, timepoint %d, channel %d', ...
