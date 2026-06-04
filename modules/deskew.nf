@@ -1,7 +1,7 @@
 process DESKEW {
     
     // Directives go first (before input/output/script)
-    publishDir "${output_dir}", mode: 'copy'
+    publishDir { output_dir }, mode: 'copy'
 
     input:
     val image_path
