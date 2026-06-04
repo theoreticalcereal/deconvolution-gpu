@@ -172,7 +172,7 @@ for c = 1:numFolders
 
             % Rotate entire 3D volume at once using imrotate3 (much faster than slice-by-slice)
             tic
-            rotTop_ShearImage = imrotate3(scaled_ShearImage, -1 * flip * angle, [0 0 1], 'bilinear', 'crop');
+            rotTop_ShearImage = imrotate3(scaled_ShearImage, -1 * flip * angle, [0 0 1], 'linear', 'crop');
             rotTop_ShearImage = uint16(rotTop_ShearImage);
             toc
 
