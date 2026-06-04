@@ -190,12 +190,14 @@ for c = 1:numFolders
 
             for i = 1:size(zy_view, 3)
                 rotated_slice = imrotate(zy_view(:,:,i), -1 * flip * angle, 'bilinear', 'crop');
-                cropped_slice = rotated_slice(min_row:max_row, min_col:max_col);
-                rotTop_ShearImage(:,:,i) = uint16(cropped_slice);
-                
-                % Clear temporary variables immediately
-                clear rotated_slice cropped_slice
+                rotTop_ShearImage(:,:,i) = uint16(rotated_slice);
+    
+                clear rotated_slice
             end
+            toc
+
+            % Crop the entire volume after all slices are rotated
+            rotTop_ShearImage = rotTop_ShearImage(min_row:max_row, min_col:max_col, :);
             toc
 
             % Convert to expected dimension order
