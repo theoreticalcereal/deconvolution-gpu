@@ -6,6 +6,9 @@ if ~exist('ChannelsToProcess', 'var') || isempty(ChannelsToProcess)
     ChannelsToProcess = [0];
 end
 numChannels = numel(ChannelsToProcess);
+if ~exist('output_dir', 'var') || isempty(output_dir)
+    error('output_dir was not provided by the wrapper.');
+end
 
 for c = 1:numFolders
 
@@ -94,7 +97,7 @@ for c = 1:numFolders
             tic
             output_size = size(ShearImage,1) * size(ShearImage,2) * size(ShearImage,3) * 2 / (1024*1024*1024);
 
-            outputFolder = fullfile(imagePath, strcat('shear', num2str(angle), '_mlv2_', cellNameWithIndex));
+            outputFolder = fullfile(output_dir, strcat('shear', num2str(angle), '_mlv2_', cellNameWithIndex));
             if ~isfolder(outputFolder)
                 error('Output folder does not exist: %s', outputFolder);
             end
@@ -152,7 +155,7 @@ for c = 1:numFolders
 
             output_size_rotTop = size(rotTop_ShearImage,1) * size(rotTop_ShearImage,2) * size(rotTop_ShearImage,3) * 2 / (1024*1024*1024);
 
-            outputFolder2 = fullfile(imagePath, strcat('Top_shear', num2str(angle), '_mlv2_', cellNameWithIndex));
+            outputFolder2 = fullfile(output_dir, strcat('Top_shear', num2str(angle), '_mlv2_', cellNameWithIndex));
             if ~isfolder(outputFolder2)
                 error('Output folder does not exist: %s', outputFolder2);
             end

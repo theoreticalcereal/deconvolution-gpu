@@ -9,6 +9,7 @@ process DESKEW {
     val dz
     val angle
     val flip
+    val output_dir
 
     output:
     path "Top_shear*", emit: deskewed_path
@@ -26,6 +27,7 @@ process DESKEW {
         --dx ${dx} \
         --dz ${dz} \
         --angle ${angle} \
-        --flip ${flip}
+        --flip ${flip} \
+        --output_dir ${output_dir}
     """
 }

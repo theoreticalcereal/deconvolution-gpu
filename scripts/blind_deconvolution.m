@@ -10,7 +10,6 @@
 if exist('psfFile', 'var')
     psf{1} = psfFile;
 end
-
 if ~exist('Cell_name', 'var')
     Cell_name = 'Top_Cell';
 end
@@ -20,6 +19,10 @@ end
 if ~exist('timepoint', 'var')
     timepoint = [];
 end
+if ~exist('output_dir', 'var') || isempty(output_dir)
+    error('output_dir was not provided by the wrapper.');
+end
+dir_Dec = output_dir;
 
 %% Load PSF
 for p = 1:size(psf, 2)
