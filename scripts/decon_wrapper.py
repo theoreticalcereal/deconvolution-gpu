@@ -3,11 +3,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+
 def run_decon(image_path, psf_path, psf_file, background, iter_count, output_dir):
     
     script_dir = str(Path(__file__).parent.absolute())
     
+    # FIX: Convert psf_path to absolute path
+    psf_path = str(Path(psf_path).resolve())
+    
     print(f"Running deconvolution with image: {image_path}, psf: {psf_path}/{psf_file}, background: {background}, iterations: {iter_count}")
+
 
     matlab_cmd = (
         f"addpath('{script_dir}'); "
@@ -20,6 +25,7 @@ def run_decon(image_path, psf_path, psf_file, background, iter_count, output_dir
         f"run('blind_deconvolution.m');"
     )
 
+
     command = ["matlab", "-batch", matlab_cmd]
     
     try:
@@ -27,6 +33,7 @@ def run_decon(image_path, psf_path, psf_file, background, iter_count, output_dir
     except subprocess.CalledProcessError as e:
         print(f"MATLAB execution failed with error code: {e.returncode}")
         sys.exit(1)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
