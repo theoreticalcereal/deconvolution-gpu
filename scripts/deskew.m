@@ -109,7 +109,7 @@ for c = 1:numFolders
 
             disp("Rotating to top view ... ");
             clear mipzy scaled_ShearImage scaled_mipzy rot_scaled_mipzy mask cropped_mipzy zy_view cropped_rotate_zy;
-            mipzy = max(ShearImage, [], 2);
+            mipzy = max(ShearImage, [], 3);
 
             figure(1)
             imagesc(mipzy); axis equal tight
@@ -120,7 +120,7 @@ for c = 1:numFolders
                 [size(ShearImage,1), size(ShearImage,2), round(size(ShearImage,3) * scale_x)], ...
                 'Method', 'linear');
 
-            scaled_mipzy = max(scaled_ShearImage, [], 2);
+            scaled_mipzy = max(scaled_ShearImage, [], 3);
 
             figure(2)
             imagesc(scaled_mipzy); axis equal tight
