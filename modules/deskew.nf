@@ -1,5 +1,5 @@
 process DESKEW {
-    
+
     // Directives go first (before input/output/script)
     publishDir { output_dir }, mode: 'copy'
 
@@ -16,7 +16,11 @@ process DESKEW {
     val output_dir
 
     output:
-    path "Top_shear*", emit: deskewed_path
+    // FIX 2: emit the output_dir/Top_shear path as a val so BLIND_DECON
+    // can locate the staged files. Nextflow cannot glob an absolute path
+    // that lives outside the work dir, so we pass the known output path
+    // as a val instead of trying to stage it with path.
+    val "${output_dir}/Top_shear", emit: deskewed_path
 
     script:
     """
@@ -25,13 +29,13 @@ process DESKEW {
     python3 ${projectDir}/scripts/deskew_wrapper.py \
         --image_path ${image_path} \
         --cell_name ${cell_name} \
-        --cell_index ${cell_index} \
+        --cell_index "${cell_index}" \
         --channels ${channels} \
         --timepoints ${timepoints} \
         --dx ${dx} \
         --dz ${dz} \
         --angle ${angle} \
         --flip ${flip} \
-        --output_dir .
+        --output_dir ${output_dir}
     """
 }
