@@ -138,7 +138,7 @@ for c = 1:numFolders
             rotTop_ShearImage = zeros(size(zy_view,1), size(zy_view,2), size(zy_view,3), 'uint16');
 
             for i = 1:size(zy_view, 3)
-                rotated_slice = imrotate(zy_view(:,:,i), -1 * flip * angle, 'bilinear', 'crop');
+                rotated_slice = imrotate3(zy_view(:,:,i), -1 * flip * angle, 'bilinear', 'crop');
                 rotTop_ShearImage(:,:,i) = uint16(rotated_slice);
                 clear rotated_slice
             end
