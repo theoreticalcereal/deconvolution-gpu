@@ -16,15 +16,12 @@ process BLIND_DECON {
     """
     module load matlab/2024a
 
-    # Copy PSF to work directory so MATLAB can find it
-    cp ${psf_path} .
-
-    python3 ${projectDir}/scripts/decon_wrapper.py \\
-        --image_path ${deskewed_path} \\
-        --psf_path ${psf_file} \\
-        --psf_file ${psf_file} \\
-        --background ${background} \\
-        --iter ${iter} \\
+    python3 ${projectDir}/scripts/decon_wrapper.py \
+        --image_path ${deskewed_path} \
+        --psf_path ${psf_path} \
+        --psf_file ${psf_file} \
+        --background ${background} \
+        --iter ${iter} \
         --output_dir ${output_dir}
     """
 }
