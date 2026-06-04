@@ -119,7 +119,9 @@ for c = 1:numfolder
             psfr2 = uint16(60000 * psfr);
 
             PSFfolder = fullfile(dir_Dec, strcat('PSFr_', names2));
-            mkdir(PSFfolder);
+            if ~isfolder(PSFfolder)
+                error('Output folder does not exist: %s', PSFfolder);
+            end
             PSFname = fullfile(PSFfolder, [names2 '_psfr_ch' num2str(ch) '.tif']);
             writetiffstack(psfr2, PSFname);
 
@@ -131,7 +133,9 @@ for c = 1:numfolder
             Dec2 = uint16(Dec2);
 
             finalPath2 = fullfile(dir_Dec, strcat('DB2_', names2));
-            mkdir(finalPath2);
+            if ~isfolder(finalPath2)
+                error('Output folder does not exist: %s', finalPath2);
+            end
 
             Decname2 = fullfile(finalPath2, [baseName '.tif']);
             writetiffstack(Dec2, Decname2);

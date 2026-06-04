@@ -95,7 +95,9 @@ for c = 1:numFolders
             output_size = size(ShearImage,1) * size(ShearImage,2) * size(ShearImage,3) * 2 / (1024*1024*1024);
 
             outputFolder = fullfile(imagePath, strcat('shear', num2str(angle), '_mlv2_', cellNameWithIndex));
-            mkdir(outputFolder);
+            if ~isfolder(outputFolder)
+                error('Output folder does not exist: %s', outputFolder);
+            end
             if output_size > 4
                 disp(sprintf("File is larger than 4GB (%.2f GB), saving as BigTIFF format", output_size));
             end
@@ -151,7 +153,9 @@ for c = 1:numFolders
             output_size_rotTop = size(rotTop_ShearImage,1) * size(rotTop_ShearImage,2) * size(rotTop_ShearImage,3) * 2 / (1024*1024*1024);
 
             outputFolder2 = fullfile(imagePath, strcat('Top_shear', num2str(angle), '_mlv2_', cellNameWithIndex));
-            mkdir(outputFolder2);
+            if ~isfolder(outputFolder2)
+                error('Output folder does not exist: %s', outputFolder2);
+            end
 
             disp("Saving the top-view image");
             if output_size_rotTop > 4
