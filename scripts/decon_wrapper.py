@@ -8,8 +8,8 @@ def run_decon(image_path, psf_path, psf_file, background, iter_count, output_dir
     
     script_dir = str(Path(__file__).parent.absolute())
     
-    # FIX: Convert psf_path to absolute path
-    psf_path = str(Path(psf_path).resolve())
+    # Remove .resolve() - use psf_path as-is from Nextflow
+    # psf_path will already be the absolute path from Nextflow
     
     print(f"Running deconvolution with image: {image_path}, psf: {psf_path}/{psf_file}, background: {background}, iterations: {iter_count}")
 
