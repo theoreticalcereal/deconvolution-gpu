@@ -12,7 +12,8 @@ process DESKEW {
     val output_dir
 
     output:
-    path "${output_dir}/Top_shear*", emit: deskewed_path
+    path "Top_shear", emit: deskewed_path, type: directory
+    publishDir "${output_dir}", mode: 'copy'
 
     script:
     """
@@ -28,6 +29,6 @@ process DESKEW {
         --dz ${dz} \
         --angle ${angle} \
         --flip ${flip} \
-        --output_dir ${output_dir}
+        --output_dir .
     """
 }
