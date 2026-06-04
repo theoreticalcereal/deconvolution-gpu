@@ -167,7 +167,7 @@ for c = 1:numFolders
             figure(2)
             imagesc(scaled_mipzy); axis equal tight
 
-            rot_scaled_mipzy = imrotate(scaled_mipzy, -1 * flip * angle, 'bilinear');
+            rot_scaled_mipzy = imrotate(scaled_mipzy, -1 * flip * angle, 'bilinear', 'crop');
             figure(2)
             imagesc(rot_scaled_mipzy); axis equal tight
 
@@ -184,12 +184,12 @@ for c = 1:numFolders
             % Crop the whole image in yz
             zy_view = permute(scaled_ShearImage, [1, 3, 2]); % Swap dimensions to get ZY slices
 
-            % Slice-by-slice rotation to avoid memory overflow
+            % Slice-by-slice rotation with 'crop' to avoid memory overflow and index errors
             tic
             rotTop_ShearImage = zeros(size(zy_view,1), size(zy_view,2), size(zy_view,3), 'uint16');
 
             for i = 1:size(zy_view, 3)
-                rotated_slice = imrotate(zy_view(:,:,i), -1 * flip * angle, 'bilinear');
+                rotated_slice = imrotate(zy_view(:,:,i), -1 * flip * angle, 'bilinear', 'crop');
                 cropped_slice = rotated_slice(min_row:max_row, min_col:max_col);
                 rotTop_ShearImage(:,:,i) = uint16(cropped_slice);
                 
