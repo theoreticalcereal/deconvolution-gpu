@@ -1,4 +1,8 @@
 process DESKEW {
+    
+    // Directives go first (before input/output/script)
+    publishDir "${output_dir}", mode: 'copy'
+
     input:
     val image_path
     val cell_name
@@ -12,8 +16,7 @@ process DESKEW {
     val output_dir
 
     output:
-    path "Top_shear", emit: deskewed_path, type: directory
-    publishDir "${output_dir}", mode: 'copy'
+    path "Top_shear*", emit: deskewed_path
 
     script:
     """
