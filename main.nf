@@ -2,7 +2,7 @@
 nextflow.enable.dsl=2
 
 include { DESKEW } from './modules/deskew'
-include { STATIC_DECON } from './modules/static_decon'
+include { STATIC_DECON } from './modules/static_deconvolution'
 
 workflow {
     // Run the MATLAB deskew step
