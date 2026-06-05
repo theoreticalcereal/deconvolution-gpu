@@ -50,6 +50,9 @@ def main():
             crop_x_start = x - x_start
             crop_x_end = crop_x_start + min(tile_size, nx - x)
             
+            #slice cleaned tile
+            cleaned_tile = decon_tile[:, crop_y_start:crop_y_end, crop_x_start:crop_x_end]
+
             # calculate target window in the final volume
             tile_nz, tile_ny, tile_nx = cleaned_tile.shape
             out_y_end = y + tile_ny
