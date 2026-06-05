@@ -22,9 +22,6 @@ def run_decon(image_path, psf_path, psf_file, background, iter_count):
         image, 
         psf, 
         n_iters=iter_count,
-        clip_negative=True,
-        bandwidth=0.5,       # standard for fluorescence
-        remove_nans=True,
     )
     
     # Normalize and convert to 16-bit
