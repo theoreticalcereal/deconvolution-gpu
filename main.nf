@@ -2,10 +2,9 @@
 nextflow.enable.dsl=2
 
 include { DESKEW } from './modules/deskew'
-include { STATIC_DECON } from './modules/static_deconvolution'
+include { DECON } from './modules/deconvolution'
 
 workflow {
-    // Run the MATLAB deskew step
     DESKEW(
         params.image_path,
         params.cell_name,
@@ -19,8 +18,7 @@ workflow {
         params.output_dir
     )
 
-    // Run the GPU Deconvolution step using your provided PSF
-    STATIC_DECON(
+    DECON(
         DESKEW.out.deskewed_path,
         params.cell_name,
         params.psf_path,

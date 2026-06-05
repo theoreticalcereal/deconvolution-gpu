@@ -1,80 +1,76 @@
+# dask-orchestrated gpu deconvolution wrapper
+# designed for single-gpu node testing before scaling to cluster
+
 import argparse
 from pathlib import Path
 import numpy as np
+import dask.array as da
 from tifffile import imread, imwrite
 from pycudadecon import decon
+import psfmodels as pm
+
+def generate_theoretical_psf(na, wavelength, ni, dxy, dz, background):
+    psf = pm.make_profile(
+        model="gibsonlanni", na=na, wavelength=wavelength, ni=ni,
+        res_lateral=dxy, res_axial=dz, size_x=128, size_y=128, size_z=61
+    ).astype(np.float32)
+    return np.abs(psf - background)
+
+def decon_worker(chunk, psf, n_iters):
+    """
+    Dask sends perfectly padded numpy chunks here.
+    We just process them and return the array.
+    """
+    processed = decon(chunk, psf, n_iters=n_iters)
+    return np.clip(processed, 0, 65535).astype(np.uint16)
 
 def main():
-    parser = argparse.ArgumentParser(description="GPU-accelerated Tiled Deconvolution")
-    parser.add_argument('--image_path', required=True, help="Path to deskewed input TIFF")
-    parser.add_argument('--psf_path', required=True, help="Directory containing PSF")
-    parser.add_argument('--psf_file', required=True, help="PSF filename")
-    parser.add_argument('--background', type=float, default=0.0, help="Background subtraction value")
-    parser.add_argument('--iter', type=int, default=10, help="Number of Richardson-Lucy iterations")
+    parser = argparse.ArgumentParser(description="Dask-orchestrated GPU deconvolution")
+    parser.add_argument('--image_path', required=True, help="path to deskewed input TIFF")
+    parser.add_argument('--background', type=float, default=0.0, help="background subtraction value")
+    parser.add_argument('--iter', type=int, default=10, help="number of Lucy Richardson iterations")
+    
+    # optical parameters
+    parser.add_argument('--na', type=float, default=1.0)
+    parser.add_argument('--wavelength', type=float, default=0.525)
+    parser.add_argument('--ni', type=float, default=1.33)
+    parser.add_argument('--dxy', type=float, default=1.0)
+    parser.add_argument('--dz', type=float, default=1.0)
     args = parser.parse_args()
 
-    # load Data
-    image = imread(args.image_path)
-    psf_full_path = Path(args.psf_path) / args.psf_file
-    psf = imread(str(psf_full_path)).astype(np.float32)
-    psf = np.abs(psf - args.background)
+    # 1. Setup PSF (Theoretical for now, eventually replaced by your extracted blind PSF)
+    psf = generate_theoretical_psf(
+        na=args.na, wavelength=args.wavelength, ni=args.ni, 
+        dxy=args.dxy, dz=args.dz, background=args.background
+    )
+
+    # 2. Lazy Load the Data with Dask
+    # We specify the exact chunk size that we know the Tesla P4 can handle
+    image_array = imread(args.image_path)
+    nz, ny, nx = image_array.shape
+    lazy_image = da.from_array(image_array, chunks=(nz, 256, 256))
+
+    print(f"Loaded {args.image_path} into Dask graph. Executing map_overlap...", flush=True)
+
+    # 3. Dask Orchestration
+    # map_overlap handles all the padding, cropping, and stitching invisibly
+    processed_lazy = lazy_image.map_overlap(
+        decon_worker,
+        depth={0: 0, 1: 32, 2: 32},  # 0 padding in Z, 32px padding in Y and X
+        boundary='reflect',          # mirror the edges to prevent dark borders
+        dtype=np.uint16,
+        psf=psf,
+        n_iters=args.iter
+    )
+
+    # 4. Compute and Save
+    # The .compute() command actually fires the GPU processing graph
+    output = processed_lazy.compute(scheduler='single-threaded') 
     
-    nz, ny, nx = image.shape
-
-    # setup tiling arrays
-    tile_size = 256
-    overlap = 32
-    output = None  # initiated as none, allocated dynamically on the first tile output
-
-    # tiling execution loop
-    for y in range(0, ny, tile_size):
-        for x in range(0, nx, tile_size):
-            # calculate padded block boundaries
-            y_start = max(0, y - overlap)
-            y_end = min(ny, y + tile_size + overlap)
-            x_start = max(0, x - overlap)
-            x_end = min(nx, x + tile_size + overlap)
-            
-            # slice and execute
-            tile = image[:, y_start:y_end, x_start:x_end]
-            decon_tile = decon(tile, psf, n_iters=args.iter)
-            print(f"Finished Tile Y:{y}-{y_end} X:{x}-{x_end}... ({np.round((y*nx + x)/(ny*nx)*100, 1)}% complete)", flush=True)
-            
-            # dynamic allocation based on actual GPU output Z-slices
-            if output is None:
-                output = np.zeros((decon_tile.shape[0], ny, nx), dtype=np.uint16)
-            
-            # calculate crop margins to eliminate edge artifacts
-            crop_y_start = y - y_start
-            crop_y_end = crop_y_start + min(tile_size, ny - y)
-            crop_x_start = x - x_start
-            crop_x_end = crop_x_start + min(tile_size, nx - x)
-            
-            #slice cleaned tile
-            cleaned_tile = decon_tile[:, crop_y_start:crop_y_end, crop_x_start:crop_x_end]
-
-            # calculate target window in the final volume
-            tile_nz, tile_ny, tile_nx = cleaned_tile.shape
-            out_y_end = y + tile_ny
-            out_x_end = x + tile_nx
-            
-            # clip limits, cast to uint16, and insert into output matrix
-            output[:, y:out_y_end, x:out_x_end] = np.clip(
-                decon_tile[:, crop_y_start:crop_y_end, crop_x_start:crop_x_end], 
-                0, 65535
-            ).astype(np.uint16)
-
-    # hopefully bulletproof local file saving
     raw_stem = Path(args.image_path).name.replace(".tiff", "").replace(".tif", "")
-    
-    if not raw_stem or "CH" not in raw_stem:
-        output_filename = "DB2_deconvolved_output.tif"
-    else:
-        output_filename = f"DB2_{raw_stem}.tif"
-        
-    # strip any rogue directory paths so it writes exactly to Nextflow's work dir
-    local_output_path = Path(output_filename).name 
-    imwrite(local_output_path, output)
+    output_filename = f"DB2_{raw_stem}.tif" if "CH" in raw_stem else "DB2_deconvolved_output.tif"
+    imwrite(Path(output_filename).name, output)
+    print("Dask processing complete and saved!", flush=True)
 
 if __name__ == '__main__':
     main()

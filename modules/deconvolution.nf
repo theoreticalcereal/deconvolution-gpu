@@ -1,4 +1,4 @@
-process STATIC_DECON {
+process DECON {
     tag "${cell_name}"
     
     publishDir "${params.output_dir}/deconvolved", mode: 'copy'
