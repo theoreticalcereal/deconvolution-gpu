@@ -38,6 +38,7 @@ def main():
             # slice and execute
             tile = image[:, y_start:y_end, x_start:x_end]
             decon_tile = decon(tile, psf, n_iters=args.iter)
+            print(f"Finished Tile Y:{y}-{y_end} X:{x}-{x_end}... ({np.round((y*nx + x)/(ny*nx)*100, 1)}% complete)", flush=True)
             
             # dynamic allocation based on actual GPU output Z-slices
             if output is None:
