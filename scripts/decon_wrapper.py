@@ -22,7 +22,7 @@ def main():
     nz, ny, nx = image.shape
 
     # setup tiling arrays
-    tile_size = 320
+    tile_size = 256
     overlap = 32
     output = None  # initiated as none, allocated dynamically on the first tile output
 
