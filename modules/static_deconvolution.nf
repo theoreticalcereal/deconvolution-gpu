@@ -19,7 +19,7 @@ process STATIC_DECON {
     val  output_dir 
 
     output:
-    path "DB2_*.tif", emit: decon_output
+    path "DB2_*", emit: decon_output
 
     script:
     """
