@@ -21,12 +21,12 @@ def main():
     
     nz, ny, nx = image.shape
 
-    # setup Tiling Arrays
-    tile_size = 256
+    # setup tiling arrays
+    tile_size = 320
     overlap = 32
-    output = None  # initiated as None, allocated dynamically on the first tile output
+    output = None  # initiated as none, allocated dynamically on the first tile output
 
-    # tiling Execution Loop
+    # tiling execution loop
     for y in range(0, ny, tile_size):
         for x in range(0, nx, tile_size):
             # calculate padded block boundaries
