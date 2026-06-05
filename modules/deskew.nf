@@ -1,6 +1,6 @@
 process DESKEW {
     
-    // Directives go first (before input/output/scrip)
+    // Directives go first (before input/output/script)
     publishDir { output_dir }, mode: 'copy'
 
     input:
@@ -16,7 +16,7 @@ process DESKEW {
     val output_dir
 
     output:
-    path "Top_shear*", emit: deskewed_path
+    val "${output_dir}/Top_shear", emit: deskewed_path
 
     script:
     """
@@ -25,13 +25,13 @@ process DESKEW {
     python3 ${projectDir}/scripts/deskew_wrapper.py \
         --image_path ${image_path} \
         --cell_name ${cell_name} \
-        --cell_index ${cell_index} \
+        --cell_index "${cell_index}" \
         --channels ${channels} \
         --timepoints ${timepoints} \
         --dx ${dx} \
         --dz ${dz} \
         --angle ${angle} \
         --flip ${flip} \
-        --output_dir .
+        --output_dir ${output_dir}
     """
 }

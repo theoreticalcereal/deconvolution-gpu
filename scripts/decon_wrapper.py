@@ -5,18 +5,20 @@ from pathlib import Path
 
 
 def run_decon(image_path, psf_path, psf_file, background, iter_count, output_dir):
-    
-    script_dir = str(Path(__file__).parent.absolute())
-    
-    # Remove .resolve() - use psf_path as-is from Nextflow
-    # psf_path will already be the absolute path from Nextflow
-    
-    print(f"Running deconvolution with image: {image_path}, psf: {psf_path}/{psf_file}, background: {background}, iterations: {iter_count}")
 
+    script_dir = str(Path(__file__).parent.absolute())
+    image_path_obj = Path(image_path)
+    matlab_image_path = str(image_path_obj.parent)
+    matlab_cell_name  = image_path_obj.name   # 'Top_shear'
+
+    print(f"Running deconvolution — imagePath: {matlab_image_path}, "
+          f"Cell_name: {matlab_cell_name}, psf: {psf_path}/{psf_file}, "
+          f"background: {background}, iterations: {iter_count}, output_dir: {output_dir}")
 
     matlab_cmd = (
         f"addpath('{script_dir}'); "
-        f"imagePath='{image_path}'; "
+        f"imagePath='{matlab_image_path}'; "
+        f"Cell_name='{matlab_cell_name}'; "
         f"psfPath='{psf_path}'; "
         f"psfFile='{psf_file}'; "
         f"background={background}; "
@@ -25,9 +27,8 @@ def run_decon(image_path, psf_path, psf_file, background, iter_count, output_dir
         f"run('blind_deconvolution.m');"
     )
 
-
     command = ["matlab", "-batch", matlab_cmd]
-    
+
     try:
         subprocess.run(command, check=True)
     except subprocess.CalledProcessError as e:
@@ -44,6 +45,6 @@ if __name__ == '__main__':
     parser.add_argument('--iter', type=int)
     parser.add_argument('--output_dir')
     args = parser.parse_args()
-    
+
     run_decon(args.image_path, args.psf_path, args.psf_file,
               args.background, args.iter, args.output_dir)
