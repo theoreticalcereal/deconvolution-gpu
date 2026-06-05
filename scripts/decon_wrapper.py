@@ -13,7 +13,7 @@ def main():
     parser.add_argument('--iter', type=int, default=10, help="Number of Richardson-Lucy iterations")
     args = parser.parse_args()
 
-    # load data
+    # load Data
     image = imread(args.image_path)
     psf_full_path = Path(args.psf_path) / args.psf_file
     psf = imread(str(psf_full_path)).astype(np.float32)
@@ -21,23 +21,27 @@ def main():
     
     nz, ny, nx = image.shape
 
-    # setup tiling arrays
+    # setup Tiling Arrays
     tile_size = 256
     overlap = 32
-    
-    # allocate host output directly as uint16 to minimize RAM overhead
-    output = None
+    output = None  # initiated as None, allocated dynamically on the first tile output
 
-    # tiling execution loop
+    # tiling Execution Loop
     for y in range(0, ny, tile_size):
         for x in range(0, nx, tile_size):
             # calculate padded block boundaries
-            y_start, y_end = max(0, y - overlap), min(ny, y + tile_size + overlap)
-            x_start, x_end = max(0, x - overlap), min(nx, x + tile_size + overlap)
+            y_start = max(0, y - overlap)
+            y_end = min(ny, y + tile_size + overlap)
+            x_start = max(0, x - overlap)
+            x_end = min(nx, x + tile_size + overlap)
             
             # slice and execute
             tile = image[:, y_start:y_end, x_start:x_end]
             decon_tile = decon(tile, psf, n_iters=args.iter)
+            
+            # dynamic allocation based on actual GPU output Z-slices
+            if output is None:
+                output = np.zeros((decon_tile.shape[0], ny, nx), dtype=np.uint16)
             
             # calculate crop margins to eliminate edge artifacts
             crop_y_start = y - y_start
@@ -55,6 +59,7 @@ def main():
                 0, 65535
             ).astype(np.uint16)
 
+    # hopefully bulletproof local file saving
     raw_stem = Path(args.image_path).name.replace(".tiff", "").replace(".tif", "")
     
     if not raw_stem or "CH" not in raw_stem:
