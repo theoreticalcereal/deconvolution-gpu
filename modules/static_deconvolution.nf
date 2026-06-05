@@ -24,8 +24,10 @@ process STATIC_DECON {
     script:
     """
     module load cuda/11.8
-    export LD_LIBRARY_PATH=\$CUDA_HOME/lib64:\$LD_LIBRARY_PATH
-    export CUDA_VISIBLE_DEVICES=0
+    export LD_LIBRARY_PATH=\${CUDA_HOME:-}/lib64:/usr/local/cuda/lib64:\${LD_LIBRARY_PATH:-}
+    echo "=== GPU Check ==="
+    nvidia-smi
+    echo "================="
 
     TARGET_IMAGE=\$(ls ${deskewed_dir}/CH*_registered_consistent.tif ${deskewed_dir}/CH*_registered_consistent.tiff 2>/dev/null | head -n 1)
 
