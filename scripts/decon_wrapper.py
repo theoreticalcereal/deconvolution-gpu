@@ -13,7 +13,7 @@ def main():
     parser.add_argument('--iter', type=int, default=10, help="Number of Richardson-Lucy iterations")
     args = parser.parse_args()
 
-    # load Data
+    # load data
     image = imread(args.image_path)
     psf_full_path = Path(args.psf_path) / args.psf_file
     psf = imread(str(psf_full_path)).astype(np.float32)
@@ -21,14 +21,14 @@ def main():
     
     nz, ny, nx = image.shape
 
-    # setup Tiling Arrays
-    tile_size = 512
+    # setup tiling arrays
+    tile_size = 256
     overlap = 32
     
     # allocate host output directly as uint16 to minimize RAM overhead
     output = np.zeros_like(image, dtype=np.uint16)
 
-    # tiling Execution Loop
+    # tiling execution loop
     for y in range(0, ny, tile_size):
         for x in range(0, nx, tile_size):
             # calculate padded block boundaries
