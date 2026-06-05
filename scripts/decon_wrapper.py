@@ -51,8 +51,9 @@ def main():
             crop_x_end = crop_x_start + min(tile_size, nx - x)
             
             # calculate target window in the final volume
-            out_y_end = y + min(tile_size, ny - y)
-            out_x_end = x + min(tile_size, nx - x)
+            tile_nz, tile_ny, tile_nx = cleaned_tile.shape
+            out_y_end = y + tile_ny
+            out_x_end = x + tile_nx
             
             # clip limits, cast to uint16, and insert into output matrix
             output[:, y:out_y_end, x:out_x_end] = np.clip(
