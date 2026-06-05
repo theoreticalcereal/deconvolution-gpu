@@ -1,5 +1,11 @@
 process BLIND_DECON {
-    publishDir { "${output_dir}/deconvolved" }, mode: 'copy'
+    tag "${deskewed_path.baseName}"
+    publishDir "${output_dir}/deconvolved", mode: 'copy'
+    maxForks 8
+    cpus 4
+    memory '32 GB'
+
+    clusterOptions '--gres=gpu:1'
 
     input:
     val  deskewed_path  
@@ -10,11 +16,12 @@ process BLIND_DECON {
     val  output_dir 
 
     output:
-    path "DB2_*", emit: decon_output
+    path "DB2_*.tif", emit: decon_output
 
     script:
     """
     module load matlab/2024a
+    module load cuda/11.8
 
     python3 ${projectDir}/scripts/decon_wrapper.py \
         --image_path ${deskewed_path} \

@@ -1,50 +1,49 @@
 import argparse
-import subprocess
-import sys
 from pathlib import Path
+import numpy as np
+from tifffile import imread, imwrite
+from pycudadecon import decon
 
-
-def run_decon(image_path, psf_path, psf_file, background, iter_count, output_dir):
-
-    script_dir = str(Path(__file__).parent.absolute())
-    image_path_obj = Path(image_path)
-    matlab_image_path = str(image_path_obj.parent)
-    matlab_cell_name  = image_path_obj.name   # 'Top_shear'
-
-    print(f"Running deconvolution — imagePath: {matlab_image_path}, "
-          f"Cell_name: {matlab_cell_name}, psf: {psf_path}/{psf_file}, "
-          f"background: {background}, iterations: {iter_count}, output_dir: {output_dir}")
-
-    matlab_cmd = (
-        f"addpath('{script_dir}'); "
-        f"imagePath='{matlab_image_path}'; "
-        f"Cell_name='{matlab_cell_name}'; "
-        f"psfPath='{psf_path}'; "
-        f"psfFile='{psf_file}'; "
-        f"background={background}; "
-        f"iter={iter_count}; "
-        f"output_dir='{output_dir}'; "
-        f"run('blind_deconvolution.m');"
+def run_decon(image_path, psf_path, psf_file, background, iter_count):
+    print("Running GPU deconvolution with provided PSF...")
+    
+    full_psf_path = Path(psf_path) / psf_file
+    
+    # Load data
+    image = imread(str(image_path))
+    psf = imread(str(full_psf_path)).astype(np.float32)
+    
+    # Apply background subtraction to your provided PSF
+    psf = psf - background
+    psf = np.abs(psf)
+    
+    # GPU Richardson-Lucy deconvolution
+    deconvolved = decon(
+        image, 
+        psf, 
+        n_iter=iter_count,
+        clip_negative=True,
+        bandwidth=0.5,       # standard for fluorescence
+        remove_nans=True,
     )
-
-    command = ["matlab", "-batch", matlab_cmd]
-
-    try:
-        subprocess.run(command, check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"MATLAB execution failed with error code: {e.returncode}")
-        sys.exit(1)
-
+    
+    # Normalize and convert to 16-bit
+    deconvolved = (deconvolved - np.min(deconvolved)) / \
+                  (np.max(deconvolved) - np.min(deconvolved) + 1e-6)
+    deconvolved = (deconvolved * 65535).astype(np.uint16)
+    
+    # Save locally for Nextflow to publish
+    output_filename = f"DB2_{Path(image_path).name}"
+    imwrite(output_filename, deconvolved)
+    print(f"Done! Saved as: {output_filename}")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--image_path')
-    parser.add_argument('--psf_path')
-    parser.add_argument('--psf_file')
-    parser.add_argument('--background', type=float)
-    parser.add_argument('--iter', type=int)
-    parser.add_argument('--output_dir')
+    parser.add_argument('--image_path', required=True)
+    parser.add_argument('--psf_path', required=True)
+    parser.add_argument('--psf_file', required=True)
+    parser.add_argument('--background', type=float, default=0.0)
+    parser.add_argument('--iter', type=int, default=10)
     args = parser.parse_args()
-
-    run_decon(args.image_path, args.psf_path, args.psf_file,
-              args.background, args.iter, args.output_dir)
+    
+    run_decon(args.image_path, args.psf_path, args.psf_file, args.background, args.iter)
