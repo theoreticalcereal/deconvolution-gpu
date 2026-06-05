@@ -26,7 +26,7 @@ def main():
     overlap = 32
     
     # allocate host output directly as uint16 to minimize RAM overhead
-    output = np.zeros_like(image, dtype=np.uint16)
+    output = None
 
     # tiling execution loop
     for y in range(0, ny, tile_size):
