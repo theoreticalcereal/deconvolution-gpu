@@ -1,6 +1,6 @@
 process DESKEW {
     
-    // Directives go first (before input/output/script)
+    // Directives go first (before input/output/scrip)
     publishDir { output_dir }, mode: 'copy'
 
     input:
