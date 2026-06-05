@@ -21,7 +21,7 @@ def run_decon(image_path, psf_path, psf_file, background, iter_count):
     deconvolved = decon(
         image, 
         psf, 
-        n_iter=iter_count,
+        n_iters=iter_count,
         clip_negative=True,
         bandwidth=0.5,       # standard for fluorescence
         remove_nans=True,
