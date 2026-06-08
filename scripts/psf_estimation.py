@@ -46,10 +46,10 @@ def generate_theoretical_psf(
     background-subtracted and normalised to sum = 1.
     """
     psf = pm.make_psf(
-        nz=psf_size_z,
+        z=psf_size_z,
         nx=psf_size_xy,
         dz=dz,
-        dx=dxy,
+        dxy=dxy,
         NA=na,
         wvl=wavelength,
         ni=ni,
@@ -67,8 +67,22 @@ def generate_theoretical_psf(
 # Per-chunk blind estimation via MATLAB deconvblind
 # ---------------------------------------------------------------------------
 
+def _write_matlab_stack(array: np.ndarray, path: Path, scale_float: bool = False) -> None:
+    """Write a stack in a TIFF format that MATLAB's Tiff reader handles reliably."""
+    array = np.asarray(array)
+    if np.issubdtype(array.dtype, np.floating):
+        finite = np.nan_to_num(array, nan=0.0, posinf=0.0, neginf=0.0)
+        finite = np.clip(finite, 0, None)
+        if scale_float:
+            max_value = finite.max()
+            if max_value > 0:
+                finite = finite / max_value * np.iinfo(np.uint16).max
+        array = np.clip(np.rint(finite), 0, np.iinfo(np.uint16).max).astype(np.uint16)
+    imwrite(str(path), array)
+
+
 def _write_chunk(chunk: np.ndarray, path: Path) -> None:
-    imwrite(str(path), chunk.astype(np.float32))
+    _write_matlab_stack(chunk, path)
 
 
 def _run_matlab_deconvblind(
@@ -85,12 +99,13 @@ def _run_matlab_deconvblind(
 
     MATLAB is invoked with -batch so it exits cleanly on completion or error.
     """
-    imwrite(str(psf_seed_path), psf_seed.astype(np.float32))
+    _write_matlab_stack(psf_seed, psf_seed_path, scale_float=True)
 
     matlab_cmd = (
         f"addpath('{script_dir}'); "
         f"chunk = single(readtiffstack('{chunk_path}')); "
         f"psf_seed = single(readtiffstack('{psf_seed_path}')); "
+        f"psf_seed = psf_seed / sum(psf_seed(:)); "
         f"[~, psf_est] = deconvblind(chunk, psf_seed, {n_iters}); "
         f"psf_est = single(psf_est); "
         f"psf_est = psf_est / sum(psf_est(:)); "
@@ -169,6 +184,7 @@ def estimate_psf_from_chunks(
           f"(nz={nz}, xy≤{chunk_xy}, pad={pad_xy})...", flush=True)
 
     psf_estimates = []
+    failed_chunks = 0
 
     with tempfile.TemporaryDirectory(prefix="psf_est_") as tmpdir:
         tmpdir = Path(tmpdir)
@@ -197,6 +213,18 @@ def estimate_psf_from_chunks(
                     n_iters, script_dir,
                 )
             except RuntimeError as exc:
+                failed_chunks += 1
+                message = str(exc)
+                if "initial PSF must have at least one non-zero element" in message:
+                    raise RuntimeError(
+                        "MATLAB read the PSF seed as all zeros. "
+                        "The seed TIFF writer is incompatible with MATLAB."
+                    ) from exc
+                if failed_chunks >= 3 and not psf_estimates:
+                    raise RuntimeError(
+                        "First three chunks failed during PSF estimation; "
+                        "aborting instead of submitting every tile to MATLAB."
+                    ) from exc
                 print(f"  WARNING: chunk {idx} failed, skipping. {exc}", flush=True)
                 continue
 
