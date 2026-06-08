@@ -34,8 +34,10 @@ def _decon_chunk(chunk: np.ndarray, otf_path: str, dz: float, n_iters: int) -> n
     Each call opens and closes its own RLContext so chunks can be dispatched
     sequentially without GPU context leakage.
     """
+    chunk_idx = block_info[0]['chunk-location'] if block_info else "unknown"
     with RLContext(chunk.shape, otf_path, dzdata=dz) as ctx:
         result = rl_decon(chunk, output_shape=ctx.out_shape, n_iters=n_iters)
+    print("chunk completed")
     return np.clip(result, 0, 65535).astype(np.uint16)
 
 
