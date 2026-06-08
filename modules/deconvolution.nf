@@ -37,16 +37,29 @@ process DECON {
     """
     module load cuda/11.8
     export LD_LIBRARY_PATH=\${CUDA_HOME:-}/lib64:/usr/local/cuda/lib64:\${LD_LIBRARY_PATH:-}
+
+    ENV_PATH="${projectDir}/.conda_env"
+    LOCK_DIR="${projectDir}/.conda_env.lock"
+
+    if [ ! -d "\$ENV_PATH" ]; then
+        if mkdir "\$LOCK_DIR" 2>/dev/null; then
+            echo "Lock acquired. Building conda environment via Mamba..."
+            mamba env create -p "\$ENV_PATH" -f ${projectDir}/environment.yml -y --quiet
+            rmdir "\$LOCK_DIR"
+        else
+            echo "Another job is currently building the environment. Waiting..."
+            while [ -d "\$LOCK_DIR" ] || [ ! -d "\$ENV_PATH" ]; do
+                sleep 10
+            done
+            echo "Environment is ready. Proceeding..."
+        fi
+    fi
+
     echo "=== GPU Check ==="
     nvidia-smi
     echo "================="
 
-    if [ ! -d "${projectDir}/.conda_env" ]; then
-        echo "Building conda environment via Mamba..."
-        mamba env create -p ${projectDir}/.conda_env -f ${projectDir}/environment.yml -y --quiet
-    fi
-
-    mamba run -p ${projectDir}/.conda_env \$(pwd)/.conda_env/bin/python3 ${projectDir}/scripts/decon_wrapper.py \\
+    \$ENV_PATH/bin/python3 ${projectDir}/scripts/decon_wrapper.py \\
         --image_path "${deskewed_dir}" \\
         --background ${background} \\
         --iter ${iter} \\
