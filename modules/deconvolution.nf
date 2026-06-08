@@ -43,7 +43,7 @@ process DECON {
 
     if [ ! -d "${projectDir}/.conda_env" ]; then
         echo "Building conda environment via Mamba..."
-        mamba env create -p ${projectDir}/.conda_env -f ${projectDir}/environment.yml --quiet
+        mamba env create -p ${projectDir}/.conda_env -f ${projectDir}/environment.yml -y --quiet
     fi
 
     mamba run -p ${projectDir}/.conda_env python3 ${projectDir}/scripts/decon_wrapper.py \\
