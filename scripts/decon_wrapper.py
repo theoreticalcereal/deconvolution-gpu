@@ -13,6 +13,7 @@
 #   single-threaded to keep one clean GPU context per job.
 
 import argparse
+import time
 from glob import glob
 from pathlib import Path
 
@@ -28,15 +29,63 @@ from psf_estimation import estimate_psf_from_chunks, generate_theoretical_psf
 # Dask worker
 # ---------------------------------------------------------------------------
 
-def _decon_chunk(chunk: np.ndarray, otf_path: str, dz: float, n_iters: int) -> np.ndarray:
+def _format_seconds(seconds: float) -> str:
+    return f"{seconds:.2f}s"
+
+
+def _chunk_progress(block_info: dict | None, total_chunks: int) -> tuple[int, str]:
+    if not isinstance(block_info, dict) or None not in block_info:
+        return 0, "unknown"
+
+    info = block_info[None]
+    location = info.get("chunk-location")
+    num_chunks = info.get("num-chunks")
+    if not location or not num_chunks:
+        return 0, "unknown"
+
+    chunk_index = 1
+    stride = 1
+    for loc, count in zip(reversed(location), reversed(num_chunks)):
+        chunk_index += loc * stride
+        stride *= count
+
+    return chunk_index, f"{chunk_index}/{total_chunks}"
+
+
+def _decon_chunk(
+    chunk: np.ndarray,
+    otf_path: str,
+    dz: float,
+    n_iters: int,
+    total_chunks: int,
+    block_info: dict | None = None,
+) -> np.ndarray:
     """
     Process one spatial chunk with pycudadecon.
     Each call opens and closes its own RLContext so chunks can be dispatched
     sequentially without GPU context leakage.
     """
+    _, chunk_label = _chunk_progress(block_info, total_chunks)
+    if chunk.size == 0:
+        return chunk
+
+    print(
+        f"  Chunk {chunk_label} started: shape={chunk.shape}, iterations={n_iters}",
+        flush=True,
+    )
+
+    start = time.perf_counter()
     with RLContext(chunk.shape, otf_path, dzdata=dz) as ctx:
         result = rl_decon(chunk, output_shape=ctx.out_shape, n_iters=n_iters)
-    print("chunk completed")
+    elapsed = time.perf_counter() - start
+    avg_iter = elapsed / n_iters if n_iters > 0 else elapsed
+
+    print(
+        f"  Iteration {n_iters}/{n_iters} of chunk {chunk_label} completed: "
+        f"chunk_time={_format_seconds(elapsed)}, "
+        f"avg_iteration_time={_format_seconds(avg_iter)}",
+        flush=True,
+    )
     return np.clip(result, 0, 65535).astype(np.uint16)
 
 
@@ -64,8 +113,15 @@ def deconvolve_tiff(
 
     nz = volume.shape[0]
     lazy = da.from_array(volume, chunks=(nz, chunk_xy, chunk_xy))
+    total_chunks = int(np.prod(lazy.numblocks))
 
     print(f"  Deconvolving {image_path.name}  shape={volume.shape}", flush=True)
+    print(
+        f"  Deconvolution chunks: total={total_chunks}, "
+        f"chunk_shape=(z={nz}, y<={chunk_xy}, x<={chunk_xy}), "
+        f"iterations_per_chunk={n_iters}",
+        flush=True,
+    )
 
     with TemporaryOTF(psf) as otf:
         processed = lazy.map_overlap(
@@ -76,6 +132,7 @@ def deconvolve_tiff(
             otf_path=otf.path,
             dz=dz,
             n_iters=n_iters,
+            total_chunks=total_chunks,
         )
         output = processed.compute(scheduler="single-threaded")
 
