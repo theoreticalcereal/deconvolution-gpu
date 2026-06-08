@@ -1,5 +1,6 @@
 process DECON {
     module 'mamba/2.3.0'
+    beforeScript 'source $(dirname $(which mamba))/../etc/profile.d/conda.sh || true'
     conda "${projectDir}/environment.yml"
     tag "${cell_name}"
 
