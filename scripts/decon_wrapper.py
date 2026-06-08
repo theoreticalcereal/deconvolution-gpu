@@ -8,9 +8,9 @@
 #      optical parameters.  All optical params are optional with defaults.
 #
 # Deconvolution:
-#   pycudadecon (TemporaryOTF + RLContext) processes each TIFF as full-Z,
-#   256x256 XY Dask chunks using map_overlap.  Chunks are computed
-#   single-threaded to keep one clean GPU context per job.
+#   pycudadecon (TemporaryOTF + RLContext) processes each TIFF as full-Z
+#   XY chunks using map_overlap.  The requested chunk_xy is treated as the
+#   maximum CUDA input tile size after overlap is added.
 
 import argparse
 import time
@@ -93,6 +93,16 @@ def _decon_chunk(
 # Per-TIFF deconvolution
 # ---------------------------------------------------------------------------
 
+def _core_chunk_size(max_chunk_xy: int, overlap_xy: int) -> int:
+    core = max_chunk_xy - (2 * overlap_xy)
+    if core <= 0:
+        raise ValueError(
+            f"chunk_xy ({max_chunk_xy}) must be greater than 2 * overlap_xy "
+            f"({2 * overlap_xy})"
+        )
+    return core
+
+
 def _pad_xy_to_multiple(
     volume: np.ndarray,
     multiple: int,
@@ -132,26 +142,29 @@ def deconvolve_tiff(
     psf: np.ndarray,
     n_iters: int,
     dz: float,
-    chunk_xy: int = 256,
+    chunk_xy: int = 128,
 ) -> np.ndarray:
     """
     Deconvolve a single TIFF using the supplied PSF.
 
-    Chunks are (nz, chunk_xy, chunk_xy) with 32-px XY overlap so tile
-    boundaries are invisible in the merged output.  Z is never split —
-    pycudadecon needs full Z depth to build its FFT plan.
+    Chunks are full-Z XY tiles with XY overlap so tile boundaries are
+    invisible in the merged output.  Z is never split.  `chunk_xy` is the
+    maximum overlapped CUDA input tile size; the Dask core chunk is smaller.
     """
     volume = imread(str(image_path))
     if volume.ndim != 3:
         raise ValueError(f"Expected 3-D volume, got shape {volume.shape}")
 
+    overlap_xy = 32
+    core_chunk_xy = _core_chunk_size(chunk_xy, overlap_xy)
+
     original_shape = volume.shape
-    padded_volume, crop, pad = _pad_xy_to_multiple(volume, chunk_xy)
+    padded_volume, crop, pad = _pad_xy_to_multiple(volume, core_chunk_xy)
     if padded_volume is not volume:
         del volume
 
     nz, padded_y, padded_x = padded_volume.shape
-    lazy = da.from_array(padded_volume, chunks=(nz, chunk_xy, chunk_xy))
+    lazy = da.from_array(padded_volume, chunks=(nz, core_chunk_xy, core_chunk_xy))
     total_chunks = int(np.prod(lazy.numblocks))
 
     print(f"  Deconvolving {image_path.name}  shape={original_shape}", flush=True)
@@ -164,7 +177,8 @@ def deconvolve_tiff(
         )
     print(
         f"  Deconvolution chunks: total={total_chunks}, "
-        f"chunk_shape=(z={nz}, y={chunk_xy}, x={chunk_xy}), "
+        f"core_chunk_shape=(z={nz}, y={core_chunk_xy}, x={core_chunk_xy}), "
+        f"overlap_xy={overlap_xy}, max_cuda_chunk_xy={chunk_xy}, "
         f"padded_xy=({padded_y}, {padded_x}), "
         f"iterations_per_chunk={n_iters}",
         flush=True,
@@ -173,7 +187,7 @@ def deconvolve_tiff(
     with TemporaryOTF(psf) as otf:
         processed = lazy.map_overlap(
             _decon_chunk,
-            depth={0: 0, 1: 32, 2: 32},
+            depth={0: 0, 1: overlap_xy, 2: overlap_xy},
             boundary="reflect",
             dtype=np.uint16,
             otf_path=otf.path,
@@ -208,6 +222,8 @@ def main() -> None:
                         help="deconvblind iterations per chunk during PSF estimation.")
     parser.add_argument("--chunk_xy",    type=int, default=256,
                         help="XY tile size (pixels) for blind PSF estimation.")
+    parser.add_argument("--decon_chunk_xy", type=int, default=128,
+                        help="Maximum overlapped XY tile size sent to CUDA deconvolution.")
     parser.add_argument("--pad_xy",      type=int, default=32,
                         help="XY reflect-padding per edge added to each chunk before deconvblind (pixels).")
 
@@ -297,7 +313,7 @@ def main() -> None:
             psf=psf,
             n_iters=args.iter,
             dz=args.dz,
-            chunk_xy=args.chunk_xy,
+            chunk_xy=args.decon_chunk_xy,
         )
 
         stem = tiff_path.name.replace(".tiff", "").replace(".tif", "")
