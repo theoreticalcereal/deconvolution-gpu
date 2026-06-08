@@ -1,6 +1,7 @@
 process DESKEW {
     
     // Directives go first (before input/output/script)
+    conda "${projectDir}/environment.yml"
     publishDir { output_dir }, mode: 'copy'
 
     input:

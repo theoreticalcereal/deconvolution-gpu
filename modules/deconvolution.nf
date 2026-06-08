@@ -1,4 +1,5 @@
 process DECON {
+    conda "${projectDir}/environment.yml"
     tag "${cell_name}"
 
     publishDir "${params.output_dir}/deconvolved", mode: 'copy'
