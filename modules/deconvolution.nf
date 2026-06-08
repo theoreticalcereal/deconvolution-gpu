@@ -1,4 +1,5 @@
 process DECON {
+    module 'mamba/2.3.0'
     conda "${projectDir}/environment.yml"
     tag "${cell_name}"
 
