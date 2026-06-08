@@ -2,7 +2,7 @@
 nextflow.enable.dsl=2
 
 include { DESKEW } from './modules/deskew'
-include { DECON } from './modules/deconvolution'
+include { DECON }  from './modules/deconvolution'
 
 workflow {
     DESKEW(
@@ -21,8 +21,6 @@ workflow {
     DECON(
         DESKEW.out.deskewed_path,
         params.cell_name,
-        params.psf_path,
-        params.psf_file,
         params.background,
         params.iter,
         params.output_dir

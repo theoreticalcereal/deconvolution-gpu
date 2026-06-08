@@ -1,27 +1,38 @@
 process DECON {
     tag "${cell_name}"
-    
+
     publishDir "${params.output_dir}/deconvolved", mode: 'copy'
-    
+
     maxForks 8
     cpus 4
     memory '32 GB'
-
     clusterOptions '--gres=gpu:1'
 
     input:
-    val  deskewed_dir  
+    val  deskewed_dir
     val  cell_name
-    val  psf_path  
-    val  psf_file
     val  background
     val  iter
-    val  output_dir 
+    val  output_dir
 
     output:
     path "DB2_*", emit: decon_output
 
     script:
+    // Build optional optical-parameter flags only if the user supplied them.
+    // All have defaults in decon_wrapper.py so omitting is safe but not recommended
+    def na_flag          = params.na          ? "--na ${params.na}"                   : ""
+    def wavelength_flag  = params.wavelength  ? "--wavelength ${params.wavelength}"   : ""
+    def ni_flag          = params.ni          ? "--ni ${params.ni}"                   : ""
+    def dxy_flag         = params.dxy         ? "--dxy ${params.dxy}"                 : ""
+    def dz_flag          = params.dz          ? "--dz ${params.dz}"                   : ""
+    def psf_size_z_flag  = params.psf_size_z  ? "--psf_size_z ${params.psf_size_z}"   : ""
+    def psf_size_xy_flag = params.psf_size_xy ? "--psf_size_xy ${params.psf_size_xy}" : ""
+    def blind_iters_flag = params.blind_iters ? "--blind_iters ${params.blind_iters}" : ""
+    def chunk_xy_flag    = params.chunk_xy    ? "--chunk_xy ${params.chunk_xy}"       : ""
+    def pad_xy_flag      = params.pad_xy      ? "--pad_xy ${params.pad_xy}"           : ""
+    def no_blind_flag    = params.no_blind    ? "--no_blind"                           : ""
+
     """
     module load cuda/11.8
     export LD_LIBRARY_PATH=\${CUDA_HOME:-}/lib64:/usr/local/cuda/lib64:\${LD_LIBRARY_PATH:-}
@@ -29,18 +40,21 @@ process DECON {
     nvidia-smi
     echo "================="
 
-    TARGET_IMAGE=\$(ls ${deskewed_dir}/CH*_registered_consistent.tif ${deskewed_dir}/CH*_registered_consistent.tiff 2>/dev/null | head -n 1)
-
-    if [ -z "\$TARGET_IMAGE" ]; then
-        echo "Error: No deskewed images found in ${deskewed_dir}"
-        exit 1
-    fi
-
     python3 ${projectDir}/scripts/decon_wrapper.py \\
-        --image_path "\$TARGET_IMAGE" \\
-        --psf_path ${psf_path} \\
-        --psf_file ${psf_file} \\
+        --image_path "${deskewed_dir}" \\
         --background ${background} \\
-        --iter ${iter}
+        --iter ${iter} \\
+        --script_dir "${projectDir}/scripts" \\
+        ${na_flag} \\
+        ${wavelength_flag} \\
+        ${ni_flag} \\
+        ${dxy_flag} \\
+        ${dz_flag} \\
+        ${psf_size_z_flag} \\
+        ${psf_size_xy_flag} \\
+        ${blind_iters_flag} \\
+        ${chunk_xy_flag} \\
+        ${pad_xy_flag} \\
+        ${no_blind_flag}
     """
 }
