@@ -93,6 +93,40 @@ def _decon_chunk(
 # Per-TIFF deconvolution
 # ---------------------------------------------------------------------------
 
+def _pad_xy_to_multiple(
+    volume: np.ndarray,
+    multiple: int,
+) -> tuple[np.ndarray, tuple[slice, slice, slice], tuple[int, int, int, int]]:
+    """Reflect-pad Y/X so both axes are exact multiples of `multiple`."""
+    if multiple <= 0:
+        raise ValueError(f"chunk_xy must be positive, got {multiple}")
+
+    _, ny, nx = volume.shape
+    pad_y = (-ny) % multiple
+    pad_x = (-nx) % multiple
+
+    pad_y_before = pad_y // 2
+    pad_y_after = pad_y - pad_y_before
+    pad_x_before = pad_x // 2
+    pad_x_after = pad_x - pad_x_before
+
+    crop = (
+        slice(None),
+        slice(pad_y_before, pad_y_before + ny),
+        slice(pad_x_before, pad_x_before + nx),
+    )
+
+    if pad_y == 0 and pad_x == 0:
+        return volume, crop, (0, 0, 0, 0)
+
+    padded = np.pad(
+        volume,
+        pad_width=((0, 0), (pad_y_before, pad_y_after), (pad_x_before, pad_x_after)),
+        mode="reflect",
+    )
+    return padded, crop, (pad_y_before, pad_y_after, pad_x_before, pad_x_after)
+
+
 def deconvolve_tiff(
     image_path: Path,
     psf: np.ndarray,
@@ -111,14 +145,27 @@ def deconvolve_tiff(
     if volume.ndim != 3:
         raise ValueError(f"Expected 3-D volume, got shape {volume.shape}")
 
-    nz = volume.shape[0]
-    lazy = da.from_array(volume, chunks=(nz, chunk_xy, chunk_xy))
+    original_shape = volume.shape
+    padded_volume, crop, pad = _pad_xy_to_multiple(volume, chunk_xy)
+    if padded_volume is not volume:
+        del volume
+
+    nz, padded_y, padded_x = padded_volume.shape
+    lazy = da.from_array(padded_volume, chunks=(nz, chunk_xy, chunk_xy))
     total_chunks = int(np.prod(lazy.numblocks))
 
-    print(f"  Deconvolving {image_path.name}  shape={volume.shape}", flush=True)
+    print(f"  Deconvolving {image_path.name}  shape={original_shape}", flush=True)
+    if padded_volume.shape != original_shape:
+        print(
+            f"  XY padded for chunking: padded_shape={padded_volume.shape}, "
+            f"pad_y=({pad[0]}, {pad[1]}), pad_x=({pad[2]}, {pad[3]}), "
+            f"crop_back_to={original_shape}",
+            flush=True,
+        )
     print(
         f"  Deconvolution chunks: total={total_chunks}, "
-        f"chunk_shape=(z={nz}, y<={chunk_xy}, x<={chunk_xy}), "
+        f"chunk_shape=(z={nz}, y={chunk_xy}, x={chunk_xy}), "
+        f"padded_xy=({padded_y}, {padded_x}), "
         f"iterations_per_chunk={n_iters}",
         flush=True,
     )
@@ -134,7 +181,7 @@ def deconvolve_tiff(
             n_iters=n_iters,
             total_chunks=total_chunks,
         )
-        output = processed.compute(scheduler="single-threaded")
+        output = processed[crop].compute(scheduler="single-threaded")
 
     return output
 
