@@ -36,6 +36,7 @@ process DECON {
 
     """
     module load cuda/11.8
+    module load matlab/2024a
     export LD_LIBRARY_PATH=\${CUDA_HOME:-}/lib64:/usr/local/cuda/lib64:\${LD_LIBRARY_PATH:-}
     
     echo "=== GPU Check ==="
