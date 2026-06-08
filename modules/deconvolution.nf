@@ -22,6 +22,7 @@ process DECON {
     script:
     // Build optional optical-parameter flags only if the user supplied them.
     // All have defaults in decon_wrapper.py so omitting is safe but not recommended
+    def project_abs = workflow.projectDir.toAbsolutePath()
     def na_flag          = params.na          ? "--na ${params.na}"                   : ""
     def wavelength_flag  = params.wavelength  ? "--wavelength ${params.wavelength}"   : ""
     def ni_flag          = params.ni          ? "--ni ${params.ni}"                   : ""
@@ -38,13 +39,16 @@ process DECON {
     module load cuda/11.8
     export LD_LIBRARY_PATH=\${CUDA_HOME:-}/lib64:/usr/local/cuda/lib64:\${LD_LIBRARY_PATH:-}
 
-    ENV_PATH="${projectDir}/.conda_env"
-    LOCK_DIR="${projectDir}/.conda_env.lock"
+    ENV_PATH="${project_abs}/.conda_env"
+    LOCK_DIR="${project_abs}/.conda_env.lock"
+    YML_PATH="${project_abs}/environment.yml"
+    SCRIPT_PATH="${project_abs}/scripts/decon_wrapper.py"
+    SCRIPT_DIR_PARAM="${project_abs}/scripts"
 
     if [ ! -d "\$ENV_PATH" ]; then
         if mkdir "\$LOCK_DIR" 2>/dev/null; then
             echo "Lock acquired. Building conda environment via Mamba..."
-            mamba env create -p "\$ENV_PATH" -f ${projectDir}/environment.yml -y --quiet
+            mamba env create -p "\$ENV_PATH" -f "\$YML_PATH" -y --quiet
             rmdir "\$LOCK_DIR"
         else
             echo "Another job is currently building the environment. Waiting..."
@@ -59,11 +63,11 @@ process DECON {
     nvidia-smi
     echo "================="
 
-    \$ENV_PATH/bin/python3 ${projectDir}/scripts/decon_wrapper.py \\
+    \$ENV_PATH/bin/python3 \$SCRIPT_PATH \\
         --image_path "${deskewed_dir}" \\
         --background ${background} \\
         --iter ${iter} \\
-        --script_dir "${projectDir}/scripts" \\
+        --script_dir "\$SCRIPT_DIR_PARAM" \\
         ${na_flag} \\
         ${wavelength_flag} \\
         ${ni_flag} \\
