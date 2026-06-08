@@ -1,4 +1,5 @@
 process DECON {
+    conda "${projectDir}/environment.yml"
     tag "${cell_name}"
 
     publishDir "${params.output_dir}/deconvolved", mode: 'copy'
@@ -17,8 +18,6 @@ process DECON {
 
     output:
     path "DB2_*", emit: decon_output
-
-    conda "${projectDir}/environment.yml"
 
     script:
     // Build optional optical-parameter flags only if the user supplied them.
