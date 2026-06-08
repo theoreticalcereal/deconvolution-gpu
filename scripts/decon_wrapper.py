@@ -125,7 +125,7 @@ def main() -> None:
                         help="Axial step size in µm.")
     parser.add_argument("--psf_size_z",  type=int,   default=61,
                         help="Z size of PSF volume.")
-    parser.add_argument("--psf_size_xy", type=int,   default=128,
+    parser.add_argument("--psf_size_xy", type=int,   default=129,
                         help="XY size of PSF volume.")
 
     # Misc, usually unneeded
