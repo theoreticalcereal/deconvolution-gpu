@@ -46,7 +46,7 @@ process DECON {
         mamba env create -p ${projectDir}/.conda_env -f ${projectDir}/environment.yml -y --quiet
     fi
 
-    mamba run -p ${projectDir}/.conda_env python3 ${projectDir}/scripts/decon_wrapper.py \\
+    mamba run -p ${projectDir}/.conda_env ${projectDir}/.conda_env/bin/python3 ${projectDir}/scripts/decon_wrapper.py \\
         --image_path "${deskewed_dir}" \\
         --background ${background} \\
         --iter ${iter} \\
