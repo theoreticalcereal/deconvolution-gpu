@@ -142,7 +142,7 @@ def deconvolve_tiff(
     psf: np.ndarray,
     n_iters: int,
     dz: float,
-    chunk_xy: int = 128,
+    chunk_xy: int = 256,
 ) -> np.ndarray:
     """
     Deconvolve a single TIFF using the supplied PSF.
@@ -222,7 +222,7 @@ def main() -> None:
                         help="deconvblind iterations per chunk during PSF estimation.")
     parser.add_argument("--chunk_xy",    type=int, default=256,
                         help="XY tile size (pixels) for blind PSF estimation.")
-    parser.add_argument("--decon_chunk_xy", type=int, default=128,
+    parser.add_argument("--decon_chunk_xy", type=int, default=256,
                         help="Maximum overlapped XY tile size sent to CUDA deconvolution.")
     parser.add_argument("--pad_xy",      type=int, default=32,
                         help="XY reflect-padding per edge added to each chunk before deconvblind (pixels).")
