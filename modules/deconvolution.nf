@@ -1,7 +1,5 @@
 process DECON {
     module 'mamba/2.3.0'
-    beforeScript 'source $(dirname $(which mamba))/../etc/profile.d/conda.sh || true'
-    conda "${projectDir}/environment.yml"
     tag "${cell_name}"
 
     publishDir "${params.output_dir}/deconvolved", mode: 'copy'
@@ -43,7 +41,12 @@ process DECON {
     nvidia-smi
     echo "================="
 
-    python3 ${projectDir}/scripts/decon_wrapper.py \\
+    if [ ! -d "${projectDir}/.conda_env" ]; then
+        echo "Building conda environment via Mamba..."
+        mamba env create -p ${projectDir}/.conda_env -f ${projectDir}/environment.yml --quiet
+    fi
+
+    mamba run -p ${projectDir}/.conda_env python3 ${projectDir}/scripts/decon_wrapper.py \\
         --image_path "${deskewed_dir}" \\
         --background ${background} \\
         --iter ${iter} \\
