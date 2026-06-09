@@ -24,11 +24,6 @@
 % DO NOT hardcode them here or it will break the pipeline
 % =========================================================================
 
-% Set defaults for variables that might not be passed by the wrapper
-if ~exist('ChannelsToProcess', 'var') || isempty(ChannelsToProcess)
-    ChannelsToProcess = [0];
-end
-
 if ~exist('timepoints', 'var')
     timepoints = [];
 end
@@ -42,7 +37,6 @@ tic;
 
 %% Processing Setup
 numFolders = 1;
-numChannels = numel(ChannelsToProcess);
 
 for c = 1:numFolders
 
@@ -64,20 +58,36 @@ for c = 1:numFolders
     [~, idx] = sort({tifFiles.name});
     tifFiles = tifFiles(idx);
 
-    numImages = numel(tifFiles);
-
-    % Define timepoints range
-    if isempty(timepoints)
-        t_start = 0;
-        t_end = round(numImages / numChannels) - 1;
-    else
-        t_start = min(timepoints);
-        t_end = max(timepoints);
+    detectedChannels = [];
+    detectedTimepoints = [];
+    for i = 1:numel(tifFiles)
+        tokens = regexp(tifFiles(i).name, '^CH(\d+)_(\d+)_registered_consistent\.tiff?$', 'tokens', 'once');
+        if ~isempty(tokens)
+            detectedChannels(end + 1) = str2double(tokens{1}); %#ok<SAGROW>
+            detectedTimepoints(end + 1) = str2double(tokens{2}); %#ok<SAGROW>
+        end
     end
 
-    % Process each timepoint and channel
-    for t = t_start:t_end
-        for ch = 1:numChannels
+    if isempty(detectedChannels)
+        error('No CH##_######_registered_consistent TIFF files found in %s', inputDir);
+    end
+
+    if ~exist('ChannelsToProcess', 'var') || isempty(ChannelsToProcess)
+        ChannelsToProcess = unique(detectedChannels);
+    end
+    if isempty(timepoints)
+        timepoints = unique(detectedTimepoints);
+    end
+
+    disp(sprintf('Detected channels: %s', mat2str(unique(detectedChannels))));
+    disp(sprintf('Detected timepoints: %s', mat2str(unique(detectedTimepoints))));
+    disp(sprintf('Processing channels: %s', mat2str(ChannelsToProcess)));
+    disp(sprintf('Processing timepoints: %s', mat2str(timepoints)));
+
+    % Process each detected/requested timepoint and channel
+    for ti = 1:numel(timepoints)
+        t = timepoints(ti);
+        for ch = 1:numel(ChannelsToProcess)
             tic;
 
             % Build the expected filename for this channel/timepoint.

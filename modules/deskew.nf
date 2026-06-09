@@ -23,15 +23,15 @@ process DESKEW {
     module load matlab/2024a
 
     python3 ${projectDir}/scripts/deskew_wrapper.py \
-        --image_path ${image_path} \
-        --cell_name ${cell_name} \
+        --image_path "${image_path}" \
+        --cell_name "${cell_name}" \
         --cell_index "${cell_index}" \
-        --channels ${channels} \
-        --timepoints ${timepoints} \
+        --channels "${channels}" \
+        --timepoints "${timepoints}" \
         --dx ${dx} \
         --dz ${dz} \
         --angle ${angle} \
         --flip ${flip} \
-        --output_dir ${output_dir}
+        --output_dir "${output_dir}"
     """
 }
