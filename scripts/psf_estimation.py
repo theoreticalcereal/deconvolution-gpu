@@ -50,7 +50,7 @@ def _available_cpu_threads(default: int = DEFAULT_CPU_THREADS) -> int:
 def resolve_worker_count(requested_workers: int, default: int = DEFAULT_CPU_THREADS) -> int:
     if requested_workers > 0:
         return requested_workers
-    return _available_cpu_threads(default=default)
+    return min(_available_cpu_threads(default=default), default)
 
 
 def generate_theoretical_psf(
@@ -292,7 +292,8 @@ def _run_matlab_deconvblind(
     )
     if result.returncode != 0:
         raise RuntimeError(
-            f"MATLAB deconvblind failed for chunk {chunk_path.name}.\n"
+            f"MATLAB deconvblind failed for chunk {chunk_path.name} "
+            f"(returncode={result.returncode}).\n"
             f"STDOUT: {result.stdout}\nSTDERR: {result.stderr}"
         )
 
@@ -379,9 +380,16 @@ def _estimate_one_tile(
 ) -> tuple[int, np.ndarray | None, float, str | None]:
     chunk_start = time.perf_counter()
     y0, x0, y1, x1 = tile
+    started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(
+        f"  Blind chunk {idx + 1}/{total_tiles} started at {started_at}: "
+        f"tile=({y0}:{y1}, {x0}:{x1})",
+        flush=True,
+    )
     core = np.asarray(volume[:, y0:y1, x0:x1])
     weight = _snr_weight(core, weight_cap=snr_weight_cap)
     chunk = _extract_tile_with_halo(volume, y0, x0, y1, x1, pad_xy)
+    chunk_shape = chunk.shape
     read_elapsed = time.perf_counter() - chunk_start
 
     chunk_path = tmpdir / f"chunk_{idx:04d}.tif"
@@ -396,6 +404,13 @@ def _estimate_one_tile(
         matlab_wait_start = time.perf_counter()
         with matlab_lock:
             matlab_wait_elapsed = time.perf_counter() - matlab_wait_start
+            matlab_started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            print(
+                f"  Blind chunk {idx + 1}/{total_tiles} MATLAB started at "
+                f"{matlab_started_at}: wait={_format_seconds(matlab_wait_elapsed)}, "
+                f"input_shape={chunk_shape}",
+                flush=True,
+            )
             matlab_start = time.perf_counter()
             _run_matlab_deconvblind(
                 chunk_path,
@@ -525,7 +540,10 @@ def estimate_psf_from_chunks(
     psf_estimates: list[np.ndarray] = []
     psf_weights: list[float] = []
     failed_chunks = 0
-    prefetch_chunks = prefetch_chunks if prefetch_chunks > 0 else max_workers * 2
+    completed_chunks = 0
+    prefetch_chunks = prefetch_chunks if prefetch_chunks > 0 else max_workers
+    heartbeat_seconds = 60.0
+    last_heartbeat = time.perf_counter()
 
     with tempfile.TemporaryDirectory(prefix="psf_est_") as tmpdir:
         tmpdir = Path(tmpdir)
@@ -535,6 +553,7 @@ def estimate_psf_from_chunks(
 
         with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             while next_idx < len(tile_origins) or pending:
+                submitted_before = next_idx
                 while next_idx < len(tile_origins) and len(pending) < prefetch_chunks:
                     pending.add(
                         executor.submit(
@@ -554,13 +573,34 @@ def estimate_psf_from_chunks(
                         )
                     )
                     next_idx += 1
+                if next_idx > submitted_before:
+                    print(
+                        f"  Submitted blind chunks {submitted_before + 1}-{next_idx}/"
+                        f"{len(tile_origins)}; pending={len(pending)}, "
+                        f"completed={completed_chunks}, failed={failed_chunks}",
+                        flush=True,
+                    )
 
                 done, pending = futures.wait(
                     pending,
+                    timeout=heartbeat_seconds,
                     return_when=futures.FIRST_COMPLETED,
                 )
+                if not done:
+                    now = time.perf_counter()
+                    if now - last_heartbeat >= heartbeat_seconds:
+                        print(
+                            f"  Blind PSF heartbeat: submitted={next_idx}/"
+                            f"{len(tile_origins)}, completed={completed_chunks}, "
+                            f"failed={failed_chunks}, pending={len(pending)}",
+                            flush=True,
+                        )
+                        last_heartbeat = now
+                    continue
+
                 for future in done:
                     idx, psf_chunk, weight, error = future.result()
+                    completed_chunks += 1
                     if error:
                         failed_chunks += 1
                         if "initial PSF must have at least one non-zero element" in error:
@@ -569,6 +609,8 @@ def estimate_psf_from_chunks(
                                 "The seed TIFF writer is incompatible with MATLAB."
                             )
                         if failed_chunks >= 3 and not psf_estimates:
+                            for pending_future in pending:
+                                pending_future.cancel()
                             raise RuntimeError(
                                 "First three chunks failed during PSF estimation; "
                                 "aborting instead of submitting every tile to MATLAB."
@@ -625,7 +667,7 @@ def main() -> None:
     parser.add_argument("--snr_weight_cap", type=float, default=DEFAULT_SNR_WEIGHT_CAP,
                         help="Maximum per-chunk SNR weight before weighted PSF merge; <=0 disables cap.")
     parser.add_argument("--prefetch_chunks", type=int, default=0,
-                        help="Number of PSF tiles to keep submitted/read ahead. <=0 uses 2x workers.")
+                        help="Number of PSF tiles to keep submitted/read ahead. <=0 uses one worker batch.")
     parser.add_argument("--vram_gb", type=float, default=None,
                         help="Override detected free VRAM in GiB for auto chunk sizing.")
     parser.add_argument("--cache_dir", default=None,

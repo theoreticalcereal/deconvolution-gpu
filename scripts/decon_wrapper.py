@@ -210,7 +210,7 @@ def main() -> None:
     parser.add_argument("--snr_weight_cap", type=float, default=DEFAULT_SNR_WEIGHT_CAP,
                         help="Maximum per-chunk SNR weight before weighted PSF merge; <=0 disables cap.")
     parser.add_argument("--prefetch_chunks", type=int, default=0,
-                        help="Number of PSF tiles to keep submitted/read ahead. <=0 uses 2x workers.")
+                        help="Number of PSF tiles to keep submitted/read ahead. <=0 uses one worker batch.")
     parser.add_argument("--decon_workers", type=int, default=1,
                         help="Dask workers for CUDA deconvolution chunks.")
     parser.add_argument("--overlap_xy", type=int, default=0,
