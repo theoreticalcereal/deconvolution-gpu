@@ -64,7 +64,7 @@ def generate_theoretical_psf(
         model="vectorial",
     ).astype(np.float32)
 
-    psf = np.abs(psf - background)
+    psf = np.maximum(psf - background, 0)
     total = psf.sum()
     if total > 0:
         psf /= total
