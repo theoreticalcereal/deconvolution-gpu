@@ -34,7 +34,8 @@ DEFAULT_CPU_THREADS = 32
 DEFAULT_SNR_WEIGHT_CAP = 100.0
 DEFAULT_BLIND_MEMORY_MULTIPLIER = 28.0
 DEFAULT_BLIND_MEMORY_OVERHEAD_GB = 1.0
-DEFAULT_BLIND_Z_SLICES = 256
+DEFAULT_BLIND_Z_SLICES = 128
+DEFAULT_BLIND_CHUNK_XY = 256
 
 
 # ---------------------------------------------------------------------------
@@ -621,7 +622,7 @@ def estimate_psf_from_chunks(
     image_path: str | Path,
     psf_seed: np.ndarray,
     n_iters: int = 10,
-    chunk_xy: int = 256,
+    chunk_xy: int = DEFAULT_BLIND_CHUNK_XY,
     pad_xy: int = 32,
     script_dir: str | Path | None = None,
     max_workers: int = 0,
@@ -630,6 +631,7 @@ def estimate_psf_from_chunks(
     cache_dir: str | Path | None = None,
     use_cache: bool = True,
     matlab_threads: int = 1,
+    matlab_workers: int = 1,
     matlab_timeout: int = 1800,
     snr_weight_cap: float = DEFAULT_SNR_WEIGHT_CAP,
     blind_z_slices: int = DEFAULT_BLIND_Z_SLICES,
@@ -671,6 +673,7 @@ def estimate_psf_from_chunks(
     requested_workers = max_workers
     cpu_workers = resolve_worker_count(requested_workers)
     matlab_threads = min(2, max(1, matlab_threads))
+    matlab_workers = max(1, matlab_workers)
     matlab_timeout = max(0, matlab_timeout)
     snr_weight_cap = max(0.0, snr_weight_cap)
     chunk_xy = resolve_chunk_xy(
@@ -681,6 +684,7 @@ def estimate_psf_from_chunks(
         vram_gb=vram_gb,
         workers=cpu_workers,
         min_xy=max(128, psf_seed.shape[-1]),
+        max_xy=min(DEFAULT_BLIND_CHUNK_XY, ny, nx),
     )
     max_workers, worker_detail = resolve_blind_worker_count(
         requested_workers,
@@ -696,7 +700,12 @@ def estimate_psf_from_chunks(
         f"{z_window_detail}; resolved_chunk_xy={chunk_xy}",
         flush=True,
     )
-    print(f"  Blind worker selection: workers={max_workers} ({worker_detail})", flush=True)
+    matlab_workers = min(matlab_workers, max_workers)
+    print(
+        f"  Blind worker selection: io_workers={max_workers} ({worker_detail}); "
+        f"matlab_workers={matlab_workers}",
+        flush=True,
+    )
 
     cache_root = Path(cache_dir) if cache_dir else image_path.parent / ".psf_cache"
     cache_key = _psf_cache_key(
@@ -718,7 +727,8 @@ def estimate_psf_from_chunks(
     tile_origins = _tile_origins(ny, nx, chunk_xy)
 
     print(f"  Processing {len(tile_origins)} chunk(s) of size "
-          f"(nz={nz}, xy<={chunk_xy}, halo={pad_xy}, workers={max_workers}, "
+          f"(nz={nz}, xy<={chunk_xy}, halo={pad_xy}, io_workers={max_workers}, "
+          f"matlab_workers={matlab_workers}, "
           f"matlab_threads={matlab_threads}, matlab_timeout={matlab_timeout}s, "
           f"snr_weight_cap={snr_weight_cap:g})...",
           flush=True)
@@ -733,7 +743,7 @@ def estimate_psf_from_chunks(
 
     with tempfile.TemporaryDirectory(prefix="psf_est_") as tmpdir:
         tmpdir = Path(tmpdir)
-        matlab_slots = threading.Semaphore(max_workers)
+        matlab_slots = threading.Semaphore(matlab_workers)
         next_idx = 0
         pending: set[futures.Future] = set()
 
@@ -843,14 +853,16 @@ def main() -> None:
     parser.add_argument("--output_path", required=True,
                         help="Where to save the merged PSF TIFF.")
     parser.add_argument("--n_iters",    type=int,   default=10)
-    parser.add_argument("--chunk_xy",   type=int,   default=0,
+    parser.add_argument("--chunk_xy",   type=int,   default=DEFAULT_BLIND_CHUNK_XY,
                         help="XY tile size. <=0 auto-sizes from available VRAM.")
     parser.add_argument("--pad_xy",     type=int,   default=32,
                         help="XY halo per edge before deconvblind (pixels).")
-    parser.add_argument("--blind_workers", type=int, default=0,
+    parser.add_argument("--blind_workers", type=int, default=1,
                         help="Concurrent MATLAB deconvblind chunks. <=0 uses CPU affinity, falling back to 32.")
     parser.add_argument("--matlab_threads", type=int, default=1,
                         help="Threads per MATLAB deconvblind process; clamped to 1 or 2.")
+    parser.add_argument("--matlab_workers", type=int, default=1,
+                        help="Concurrent MATLAB deconvblind processes; default 1 avoids MATLAB orchestration hangs.")
     parser.add_argument("--matlab_timeout", type=int, default=1800,
                         help="Seconds before killing one MATLAB deconvblind chunk. <=0 disables.")
     parser.add_argument("--blind_z_slices", type=int, default=DEFAULT_BLIND_Z_SLICES,
@@ -902,6 +914,7 @@ def main() -> None:
         cache_dir=args.cache_dir,
         use_cache=not args.no_psf_cache,
         matlab_threads=args.matlab_threads,
+        matlab_workers=args.matlab_workers,
         matlab_timeout=args.matlab_timeout,
         snr_weight_cap=args.snr_weight_cap,
         blind_z_slices=args.blind_z_slices,

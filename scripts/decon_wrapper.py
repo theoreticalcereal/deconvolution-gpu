@@ -23,6 +23,7 @@ from pycudadecon import TemporaryOTF, RLContext, rl_decon
 from tifffile import imwrite
 
 from psf_estimation import (
+    DEFAULT_BLIND_CHUNK_XY,
     DEFAULT_BLIND_Z_SLICES,
     DEFAULT_SNR_WEIGHT_CAP,
     estimate_psf_from_chunks,
@@ -198,16 +199,18 @@ def main() -> None:
     # Blind estimation options (only used when --no_blind is NOT set)
     parser.add_argument("--blind_iters", type=int, default=10,
                         help="deconvblind iterations per chunk during PSF estimation.")
-    parser.add_argument("--chunk_xy",    type=int, default=0,
+    parser.add_argument("--chunk_xy",    type=int, default=DEFAULT_BLIND_CHUNK_XY,
                         help="XY tile size for blind PSF estimation. <=0 auto-sizes from VRAM.")
     parser.add_argument("--decon_chunk_xy", type=int, default=0,
                         help="Core XY tile size for CUDA deconvolution. <=0 auto-sizes from VRAM.")
     parser.add_argument("--pad_xy",      type=int, default=32,
                         help="XY halo per edge added to each blind PSF chunk (pixels).")
-    parser.add_argument("--blind_workers", type=int, default=0,
+    parser.add_argument("--blind_workers", type=int, default=1,
                         help="Concurrent MATLAB deconvblind chunks. <=0 uses CPU affinity, falling back to 32.")
     parser.add_argument("--matlab_threads", type=int, default=1,
                         help="Threads per MATLAB deconvblind process; clamped to 1 or 2.")
+    parser.add_argument("--matlab_workers", type=int, default=1,
+                        help="Concurrent MATLAB deconvblind processes; default 1 avoids MATLAB orchestration hangs.")
     parser.add_argument("--matlab_timeout", type=int, default=1800,
                         help="Seconds before killing one MATLAB deconvblind chunk. <=0 disables.")
     parser.add_argument("--blind_z_slices", type=int, default=DEFAULT_BLIND_Z_SLICES,
@@ -303,6 +306,7 @@ def main() -> None:
             cache_dir=args.cache_dir,
             use_cache=not args.no_psf_cache,
             matlab_threads=args.matlab_threads,
+            matlab_workers=args.matlab_workers,
             matlab_timeout=args.matlab_timeout,
             snr_weight_cap=args.snr_weight_cap,
             blind_z_slices=args.blind_z_slices,

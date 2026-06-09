@@ -34,6 +34,7 @@ process DECON {
     def decon_chunk_xy_flag = params.decon_chunk_xy ? "--decon_chunk_xy ${params.decon_chunk_xy}" : ""
     def pad_xy_flag      = params.pad_xy      ? "--pad_xy ${params.pad_xy}"           : ""
     def blind_workers_flag = params.blind_workers ? "--blind_workers ${params.blind_workers}" : ""
+    def matlab_workers_flag = params.matlab_workers ? "--matlab_workers ${params.matlab_workers}" : ""
     def matlab_threads_flag = params.matlab_threads ? "--matlab_threads ${params.matlab_threads}" : ""
     def matlab_timeout_flag = params.matlab_timeout ? "--matlab_timeout ${params.matlab_timeout}" : ""
     def blind_z_slices_flag = params.blind_z_slices ? "--blind_z_slices ${params.blind_z_slices}" : ""
@@ -72,6 +73,7 @@ process DECON {
         ${decon_chunk_xy_flag} \\
         ${pad_xy_flag} \\
         ${blind_workers_flag} \\
+        ${matlab_workers_flag} \\
         ${matlab_threads_flag} \\
         ${matlab_timeout_flag} \\
         ${blind_z_slices_flag} \\
