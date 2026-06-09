@@ -32,6 +32,8 @@ from tifffile import TiffFile, imread, imwrite, memmap as tiff_memmap
 
 DEFAULT_CPU_THREADS = 32
 DEFAULT_SNR_WEIGHT_CAP = 100.0
+DEFAULT_BLIND_MEMORY_MULTIPLIER = 28.0
+DEFAULT_BLIND_MEMORY_OVERHEAD_GB = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -51,6 +53,120 @@ def resolve_worker_count(requested_workers: int, default: int = DEFAULT_CPU_THRE
     if requested_workers > 0:
         return requested_workers
     return min(_available_cpu_threads(default=default), default)
+
+
+def _parse_memory_bytes(value: str | None) -> int | None:
+    if not value:
+        return None
+    text = value.strip().upper()
+    if not text:
+        return None
+    multiplier = 1
+    if text.endswith(("K", "KB")):
+        multiplier = 1024
+        text = text.rstrip("B").rstrip("K")
+    elif text.endswith(("M", "MB")):
+        multiplier = 1024 ** 2
+        text = text.rstrip("B").rstrip("M")
+    elif text.endswith(("G", "GB")):
+        multiplier = 1024 ** 3
+        text = text.rstrip("B").rstrip("G")
+    elif text.endswith(("T", "TB")):
+        multiplier = 1024 ** 4
+        text = text.rstrip("B").rstrip("T")
+    try:
+        number = float(text)
+    except ValueError:
+        return None
+    # Slurm memory variables without suffix are MB.
+    if multiplier == 1 and number < 10_000_000:
+        multiplier = 1024 ** 2
+    return int(number * multiplier)
+
+
+def _cgroup_memory_limit_bytes() -> int | None:
+    candidates = [
+        Path("/sys/fs/cgroup/memory.max"),
+        Path("/sys/fs/cgroup/memory/memory.limit_in_bytes"),
+    ]
+    for path in candidates:
+        try:
+            text = path.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if not text or text == "max":
+            continue
+        try:
+            value = int(text)
+        except ValueError:
+            continue
+        if 0 < value < 1 << 60:
+            return value
+    return None
+
+
+def _allocated_memory_bytes() -> int | None:
+    slurm_node = _parse_memory_bytes(os.environ.get("SLURM_MEM_PER_NODE"))
+    if slurm_node:
+        return slurm_node
+
+    slurm_per_cpu = _parse_memory_bytes(os.environ.get("SLURM_MEM_PER_CPU"))
+    if slurm_per_cpu:
+        cpus = int(os.environ.get("SLURM_CPUS_PER_TASK") or _available_cpu_threads())
+        return slurm_per_cpu * max(1, cpus)
+
+    cgroup_limit = _cgroup_memory_limit_bytes()
+    if cgroup_limit:
+        return cgroup_limit
+
+    try:
+        import psutil
+
+        return int(psutil.virtual_memory().available)
+    except Exception:
+        return None
+
+
+def _blind_chunk_input_bytes(
+    volume_shape: tuple[int, int, int],
+    dtype: np.dtype,
+    chunk_xy: int,
+    halo_xy: int,
+) -> int:
+    nz, ny, nx = volume_shape
+    tile_y = min(ny, chunk_xy + 2 * halo_xy)
+    tile_x = min(nx, chunk_xy + 2 * halo_xy)
+    return int(nz * tile_y * tile_x * np.dtype(dtype).itemsize)
+
+
+def resolve_blind_worker_count(
+    requested_workers: int,
+    cpu_workers: int,
+    volume_shape: tuple[int, int, int],
+    dtype: np.dtype,
+    chunk_xy: int,
+    halo_xy: int,
+    memory_multiplier: float = DEFAULT_BLIND_MEMORY_MULTIPLIER,
+    overhead_gb: float = DEFAULT_BLIND_MEMORY_OVERHEAD_GB,
+) -> tuple[int, str]:
+    if requested_workers > 0:
+        return requested_workers, "explicit"
+
+    memory_bytes = _allocated_memory_bytes()
+    if not memory_bytes:
+        return cpu_workers, "cpu"
+
+    chunk_bytes = _blind_chunk_input_bytes(volume_shape, dtype, chunk_xy, halo_xy)
+    per_worker = chunk_bytes * memory_multiplier + overhead_gb * (1024 ** 3)
+    usable = memory_bytes * 0.70
+    memory_workers = max(1, int(usable // max(1, per_worker)))
+    resolved = max(1, min(cpu_workers, memory_workers))
+    detail = (
+        f"cpu={cpu_workers}, memory_cap={memory_workers}, "
+        f"allocated={memory_bytes / (1024 ** 3):.1f}GiB, "
+        f"estimated_per_worker={per_worker / (1024 ** 3):.1f}GiB"
+    )
+    return resolved, detail
 
 
 def generate_theoretical_psf(
@@ -248,6 +364,7 @@ def _run_matlab_deconvblind(
     n_iters: int,
     script_dir: Path,
     matlab_threads: int,
+    matlab_timeout: int,
 ) -> None:
     """
     Call MATLAB deconvblind on one chunk.  The script writes the recovered PSF
@@ -284,12 +401,20 @@ def _run_matlab_deconvblind(
     ):
         env[name] = str(matlab_threads)
 
-    result = subprocess.run(
-        matlab_args,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
+    try:
+        result = subprocess.run(
+            matlab_args,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=matlab_timeout if matlab_timeout > 0 else None,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"MATLAB deconvblind timed out for chunk {chunk_path.name} "
+            f"after {matlab_timeout}s.\n"
+            f"STDOUT: {exc.stdout or ''}\nSTDERR: {exc.stderr or ''}"
+        ) from exc
     if result.returncode != 0:
         raise RuntimeError(
             f"MATLAB deconvblind failed for chunk {chunk_path.name} "
@@ -376,6 +501,7 @@ def _estimate_one_tile(
     tmpdir: Path,
     matlab_lock: threading.Semaphore,
     matlab_threads: int,
+    matlab_timeout: int,
     snr_weight_cap: float,
 ) -> tuple[int, np.ndarray | None, float, str | None]:
     chunk_start = time.perf_counter()
@@ -420,6 +546,7 @@ def _estimate_one_tile(
                 n_iters,
                 script_dir,
                 matlab_threads,
+                matlab_timeout,
             )
             matlab_elapsed = time.perf_counter() - matlab_start
     except RuntimeError as exc:
@@ -468,6 +595,7 @@ def estimate_psf_from_chunks(
     cache_dir: str | Path | None = None,
     use_cache: bool = True,
     matlab_threads: int = 1,
+    matlab_timeout: int = 1800,
     snr_weight_cap: float = DEFAULT_SNR_WEIGHT_CAP,
 ) -> np.ndarray:
     """
@@ -499,8 +627,10 @@ def estimate_psf_from_chunks(
         raise ValueError(f"Expected a 3-D volume, got shape {volume.shape}")
 
     nz, ny, nx = volume.shape
-    max_workers = resolve_worker_count(max_workers)
+    requested_workers = max_workers
+    cpu_workers = resolve_worker_count(requested_workers)
     matlab_threads = min(2, max(1, matlab_threads))
+    matlab_timeout = max(0, matlab_timeout)
     snr_weight_cap = max(0.0, snr_weight_cap)
     chunk_xy = resolve_chunk_xy(
         chunk_xy,
@@ -508,11 +638,20 @@ def estimate_psf_from_chunks(
         volume.dtype,
         overlap_xy=pad_xy,
         vram_gb=vram_gb,
-        workers=max_workers,
+        workers=cpu_workers,
         min_xy=max(128, psf_seed.shape[-1]),
+    )
+    max_workers, worker_detail = resolve_blind_worker_count(
+        requested_workers,
+        cpu_workers,
+        volume.shape,
+        volume.dtype,
+        chunk_xy,
+        pad_xy,
     )
 
     print(f"  Volume shape: {volume.shape}; resolved_chunk_xy={chunk_xy}", flush=True)
+    print(f"  Blind worker selection: workers={max_workers} ({worker_detail})", flush=True)
 
     cache_root = Path(cache_dir) if cache_dir else image_path.parent / ".psf_cache"
     cache_key = _psf_cache_key(
@@ -534,7 +673,8 @@ def estimate_psf_from_chunks(
 
     print(f"  Processing {len(tile_origins)} chunk(s) of size "
           f"(nz={nz}, xy<={chunk_xy}, halo={pad_xy}, workers={max_workers}, "
-          f"matlab_threads={matlab_threads}, snr_weight_cap={snr_weight_cap:g})...",
+          f"matlab_threads={matlab_threads}, matlab_timeout={matlab_timeout}s, "
+          f"snr_weight_cap={snr_weight_cap:g})...",
           flush=True)
 
     psf_estimates: list[np.ndarray] = []
@@ -569,6 +709,7 @@ def estimate_psf_from_chunks(
                             tmpdir,
                             matlab_slots,
                             matlab_threads,
+                            matlab_timeout,
                             snr_weight_cap,
                         )
                     )
@@ -664,6 +805,8 @@ def main() -> None:
                         help="Concurrent MATLAB deconvblind chunks. <=0 uses CPU affinity, falling back to 32.")
     parser.add_argument("--matlab_threads", type=int, default=1,
                         help="Threads per MATLAB deconvblind process; clamped to 1 or 2.")
+    parser.add_argument("--matlab_timeout", type=int, default=1800,
+                        help="Seconds before killing one MATLAB deconvblind chunk. <=0 disables.")
     parser.add_argument("--snr_weight_cap", type=float, default=DEFAULT_SNR_WEIGHT_CAP,
                         help="Maximum per-chunk SNR weight before weighted PSF merge; <=0 disables cap.")
     parser.add_argument("--prefetch_chunks", type=int, default=0,
@@ -711,6 +854,7 @@ def main() -> None:
         cache_dir=args.cache_dir,
         use_cache=not args.no_psf_cache,
         matlab_threads=args.matlab_threads,
+        matlab_timeout=args.matlab_timeout,
         snr_weight_cap=args.snr_weight_cap,
     )
 

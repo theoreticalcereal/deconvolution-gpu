@@ -5,7 +5,7 @@ process DECON {
     publishDir "${params.output_dir}/deconvolved", mode: 'copy'
 
     maxForks 8
-    cpus 32
+    cpus 8
     memory '32 GB'
     clusterOptions '--gres=gpu:1'
 
@@ -35,6 +35,7 @@ process DECON {
     def pad_xy_flag      = params.pad_xy      ? "--pad_xy ${params.pad_xy}"           : ""
     def blind_workers_flag = params.blind_workers ? "--blind_workers ${params.blind_workers}" : ""
     def matlab_threads_flag = params.matlab_threads ? "--matlab_threads ${params.matlab_threads}" : ""
+    def matlab_timeout_flag = params.matlab_timeout ? "--matlab_timeout ${params.matlab_timeout}" : ""
     def snr_weight_cap_flag = params.snr_weight_cap != null ? "--snr_weight_cap ${params.snr_weight_cap}" : ""
     def prefetch_chunks_flag = params.prefetch_chunks ? "--prefetch_chunks ${params.prefetch_chunks}" : ""
     def decon_workers_flag = params.decon_workers ? "--decon_workers ${params.decon_workers}" : ""
@@ -71,6 +72,7 @@ process DECON {
         ${pad_xy_flag} \\
         ${blind_workers_flag} \\
         ${matlab_threads_flag} \\
+        ${matlab_timeout_flag} \\
         ${snr_weight_cap_flag} \\
         ${prefetch_chunks_flag} \\
         ${decon_workers_flag} \\
