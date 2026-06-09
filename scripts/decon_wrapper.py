@@ -23,6 +23,7 @@ from pycudadecon import TemporaryOTF, RLContext, rl_decon
 from tifffile import imwrite
 
 from psf_estimation import (
+    DEFAULT_BLIND_Z_SLICES,
     DEFAULT_SNR_WEIGHT_CAP,
     estimate_psf_from_chunks,
     generate_theoretical_psf,
@@ -209,6 +210,8 @@ def main() -> None:
                         help="Threads per MATLAB deconvblind process; clamped to 1 or 2.")
     parser.add_argument("--matlab_timeout", type=int, default=1800,
                         help="Seconds before killing one MATLAB deconvblind chunk. <=0 disables.")
+    parser.add_argument("--blind_z_slices", type=int, default=DEFAULT_BLIND_Z_SLICES,
+                        help="Z planes used per blind PSF tile. <=0 uses full Z.")
     parser.add_argument("--snr_weight_cap", type=float, default=DEFAULT_SNR_WEIGHT_CAP,
                         help="Maximum per-chunk SNR weight before weighted PSF merge; <=0 disables cap.")
     parser.add_argument("--prefetch_chunks", type=int, default=0,
@@ -302,6 +305,7 @@ def main() -> None:
             matlab_threads=args.matlab_threads,
             matlab_timeout=args.matlab_timeout,
             snr_weight_cap=args.snr_weight_cap,
+            blind_z_slices=args.blind_z_slices,
         )
         psf_save_path = image_dir / "estimated_psf.tif"
         imwrite(str(psf_save_path), psf)

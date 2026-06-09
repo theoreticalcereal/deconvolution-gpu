@@ -34,6 +34,7 @@ DEFAULT_CPU_THREADS = 32
 DEFAULT_SNR_WEIGHT_CAP = 100.0
 DEFAULT_BLIND_MEMORY_MULTIPLIER = 28.0
 DEFAULT_BLIND_MEMORY_OVERHEAD_GB = 1.0
+DEFAULT_BLIND_Z_SLICES = 256
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +138,38 @@ def _blind_chunk_input_bytes(
     tile_y = min(ny, chunk_xy + 2 * halo_xy)
     tile_x = min(nx, chunk_xy + 2 * halo_xy)
     return int(nz * tile_y * tile_x * np.dtype(dtype).itemsize)
+
+
+def select_blind_z_window(
+    volume: np.ndarray,
+    max_z_slices: int = DEFAULT_BLIND_Z_SLICES,
+    sample_planes: int = 64,
+) -> tuple[slice, str]:
+    nz = volume.shape[0]
+    if max_z_slices <= 0 or nz <= max_z_slices:
+        return slice(None), f"full_z=0:{nz}"
+
+    sample_count = max(1, min(sample_planes, nz))
+    sample_indices = np.unique(np.linspace(0, nz - 1, sample_count, dtype=int))
+    scores = []
+    for z in sample_indices:
+        plane = np.asarray(volume[z], dtype=np.float32)
+        scores.append(float(np.percentile(plane, 99.9)))
+
+    if max(scores) <= min(scores):
+        center_z = nz // 2
+        score_detail = "flat_sample_scores"
+    else:
+        center_z = int(sample_indices[int(np.argmax(scores))])
+        score_detail = "brightest_sample"
+    start = max(0, center_z - (max_z_slices // 2))
+    stop = min(nz, start + max_z_slices)
+    start = max(0, stop - max_z_slices)
+    return (
+        slice(start, stop),
+        f"bright_z_window={start}:{stop}, center={center_z}, "
+        f"sampled_planes={len(sample_indices)}, selector={score_detail}",
+    )
 
 
 def resolve_blind_worker_count(
@@ -319,6 +352,7 @@ def _psf_cache_key(
     script_dir: Path,
     merge_mode: str,
     snr_weight_cap: float,
+    z_window: tuple[int | None, int | None],
 ) -> str:
     stat = image_path.stat()
     payload = {
@@ -333,6 +367,7 @@ def _psf_cache_key(
         "script_dir": str(script_dir.resolve()),
         "merge_mode": merge_mode,
         "snr_weight_cap": snr_weight_cap,
+        "z_window": z_window,
         "version": 2,
     }
     encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
@@ -597,6 +632,7 @@ def estimate_psf_from_chunks(
     matlab_threads: int = 1,
     matlab_timeout: int = 1800,
     snr_weight_cap: float = DEFAULT_SNR_WEIGHT_CAP,
+    blind_z_slices: int = DEFAULT_BLIND_Z_SLICES,
 ) -> np.ndarray:
     """
     Estimate a PSF by running MATLAB deconvblind on spatial XY chunks of the
@@ -626,6 +662,11 @@ def estimate_psf_from_chunks(
     if volume.ndim != 3:
         raise ValueError(f"Expected a 3-D volume, got shape {volume.shape}")
 
+    original_shape = volume.shape
+    z_window, z_window_detail = select_blind_z_window(volume, blind_z_slices)
+    z_start = z_window.start
+    z_stop = z_window.stop
+    volume = volume[z_window]
     nz, ny, nx = volume.shape
     requested_workers = max_workers
     cpu_workers = resolve_worker_count(requested_workers)
@@ -650,7 +691,11 @@ def estimate_psf_from_chunks(
         pad_xy,
     )
 
-    print(f"  Volume shape: {volume.shape}; resolved_chunk_xy={chunk_xy}", flush=True)
+    print(
+        f"  Volume shape: {original_shape}; blind_volume_shape={volume.shape}; "
+        f"{z_window_detail}; resolved_chunk_xy={chunk_xy}",
+        flush=True,
+    )
     print(f"  Blind worker selection: workers={max_workers} ({worker_detail})", flush=True)
 
     cache_root = Path(cache_dir) if cache_dir else image_path.parent / ".psf_cache"
@@ -663,6 +708,7 @@ def estimate_psf_from_chunks(
         script_dir,
         "snr_weighted_mean",
         snr_weight_cap,
+        (z_start, z_stop),
     )
     cache_path = cache_root / f"estimated_psf_{cache_key}.tif"
     if use_cache and cache_path.exists():
@@ -807,6 +853,8 @@ def main() -> None:
                         help="Threads per MATLAB deconvblind process; clamped to 1 or 2.")
     parser.add_argument("--matlab_timeout", type=int, default=1800,
                         help="Seconds before killing one MATLAB deconvblind chunk. <=0 disables.")
+    parser.add_argument("--blind_z_slices", type=int, default=DEFAULT_BLIND_Z_SLICES,
+                        help="Z planes used per blind PSF tile. <=0 uses full Z.")
     parser.add_argument("--snr_weight_cap", type=float, default=DEFAULT_SNR_WEIGHT_CAP,
                         help="Maximum per-chunk SNR weight before weighted PSF merge; <=0 disables cap.")
     parser.add_argument("--prefetch_chunks", type=int, default=0,
@@ -856,6 +904,7 @@ def main() -> None:
         matlab_threads=args.matlab_threads,
         matlab_timeout=args.matlab_timeout,
         snr_weight_cap=args.snr_weight_cap,
+        blind_z_slices=args.blind_z_slices,
     )
 
     imwrite(args.output_path, merged_psf)
