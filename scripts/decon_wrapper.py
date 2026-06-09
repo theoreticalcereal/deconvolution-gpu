@@ -3,14 +3,14 @@
 #
 # PSF resolution order:
 #   1. Blind (default): estimate PSF from first TIFF via chunked MATLAB deconvblind,
-#      merge per-chunk estimates with median, save as estimated_psf.tif.
+#      merge per-chunk estimates with SNR weighting, save as estimated_psf.tif.
 #   2. No-blind (--no_blind): generate a theoretical Gibson-Lanni PSF from
 #      optical parameters.  All optical params are optional with defaults.
 #
 # Deconvolution:
 #   pycudadecon (TemporaryOTF + RLContext) processes each TIFF as full-Z
 #   XY chunks using map_overlap.  The requested chunk_xy is treated as the
-#   maximum CUDA input tile size after overlap is added.
+#   core tile size; <=0 auto-sizes from available VRAM.
 
 import argparse
 import time
@@ -20,9 +20,14 @@ from pathlib import Path
 import dask.array as da
 import numpy as np
 from pycudadecon import TemporaryOTF, RLContext, rl_decon
-from tifffile import imread, imwrite
+from tifffile import imwrite
 
-from psf_estimation import estimate_psf_from_chunks, generate_theoretical_psf
+from psf_estimation import (
+    estimate_psf_from_chunks,
+    generate_theoretical_psf,
+    open_tiff_memmap,
+    resolve_chunk_xy,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -93,48 +98,10 @@ def _decon_chunk(
 # Per-TIFF deconvolution
 # ---------------------------------------------------------------------------
 
-def _core_chunk_size(max_chunk_xy: int, overlap_xy: int) -> int:
-    core = max_chunk_xy - (2 * overlap_xy)
-    if core <= 0:
-        raise ValueError(
-            f"chunk_xy ({max_chunk_xy}) must be greater than 2 * overlap_xy "
-            f"({2 * overlap_xy})"
-        )
-    return core
-
-
-def _pad_xy_to_multiple(
-    volume: np.ndarray,
-    multiple: int,
-) -> tuple[np.ndarray, tuple[slice, slice, slice], tuple[int, int, int, int]]:
-    """Reflect-pad Y/X so both axes are exact multiples of `multiple`."""
-    if multiple <= 0:
-        raise ValueError(f"chunk_xy must be positive, got {multiple}")
-
-    _, ny, nx = volume.shape
-    pad_y = (-ny) % multiple
-    pad_x = (-nx) % multiple
-
-    pad_y_before = pad_y // 2
-    pad_y_after = pad_y - pad_y_before
-    pad_x_before = pad_x // 2
-    pad_x_after = pad_x - pad_x_before
-
-    crop = (
-        slice(None),
-        slice(pad_y_before, pad_y_before + ny),
-        slice(pad_x_before, pad_x_before + nx),
-    )
-
-    if pad_y == 0 and pad_x == 0:
-        return volume, crop, (0, 0, 0, 0)
-
-    padded = np.pad(
-        volume,
-        pad_width=((0, 0), (pad_y_before, pad_y_after), (pad_x_before, pad_x_after)),
-        mode="reflect",
-    )
-    return padded, crop, (pad_y_before, pad_y_after, pad_x_before, pad_x_after)
+def _psf_overlap_xy(psf: np.ndarray) -> int:
+    """Use the PSF support as the minimum XY halo needed at chunk boundaries."""
+    psf_xy = max(psf.shape[-2:])
+    return max(16, int(np.ceil(psf_xy / 2)))
 
 
 def deconvolve_tiff(
@@ -142,45 +109,52 @@ def deconvolve_tiff(
     psf: np.ndarray,
     n_iters: int,
     dz: float,
-    chunk_xy: int = 256,
+    chunk_xy: int = 0,
+    vram_gb: float | None = None,
+    decon_workers: int = 1,
 ) -> np.ndarray:
     """
     Deconvolve a single TIFF using the supplied PSF.
 
-    Chunks are full-Z XY tiles with XY overlap so tile boundaries are
-    invisible in the merged output.  Z is never split.  `chunk_xy` is the
-    maximum overlapped CUDA input tile size; the Dask core chunk is smaller.
+    Chunks are full-Z XY tiles with PSF-dependent XY overlap so tile boundaries
+    are invisible in the merged output.  Z is never split.  `chunk_xy` is the
+    core tile size; <=0 chooses a VRAM-aware size.
     """
-    volume = imread(str(image_path))
+    volume = open_tiff_memmap(image_path)
     if volume.ndim != 3:
         raise ValueError(f"Expected 3-D volume, got shape {volume.shape}")
 
-    overlap_xy = 32
-    core_chunk_xy = _core_chunk_size(chunk_xy, overlap_xy)
-
     original_shape = volume.shape
-    padded_volume, crop, pad = _pad_xy_to_multiple(volume, core_chunk_xy)
-    if padded_volume is not volume:
-        del volume
+    overlap_xy = _psf_overlap_xy(psf)
+    overlap_xy = min(overlap_xy, max(1, (min(volume.shape[1:]) - 1) // 2))
+    decon_workers = max(1, decon_workers)
+    core_chunk_xy = resolve_chunk_xy(
+        chunk_xy,
+        volume.shape,
+        volume.dtype,
+        overlap_xy=overlap_xy,
+        vram_gb=vram_gb,
+        workers=decon_workers,
+        min_xy=max(128, overlap_xy * 2),
+    )
+    if core_chunk_xy <= 0:
+        raise ValueError(f"Resolved decon chunk size must be positive, got {core_chunk_xy}")
 
-    nz, padded_y, padded_x = padded_volume.shape
-    lazy = da.from_array(padded_volume, chunks=(nz, core_chunk_xy, core_chunk_xy))
+    nz, ny, nx = volume.shape
+    lazy = da.from_array(
+        volume,
+        chunks=(nz, core_chunk_xy, core_chunk_xy),
+        asarray=False,
+        lock=False,
+    )
     total_chunks = int(np.prod(lazy.numblocks))
 
     print(f"  Deconvolving {image_path.name}  shape={original_shape}", flush=True)
-    if padded_volume.shape != original_shape:
-        print(
-            f"  XY padded for chunking: padded_shape={padded_volume.shape}, "
-            f"pad_y=({pad[0]}, {pad[1]}), pad_x=({pad[2]}, {pad[3]}), "
-            f"crop_back_to={original_shape}",
-            flush=True,
-        )
     print(
         f"  Deconvolution chunks: total={total_chunks}, "
         f"core_chunk_shape=(z={nz}, y={core_chunk_xy}, x={core_chunk_xy}), "
-        f"overlap_xy={overlap_xy}, max_cuda_chunk_xy={chunk_xy}, "
-        f"padded_xy=({padded_y}, {padded_x}), "
-        f"iterations_per_chunk={n_iters}",
+        f"psf_overlap_xy={overlap_xy}, image_xy=({ny}, {nx}), "
+        f"iterations_per_chunk={n_iters}, workers={decon_workers}",
         flush=True,
     )
 
@@ -195,7 +169,8 @@ def deconvolve_tiff(
             n_iters=n_iters,
             total_chunks=total_chunks,
         )
-        output = processed[crop].compute(scheduler="single-threaded")
+        scheduler = "threads" if decon_workers > 1 else "single-threaded"
+        output = processed.compute(scheduler=scheduler, num_workers=decon_workers)
 
     return output
 
@@ -220,12 +195,24 @@ def main() -> None:
     # Blind estimation options (only used when --no_blind is NOT set)
     parser.add_argument("--blind_iters", type=int, default=10,
                         help="deconvblind iterations per chunk during PSF estimation.")
-    parser.add_argument("--chunk_xy",    type=int, default=256,
-                        help="XY tile size (pixels) for blind PSF estimation.")
-    parser.add_argument("--decon_chunk_xy", type=int, default=256,
-                        help="Maximum overlapped XY tile size sent to CUDA deconvolution.")
+    parser.add_argument("--chunk_xy",    type=int, default=0,
+                        help="XY tile size for blind PSF estimation. <=0 auto-sizes from VRAM.")
+    parser.add_argument("--decon_chunk_xy", type=int, default=0,
+                        help="Core XY tile size for CUDA deconvolution. <=0 auto-sizes from VRAM.")
     parser.add_argument("--pad_xy",      type=int, default=32,
-                        help="XY reflect-padding per edge added to each chunk before deconvblind (pixels).")
+                        help="XY halo per edge added to each blind PSF chunk (pixels).")
+    parser.add_argument("--blind_workers", type=int, default=0,
+                        help="Concurrent MATLAB deconvblind chunks. <=0 uses a bounded auto value.")
+    parser.add_argument("--prefetch_chunks", type=int, default=0,
+                        help="Number of PSF tiles to keep submitted/read ahead. <=0 uses 2x workers.")
+    parser.add_argument("--decon_workers", type=int, default=1,
+                        help="Dask workers for CUDA deconvolution chunks.")
+    parser.add_argument("--vram_gb", type=float, default=None,
+                        help="Override detected free VRAM in GiB for auto chunk sizing.")
+    parser.add_argument("--cache_dir", default=None,
+                        help="Directory for cached blind PSF estimates.")
+    parser.add_argument("--no_psf_cache", action="store_true",
+                        help="Disable reuse of cached blind PSF estimates.")
 
     # Deconvolution options
     parser.add_argument("--iter",       type=int,   default=10,
@@ -297,6 +284,11 @@ def main() -> None:
             chunk_xy=args.chunk_xy,
             pad_xy=args.pad_xy,
             script_dir=args.script_dir,
+            max_workers=args.blind_workers,
+            prefetch_chunks=args.prefetch_chunks,
+            vram_gb=args.vram_gb,
+            cache_dir=args.cache_dir,
+            use_cache=not args.no_psf_cache,
         )
         psf_save_path = image_dir / "estimated_psf.tif"
         imwrite(str(psf_save_path), psf)
@@ -314,6 +306,8 @@ def main() -> None:
             n_iters=args.iter,
             dz=args.dz,
             chunk_xy=args.decon_chunk_xy,
+            vram_gb=args.vram_gb,
+            decon_workers=args.decon_workers,
         )
 
         stem = tiff_path.name.replace(".tiff", "").replace(".tif", "")

@@ -1,25 +1,33 @@
 # psf_estimation.py
-# Blind PSF estimation via chunked MATLAB deconvblind + median merge.
+# Blind PSF estimation via chunked MATLAB deconvblind + weighted merge.
 #
 # Workflow:
-#   Load the first deskewed TIFF.
-#   Dask splits it into (nz, chunk_xy, chunk_xy) tiles with full Z, 256x256 XY.
-#   Each tile is written to a temp TIFF and sent to MATLAB deconvblind.
+#   Memory-map the first deskewed TIFF.
+#   Split it into full-Z XY tiles sized from available VRAM unless overridden.
+#   Tiles are read ahead, written to temp TIFFs, and sent to MATLAB deconvblind.
 #   MATLAB writes back an estimated PSF TIFF per tile.
-#   Python collects all per-tile PSFs and returns np.median across them.
+#   Python collects all per-tile PSFs and returns an SNR-weighted PSF merge.
 #
 # The returned PSF is float32, normalised to sum=1, and saved as estimated_psf.tif
 # next to the input image so pycudadecon can pick it up via TemporaryOTF.
 
 import argparse
+import concurrent.futures as futures
+import hashlib
+import json
+import math
+import os
 import subprocess
 import tempfile
 import sys
+import threading
+import time
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 import psfmodels as pm
-from tifffile import imread, imwrite
+from tifffile import TiffFile, imread, imwrite, memmap as tiff_memmap
 
 
 # ---------------------------------------------------------------------------
@@ -66,6 +74,124 @@ def generate_theoretical_psf(
 # ---------------------------------------------------------------------------
 # Per-chunk blind estimation via MATLAB deconvblind
 # ---------------------------------------------------------------------------
+
+def _normalise_psf(psf: np.ndarray) -> np.ndarray:
+    psf = np.nan_to_num(psf.astype(np.float32, copy=False), nan=0.0, posinf=0.0, neginf=0.0)
+    psf = np.clip(psf, 0, None)
+    total = float(psf.sum())
+    if total > 0:
+        psf = psf / total
+    return psf.astype(np.float32, copy=False)
+
+
+def open_tiff_memmap(path: str | Path) -> np.ndarray:
+    """
+    Return a read-only array-like TIFF volume without forcing a full RAM load.
+
+    `tifffile.memmap` maps compatible contiguous TIFF data directly.  Some TIFFs
+    cannot be directly memory-mapped; for those, tifffile can materialise a
+    temporary memmap via `asarray(out="memmap")`, which still keeps downstream
+    chunking bounded instead of holding the whole image as an ndarray.
+    """
+    path = Path(path)
+    try:
+        return tiff_memmap(str(path), mode="r")
+    except Exception:
+        with TiffFile(str(path)) as tif:
+            return tif.asarray(out="memmap")
+
+
+def detect_vram_bytes() -> int | None:
+    """Best-effort free VRAM query using nvidia-smi."""
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=memory.free",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+
+    if result.returncode != 0:
+        return None
+
+    free_mb = []
+    for line in result.stdout.splitlines():
+        try:
+            free_mb.append(int(line.strip().split()[0]))
+        except (IndexError, ValueError):
+            continue
+    if not free_mb:
+        return None
+    return min(free_mb) * 1024 * 1024
+
+
+def resolve_chunk_xy(
+    requested_xy: int,
+    volume_shape: tuple[int, int, int],
+    dtype: np.dtype,
+    overlap_xy: int = 0,
+    vram_gb: float | None = None,
+    workers: int = 1,
+    safety_fraction: float = 0.55,
+    memory_multiplier: float = 18.0,
+    min_xy: int = 128,
+    max_xy: int | None = None,
+) -> int:
+    """
+    Resolve an XY chunk size.  Positive `requested_xy` is treated as an explicit
+    override; zero or negative values trigger a VRAM-aware estimate.
+    """
+    if requested_xy > 0:
+        return requested_xy
+
+    nz, ny, nx = volume_shape
+    max_xy = max_xy or min(ny, nx)
+    vram_bytes = int(vram_gb * (1024 ** 3)) if vram_gb and vram_gb > 0 else detect_vram_bytes()
+    if not vram_bytes:
+        return min(512, max_xy)
+
+    workers = max(1, workers)
+    bytes_per_voxel = np.dtype(dtype).itemsize
+    usable = vram_bytes * safety_fraction / workers
+    denom = max(1, nz) * bytes_per_voxel * memory_multiplier
+    overlapped_xy = int(math.sqrt(max(1, usable / denom)))
+    core_xy = max(min_xy, overlapped_xy - (2 * overlap_xy))
+    core_xy = min(core_xy, max_xy)
+    aligned = max(min_xy, (core_xy // 32) * 32)
+    return max(32, min(aligned, max_xy))
+
+
+def _psf_cache_key(
+    image_path: Path,
+    psf_seed: np.ndarray,
+    n_iters: int,
+    chunk_xy: int,
+    pad_xy: int,
+    script_dir: Path,
+    merge_mode: str,
+) -> str:
+    stat = image_path.stat()
+    payload = {
+        "image": str(image_path.resolve()),
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+        "seed_shape": psf_seed.shape,
+        "seed_sha256": hashlib.sha256(np.ascontiguousarray(psf_seed).view(np.uint8)).hexdigest(),
+        "n_iters": n_iters,
+        "chunk_xy": chunk_xy,
+        "pad_xy": pad_xy,
+        "script_dir": str(script_dir.resolve()),
+        "merge_mode": merge_mode,
+        "version": 2,
+    }
+    encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:20]
 
 def _write_matlab_stack(array: np.ndarray, path: Path, scale_float: bool = False) -> None:
     """Write a stack in a TIFF format that MATLAB's Tiff reader handles reliably."""
@@ -128,6 +254,139 @@ def _run_matlab_deconvblind(
 # Main estimation entry point
 # ---------------------------------------------------------------------------
 
+def _tile_origins(ny: int, nx: int, chunk_xy: int) -> list[tuple[int, int, int, int]]:
+    min_tile = max(1, chunk_xy // 2)
+    origins = []
+    for y0 in range(0, ny, chunk_xy):
+        for x0 in range(0, nx, chunk_xy):
+            y1 = min(y0 + chunk_xy, ny)
+            x1 = min(x0 + chunk_xy, nx)
+            if (y1 - y0) >= min_tile and (x1 - x0) >= min_tile:
+                origins.append((y0, x0, y1, x1))
+    return origins
+
+
+def _extract_tile_with_halo(
+    volume: np.ndarray,
+    y0: int,
+    x0: int,
+    y1: int,
+    x1: int,
+    halo_xy: int,
+) -> np.ndarray:
+    _, ny, nx = volume.shape
+    read_y0 = max(0, y0 - halo_xy)
+    read_y1 = min(ny, y1 + halo_xy)
+    read_x0 = max(0, x0 - halo_xy)
+    read_x1 = min(nx, x1 + halo_xy)
+
+    chunk = np.asarray(volume[:, read_y0:read_y1, read_x0:read_x1])
+
+    before_y = read_y0 - (y0 - halo_xy)
+    after_y = (y1 + halo_xy) - read_y1
+    before_x = read_x0 - (x0 - halo_xy)
+    after_x = (x1 + halo_xy) - read_x1
+    if before_y or after_y or before_x or after_x:
+        chunk = np.pad(
+            chunk,
+            pad_width=((0, 0), (before_y, after_y), (before_x, after_x)),
+            mode="reflect",
+        )
+    return chunk
+
+
+def _snr_weight(core: np.ndarray) -> float:
+    sample = np.asarray(core, dtype=np.float32)
+    if sample.size == 0:
+        return 0.0
+    p50, p90, p99 = np.percentile(sample, [50, 90, 99])
+    noise_region = sample[sample <= p90]
+    if noise_region.size == 0:
+        noise_region = sample
+    mad = np.median(np.abs(noise_region - np.median(noise_region)))
+    noise = max(1.4826 * float(mad), float(np.std(noise_region)), 1.0)
+    snr = max(0.0, float(p99 - p50)) / noise
+    return max(1e-3, snr * snr)
+
+
+def _format_seconds(seconds: float) -> str:
+    return f"{seconds:.2f}s"
+
+
+def _estimate_one_tile(
+    idx: int,
+    total_tiles: int,
+    volume: np.ndarray,
+    tile: tuple[int, int, int, int],
+    psf_seed: np.ndarray,
+    pad_xy: int,
+    n_iters: int,
+    script_dir: Path,
+    tmpdir: Path,
+    matlab_lock: threading.Semaphore,
+) -> tuple[int, np.ndarray | None, float, str | None]:
+    chunk_start = time.perf_counter()
+    y0, x0, y1, x1 = tile
+    core = np.asarray(volume[:, y0:y1, x0:x1])
+    weight = _snr_weight(core)
+    chunk = _extract_tile_with_halo(volume, y0, x0, y1, x1, pad_xy)
+    read_elapsed = time.perf_counter() - chunk_start
+
+    chunk_path = tmpdir / f"chunk_{idx:04d}.tif"
+    seed_path = tmpdir / f"seed_{idx:04d}.tif"
+    psf_out_path = tmpdir / f"psf_out_{idx:04d}.tif"
+    write_start = time.perf_counter()
+    _write_chunk(chunk, chunk_path)
+    del chunk
+    write_elapsed = time.perf_counter() - write_start
+
+    try:
+        matlab_wait_start = time.perf_counter()
+        with matlab_lock:
+            matlab_wait_elapsed = time.perf_counter() - matlab_wait_start
+            matlab_start = time.perf_counter()
+            _run_matlab_deconvblind(
+                chunk_path,
+                psf_seed,
+                seed_path,
+                psf_out_path,
+                n_iters,
+                script_dir,
+            )
+            matlab_elapsed = time.perf_counter() - matlab_start
+    except RuntimeError as exc:
+        return idx, None, weight, str(exc)
+
+    if not psf_out_path.exists():
+        return idx, None, weight, "MATLAB produced no PSF output"
+
+    output_read_start = time.perf_counter()
+    psf_chunk = imread(str(psf_out_path)).astype(np.float32)
+    output_read_elapsed = time.perf_counter() - output_read_start
+    if psf_chunk.shape != psf_seed.shape:
+        return (
+            idx,
+            None,
+            weight,
+            f"PSF shape {psf_chunk.shape} != seed shape {psf_seed.shape}",
+        )
+
+    total_elapsed = time.perf_counter() - chunk_start
+    completed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(
+        f"  Blind chunk {idx + 1}/{total_tiles} completed at {completed_at}: "
+        f"tile=({y0}:{y1}, {x0}:{x1}), "
+        f"snr_weight={weight:.3g}, "
+        f"read={_format_seconds(read_elapsed)}, "
+        f"write={_format_seconds(write_elapsed)}, "
+        f"matlab_wait={_format_seconds(matlab_wait_elapsed)}, "
+        f"matlab={_format_seconds(matlab_elapsed)}, "
+        f"output_read={_format_seconds(output_read_elapsed)}, "
+        f"total={_format_seconds(total_elapsed)}",
+        flush=True,
+    )
+    return idx, _normalise_psf(psf_chunk), weight, None
+
 def estimate_psf_from_chunks(
     image_path: str | Path,
     psf_seed: np.ndarray,
@@ -135,10 +394,15 @@ def estimate_psf_from_chunks(
     chunk_xy: int = 256,
     pad_xy: int = 32,
     script_dir: str | Path | None = None,
+    max_workers: int = 0,
+    prefetch_chunks: int = 0,
+    vram_gb: float | None = None,
+    cache_dir: str | Path | None = None,
+    use_cache: bool = True,
 ) -> np.ndarray:
     """
     Estimate a PSF by running MATLAB deconvblind on spatial XY chunks of the
-    first deskewed TIFF and merging the per-chunk estimates with a median.
+    first deskewed TIFF and merging per-chunk estimates by SNR-weighted mean.
 
     Parameters
     ----------
@@ -146,11 +410,9 @@ def estimate_psf_from_chunks(
     psf_seed    : initial PSF guess, float32 numpy array (nz_psf, ny_psf, nx_psf).
                   Typically the output of generate_theoretical_psf().
     n_iters     : number of deconvblind iterations per chunk.
-    chunk_xy    : XY tile size in pixels (256 for ~4 GB volumes).
-    pad_xy      : pixels of reflect padding added to each XY edge before
-                  deconvblind to suppress edge ringing.  The padding is applied
-                  to the image chunk only — deconvblind always returns a PSF
-                  the same shape as the seed, so no crop is needed afterwards.
+    chunk_xy    : XY tile size.  <= 0 chooses a VRAM-aware size.
+    pad_xy      : XY halo per edge before deconvblind. Interior tiles include
+                  real neighboring pixels; only image borders are reflect-padded.
     script_dir  : directory containing readtiffstack.m / writetiffstack.m.
                   Defaults to the directory of this script.
 
@@ -161,86 +423,94 @@ def estimate_psf_from_chunks(
     image_path = Path(image_path)
     script_dir = Path(script_dir) if script_dir else Path(__file__).parent
 
-    print(f"Loading {image_path} for PSF estimation...", flush=True)
-    volume = imread(str(image_path))  # (nz, ny, nx)
+    print(f"Memory-mapping {image_path} for PSF estimation...", flush=True)
+    volume = open_tiff_memmap(image_path)  # (nz, ny, nx)
     if volume.ndim != 3:
         raise ValueError(f"Expected a 3-D volume, got shape {volume.shape}")
 
     nz, ny, nx = volume.shape
-    print(f"  Volume shape: {volume.shape}", flush=True)
+    max_workers = max_workers if max_workers > 0 else max(1, min(4, os.cpu_count() or 1))
+    chunk_xy = resolve_chunk_xy(
+        chunk_xy,
+        volume.shape,
+        volume.dtype,
+        overlap_xy=pad_xy,
+        vram_gb=vram_gb,
+        workers=max_workers,
+        min_xy=max(128, psf_seed.shape[-1]),
+    )
 
-    # Build list of (y_start, x_start) tile origins, skipping tiles that are
-    # too small to produce a reliable PSF estimate.
-    min_tile = chunk_xy // 2
-    tile_origins = []
-    for y0 in range(0, ny, chunk_xy):
-        for x0 in range(0, nx, chunk_xy):
-            y1 = min(y0 + chunk_xy, ny)
-            x1 = min(x0 + chunk_xy, nx)
-            if (y1 - y0) >= min_tile and (x1 - x0) >= min_tile:
-                tile_origins.append((y0, x0, y1, x1))
+    print(f"  Volume shape: {volume.shape}; resolved_chunk_xy={chunk_xy}", flush=True)
+
+    cache_root = Path(cache_dir) if cache_dir else image_path.parent / ".psf_cache"
+    cache_key = _psf_cache_key(
+        image_path, psf_seed, n_iters, chunk_xy, pad_xy, script_dir, "snr_weighted_mean"
+    )
+    cache_path = cache_root / f"estimated_psf_{cache_key}.tif"
+    if use_cache and cache_path.exists():
+        print(f"Using cached PSF estimate: {cache_path}", flush=True)
+        return _normalise_psf(imread(str(cache_path)))
+
+    tile_origins = _tile_origins(ny, nx, chunk_xy)
 
     print(f"  Processing {len(tile_origins)} chunk(s) of size "
-          f"(nz={nz}, xy≤{chunk_xy}, pad={pad_xy})...", flush=True)
+          f"(nz={nz}, xy<={chunk_xy}, halo={pad_xy}, workers={max_workers})...",
+          flush=True)
 
-    psf_estimates = []
+    psf_estimates: list[np.ndarray] = []
+    psf_weights: list[float] = []
     failed_chunks = 0
+    prefetch_chunks = prefetch_chunks if prefetch_chunks > 0 else max_workers * 2
 
     with tempfile.TemporaryDirectory(prefix="psf_est_") as tmpdir:
         tmpdir = Path(tmpdir)
+        matlab_slots = threading.Semaphore(max_workers)
+        next_idx = 0
+        pending: set[futures.Future] = set()
 
-        for idx, (y0, x0, y1, x1) in enumerate(tile_origins):
-            chunk = volume[:, y0:y1, x0:x1]
-
-            # Reflect-pad in XY to suppress edge ringing during deconvblind.
-            # Z is full-depth so no padding needed there.
-            if pad_xy > 0:
-                chunk = np.pad(
-                    chunk,
-                    pad_width=((0, 0), (pad_xy, pad_xy), (pad_xy, pad_xy)),
-                    mode="reflect",
-                )
-
-            chunk_path      = tmpdir / f"chunk_{idx:04d}.tif"
-            seed_path       = tmpdir / f"seed_{idx:04d}.tif"
-            psf_out_path    = tmpdir / f"psf_out_{idx:04d}.tif"
-
-            _write_chunk(chunk, chunk_path)
-
-            try:
-                _run_matlab_deconvblind(
-                    chunk_path, psf_seed, seed_path, psf_out_path,
-                    n_iters, script_dir,
-                )
-            except RuntimeError as exc:
-                failed_chunks += 1
-                message = str(exc)
-                if "initial PSF must have at least one non-zero element" in message:
-                    raise RuntimeError(
-                        "MATLAB read the PSF seed as all zeros. "
-                        "The seed TIFF writer is incompatible with MATLAB."
-                    ) from exc
-                if failed_chunks >= 3 and not psf_estimates:
-                    raise RuntimeError(
-                        "First three chunks failed during PSF estimation; "
-                        "aborting instead of submitting every tile to MATLAB."
-                    ) from exc
-                print(f"  WARNING: chunk {idx} failed, skipping. {exc}", flush=True)
-                continue
-
-            if psf_out_path.exists():
-                psf_chunk = imread(str(psf_out_path)).astype(np.float32)
-                # Resize to match seed shape if MATLAB padded differently
-                if psf_chunk.shape != psf_seed.shape:
-                    print(
-                        f"  WARNING: chunk {idx} PSF shape {psf_chunk.shape} "
-                        f"!= seed shape {psf_seed.shape}, skipping.", flush=True
+        with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            while next_idx < len(tile_origins) or pending:
+                while next_idx < len(tile_origins) and len(pending) < prefetch_chunks:
+                    pending.add(
+                        executor.submit(
+                            _estimate_one_tile,
+                            next_idx,
+                            len(tile_origins),
+                            volume,
+                            tile_origins[next_idx],
+                            psf_seed,
+                            pad_xy,
+                            n_iters,
+                            script_dir,
+                            tmpdir,
+                            matlab_slots,
+                        )
                     )
-                    continue
-                psf_estimates.append(psf_chunk)
-                print(f"  Chunk {idx + 1}/{len(tile_origins)} done.", flush=True)
-            else:
-                print(f"  WARNING: no PSF output for chunk {idx}, skipping.", flush=True)
+                    next_idx += 1
+
+                done, pending = futures.wait(
+                    pending,
+                    return_when=futures.FIRST_COMPLETED,
+                )
+                for future in done:
+                    idx, psf_chunk, weight, error = future.result()
+                    if error:
+                        failed_chunks += 1
+                        if "initial PSF must have at least one non-zero element" in error:
+                            raise RuntimeError(
+                                "MATLAB read the PSF seed as all zeros. "
+                                "The seed TIFF writer is incompatible with MATLAB."
+                            )
+                        if failed_chunks >= 3 and not psf_estimates:
+                            raise RuntimeError(
+                                "First three chunks failed during PSF estimation; "
+                                "aborting instead of submitting every tile to MATLAB."
+                            )
+                        print(f"  WARNING: chunk {idx} failed, skipping. {error}", flush=True)
+                        continue
+                    if psf_chunk is not None:
+                        psf_estimates.append(psf_chunk)
+                        psf_weights.append(weight)
 
     if not psf_estimates:
         raise RuntimeError(
@@ -248,13 +518,18 @@ def estimate_psf_from_chunks(
             "Check MATLAB logs above and ensure deconvblind is available."
         )
 
-    print(f"Merging {len(psf_estimates)} PSF estimate(s) via median...", flush=True)
-    stack = np.stack(psf_estimates, axis=0)        # (n_chunks, nz, ny, nx)
-    merged = np.median(stack, axis=0).astype(np.float32)
+    print(f"Merging {len(psf_estimates)} PSF estimate(s) via SNR-weighted mean...", flush=True)
+    stack = np.stack(psf_estimates, axis=0)
+    weights = np.asarray(psf_weights, dtype=np.float32)
+    weights = np.clip(weights, 1e-3, None)
+    weights = weights / weights.sum()
+    merged = np.tensordot(weights, stack, axes=(0, 0)).astype(np.float32)
+    merged = _normalise_psf(merged)
 
-    total = merged.sum()
-    if total > 0:
-        merged /= total
+    if use_cache:
+        cache_root.mkdir(parents=True, exist_ok=True)
+        imwrite(str(cache_path), merged)
+        print(f"Cached PSF estimate: {cache_path}", flush=True)
 
     return merged
 
@@ -271,9 +546,20 @@ def main() -> None:
     parser.add_argument("--output_path", required=True,
                         help="Where to save the merged PSF TIFF.")
     parser.add_argument("--n_iters",    type=int,   default=10)
-    parser.add_argument("--chunk_xy",   type=int,   default=256)
+    parser.add_argument("--chunk_xy",   type=int,   default=0,
+                        help="XY tile size. <=0 auto-sizes from available VRAM.")
     parser.add_argument("--pad_xy",     type=int,   default=32,
-                        help="XY reflect-padding per edge before deconvblind (pixels).")
+                        help="XY halo per edge before deconvblind (pixels).")
+    parser.add_argument("--blind_workers", type=int, default=0,
+                        help="Concurrent MATLAB deconvblind chunks. <=0 uses a bounded auto value.")
+    parser.add_argument("--prefetch_chunks", type=int, default=0,
+                        help="Number of PSF tiles to keep submitted/read ahead. <=0 uses 2x workers.")
+    parser.add_argument("--vram_gb", type=float, default=None,
+                        help="Override detected free VRAM in GiB for auto chunk sizing.")
+    parser.add_argument("--cache_dir", default=None,
+                        help="Directory for cached PSF estimates.")
+    parser.add_argument("--no_psf_cache", action="store_true",
+                        help="Disable reuse of cached blind PSF estimates.")
     parser.add_argument("--script_dir", default=str(Path(__file__).parent))
 
     # Optional optical parameters for the PSF seed
@@ -305,6 +591,11 @@ def main() -> None:
         chunk_xy=args.chunk_xy,
         pad_xy=args.pad_xy,
         script_dir=args.script_dir,
+        max_workers=args.blind_workers,
+        prefetch_chunks=args.prefetch_chunks,
+        vram_gb=args.vram_gb,
+        cache_dir=args.cache_dir,
+        use_cache=not args.no_psf_cache,
     )
 
     imwrite(args.output_path, merged_psf)

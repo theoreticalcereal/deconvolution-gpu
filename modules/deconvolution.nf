@@ -31,7 +31,14 @@ process DECON {
     def psf_size_xy_flag = params.psf_size_xy ? "--psf_size_xy ${params.psf_size_xy}" : ""
     def blind_iters_flag = params.blind_iters ? "--blind_iters ${params.blind_iters}" : ""
     def chunk_xy_flag    = params.chunk_xy    ? "--chunk_xy ${params.chunk_xy}"       : ""
+    def decon_chunk_xy_flag = params.decon_chunk_xy ? "--decon_chunk_xy ${params.decon_chunk_xy}" : ""
     def pad_xy_flag      = params.pad_xy      ? "--pad_xy ${params.pad_xy}"           : ""
+    def blind_workers_flag = params.blind_workers ? "--blind_workers ${params.blind_workers}" : ""
+    def prefetch_chunks_flag = params.prefetch_chunks ? "--prefetch_chunks ${params.prefetch_chunks}" : ""
+    def decon_workers_flag = params.decon_workers ? "--decon_workers ${params.decon_workers}" : ""
+    def vram_gb_flag     = params.vram_gb     ? "--vram_gb ${params.vram_gb}"         : ""
+    def cache_dir_flag   = params.psf_cache_dir ? "--cache_dir ${params.psf_cache_dir}" : ""
+    def no_psf_cache_flag = params.no_psf_cache ? "--no_psf_cache"                    : ""
     def no_blind_flag    = params.no_blind    ? "--no_blind"                          : ""
 
     """
@@ -57,7 +64,14 @@ process DECON {
         ${psf_size_xy_flag} \\
         ${blind_iters_flag} \\
         ${chunk_xy_flag} \\
+        ${decon_chunk_xy_flag} \\
         ${pad_xy_flag} \\
+        ${blind_workers_flag} \\
+        ${prefetch_chunks_flag} \\
+        ${decon_workers_flag} \\
+        ${vram_gb_flag} \\
+        ${cache_dir_flag} \\
+        ${no_psf_cache_flag} \\
         ${no_blind_flag}
     """
 }
