@@ -23,6 +23,7 @@ from pycudadecon import TemporaryOTF, RLContext, rl_decon
 from tifffile import imwrite
 
 from psf_estimation import (
+    DEFAULT_SNR_WEIGHT_CAP,
     estimate_psf_from_chunks,
     generate_theoretical_psf,
     open_tiff_memmap,
@@ -99,9 +100,9 @@ def _decon_chunk(
 # ---------------------------------------------------------------------------
 
 def _psf_overlap_xy(psf: np.ndarray) -> int:
-    """Use the PSF support as the minimum XY halo needed at chunk boundaries."""
+    """Use a moderate PSF-support halo at chunk boundaries."""
     psf_xy = max(psf.shape[-2:])
-    return max(16, int(np.ceil(psf_xy / 2)))
+    return min(48, max(16, int(np.ceil(psf_xy / 4))))
 
 
 def deconvolve_tiff(
@@ -112,6 +113,7 @@ def deconvolve_tiff(
     chunk_xy: int = 0,
     vram_gb: float | None = None,
     decon_workers: int = 1,
+    overlap_xy: int = 0,
 ) -> np.ndarray:
     """
     Deconvolve a single TIFF using the supplied PSF.
@@ -125,7 +127,7 @@ def deconvolve_tiff(
         raise ValueError(f"Expected 3-D volume, got shape {volume.shape}")
 
     original_shape = volume.shape
-    overlap_xy = _psf_overlap_xy(psf)
+    overlap_xy = overlap_xy if overlap_xy > 0 else _psf_overlap_xy(psf)
     overlap_xy = min(overlap_xy, max(1, (min(volume.shape[1:]) - 1) // 2))
     decon_workers = max(1, decon_workers)
     core_chunk_xy = resolve_chunk_xy(
@@ -202,11 +204,17 @@ def main() -> None:
     parser.add_argument("--pad_xy",      type=int, default=32,
                         help="XY halo per edge added to each blind PSF chunk (pixels).")
     parser.add_argument("--blind_workers", type=int, default=0,
-                        help="Concurrent MATLAB deconvblind chunks. <=0 uses a bounded auto value.")
+                        help="Concurrent MATLAB deconvblind chunks. <=0 uses CPU affinity, falling back to 32.")
+    parser.add_argument("--matlab_threads", type=int, default=1,
+                        help="Threads per MATLAB deconvblind process; clamped to 1 or 2.")
+    parser.add_argument("--snr_weight_cap", type=float, default=DEFAULT_SNR_WEIGHT_CAP,
+                        help="Maximum per-chunk SNR weight before weighted PSF merge; <=0 disables cap.")
     parser.add_argument("--prefetch_chunks", type=int, default=0,
                         help="Number of PSF tiles to keep submitted/read ahead. <=0 uses 2x workers.")
     parser.add_argument("--decon_workers", type=int, default=1,
                         help="Dask workers for CUDA deconvolution chunks.")
+    parser.add_argument("--overlap_xy", type=int, default=0,
+                        help="Override CUDA decon XY overlap. <=0 uses a capped PSF/4 estimate.")
     parser.add_argument("--vram_gb", type=float, default=None,
                         help="Override detected free VRAM in GiB for auto chunk sizing.")
     parser.add_argument("--cache_dir", default=None,
@@ -289,6 +297,8 @@ def main() -> None:
             vram_gb=args.vram_gb,
             cache_dir=args.cache_dir,
             use_cache=not args.no_psf_cache,
+            matlab_threads=args.matlab_threads,
+            snr_weight_cap=args.snr_weight_cap,
         )
         psf_save_path = image_dir / "estimated_psf.tif"
         imwrite(str(psf_save_path), psf)
@@ -308,6 +318,7 @@ def main() -> None:
             chunk_xy=args.decon_chunk_xy,
             vram_gb=args.vram_gb,
             decon_workers=args.decon_workers,
+            overlap_xy=args.overlap_xy,
         )
 
         stem = tiff_path.name.replace(".tiff", "").replace(".tif", "")

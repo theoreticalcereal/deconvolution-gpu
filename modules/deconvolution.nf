@@ -5,7 +5,7 @@ process DECON {
     publishDir "${params.output_dir}/deconvolved", mode: 'copy'
 
     maxForks 8
-    cpus 4
+    cpus 32
     memory '32 GB'
     clusterOptions '--gres=gpu:1'
 
@@ -34,8 +34,11 @@ process DECON {
     def decon_chunk_xy_flag = params.decon_chunk_xy ? "--decon_chunk_xy ${params.decon_chunk_xy}" : ""
     def pad_xy_flag      = params.pad_xy      ? "--pad_xy ${params.pad_xy}"           : ""
     def blind_workers_flag = params.blind_workers ? "--blind_workers ${params.blind_workers}" : ""
+    def matlab_threads_flag = params.matlab_threads ? "--matlab_threads ${params.matlab_threads}" : ""
+    def snr_weight_cap_flag = params.snr_weight_cap != null ? "--snr_weight_cap ${params.snr_weight_cap}" : ""
     def prefetch_chunks_flag = params.prefetch_chunks ? "--prefetch_chunks ${params.prefetch_chunks}" : ""
     def decon_workers_flag = params.decon_workers ? "--decon_workers ${params.decon_workers}" : ""
+    def overlap_xy_flag  = params.overlap_xy  ? "--overlap_xy ${params.overlap_xy}"   : ""
     def vram_gb_flag     = params.vram_gb     ? "--vram_gb ${params.vram_gb}"         : ""
     def cache_dir_flag   = params.psf_cache_dir ? "--cache_dir ${params.psf_cache_dir}" : ""
     def no_psf_cache_flag = params.no_psf_cache ? "--no_psf_cache"                    : ""
@@ -67,8 +70,11 @@ process DECON {
         ${decon_chunk_xy_flag} \\
         ${pad_xy_flag} \\
         ${blind_workers_flag} \\
+        ${matlab_threads_flag} \\
+        ${snr_weight_cap_flag} \\
         ${prefetch_chunks_flag} \\
         ${decon_workers_flag} \\
+        ${overlap_xy_flag} \\
         ${vram_gb_flag} \\
         ${cache_dir_flag} \\
         ${no_psf_cache_flag} \\

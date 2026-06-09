@@ -14,6 +14,7 @@
 import argparse
 import concurrent.futures as futures
 import hashlib
+import inspect
 import json
 import math
 import os
@@ -29,10 +30,28 @@ import numpy as np
 import psfmodels as pm
 from tifffile import TiffFile, imread, imwrite, memmap as tiff_memmap
 
+DEFAULT_CPU_THREADS = 32
+DEFAULT_SNR_WEIGHT_CAP = 100.0
+
 
 # ---------------------------------------------------------------------------
 # Theoretical PSF (fallback when --no_blind is passed)
 # ---------------------------------------------------------------------------
+
+def _available_cpu_threads(default: int = DEFAULT_CPU_THREADS) -> int:
+    try:
+        return max(1, len(os.sched_getaffinity(0)))
+    except (AttributeError, OSError):
+        pass
+    count = os.cpu_count()
+    return count if count and count > 0 else default
+
+
+def resolve_worker_count(requested_workers: int, default: int = DEFAULT_CPU_THREADS) -> int:
+    if requested_workers > 0:
+        return requested_workers
+    return _available_cpu_threads(default=default)
+
 
 def generate_theoretical_psf(
     na: float = 1.0,
@@ -53,16 +72,24 @@ def generate_theoretical_psf(
     Returns float32 array of shape (psf_size_z, psf_size_xy, psf_size_xy),
     background-subtracted and normalised to sum = 1.
     """
-    psf = pm.make_psf(
-        z=psf_size_z,
-        nx=psf_size_xy,
-        dz=dz,
-        dxy=dxy,
-        NA=na,
-        wvl=wavelength,
-        ni=ni,
-        model="vectorial",
-    ).astype(np.float32)
+    requested_kwargs = {
+        "z": psf_size_z,
+        "nx": psf_size_xy,
+        "dz": dz,
+        "dxy": dxy,
+        "NA": na,
+        "wvl": wavelength,
+        "ni": ni,
+        "model": "vectorial",
+    }
+    signature = inspect.signature(pm.make_psf)
+    missing = [name for name in requested_kwargs if name not in signature.parameters]
+    if missing:
+        raise RuntimeError(
+            "psfmodels.make_psf API mismatch; missing expected parameter(s): "
+            + ", ".join(missing)
+        )
+    psf = pm.make_psf(**requested_kwargs).astype(np.float32)
 
     psf = np.maximum(psf - background, 0)
     total = psf.sum()
@@ -175,6 +202,7 @@ def _psf_cache_key(
     pad_xy: int,
     script_dir: Path,
     merge_mode: str,
+    snr_weight_cap: float,
 ) -> str:
     stat = image_path.stat()
     payload = {
@@ -188,6 +216,7 @@ def _psf_cache_key(
         "pad_xy": pad_xy,
         "script_dir": str(script_dir.resolve()),
         "merge_mode": merge_mode,
+        "snr_weight_cap": snr_weight_cap,
         "version": 2,
     }
     encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
@@ -218,6 +247,7 @@ def _run_matlab_deconvblind(
     output_psf_path: Path,
     n_iters: int,
     script_dir: Path,
+    matlab_threads: int,
 ) -> None:
     """
     Call MATLAB deconvblind on one chunk.  The script writes the recovered PSF
@@ -227,8 +257,11 @@ def _run_matlab_deconvblind(
     """
     _write_matlab_stack(psf_seed, psf_seed_path, scale_float=True)
 
+    matlab_threads = min(2, max(1, matlab_threads))
+    matlab_thread_cmd = f"maxNumCompThreads({matlab_threads}); "
     matlab_cmd = (
         f"addpath('{script_dir}'); "
+        f"{matlab_thread_cmd}"
         f"chunk = single(readtiffstack('{chunk_path}')); "
         f"psf_seed = single(readtiffstack('{psf_seed_path}')); "
         f"psf_seed = psf_seed / sum(psf_seed(:)); "
@@ -237,11 +270,25 @@ def _run_matlab_deconvblind(
         f"psf_est = psf_est / sum(psf_est(:)); "
         f"writetiffstack(psf_est, '{output_psf_path}');"
     )
+    matlab_args = ["matlab"]
+    if matlab_threads == 1:
+        matlab_args.append("-singleCompThread")
+    matlab_args.extend(["-batch", matlab_cmd])
+    env = os.environ.copy()
+    for name in (
+        "OMP_NUM_THREADS",
+        "OMP_THREAD_LIMIT",
+        "MKL_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+    ):
+        env[name] = str(matlab_threads)
 
     result = subprocess.run(
-        ["matlab", "-batch", matlab_cmd],
+        matlab_args,
         capture_output=True,
         text=True,
+        env=env,
     )
     if result.returncode != 0:
         raise RuntimeError(
@@ -295,7 +342,7 @@ def _extract_tile_with_halo(
     return chunk
 
 
-def _snr_weight(core: np.ndarray) -> float:
+def _snr_weight(core: np.ndarray, weight_cap: float = DEFAULT_SNR_WEIGHT_CAP) -> float:
     sample = np.asarray(core, dtype=np.float32)
     if sample.size == 0:
         return 0.0
@@ -306,7 +353,10 @@ def _snr_weight(core: np.ndarray) -> float:
     mad = np.median(np.abs(noise_region - np.median(noise_region)))
     noise = max(1.4826 * float(mad), float(np.std(noise_region)), 1.0)
     snr = max(0.0, float(p99 - p50)) / noise
-    return max(1e-3, snr * snr)
+    weight = max(1e-3, snr * snr)
+    if weight_cap > 0:
+        weight = min(weight, weight_cap)
+    return weight
 
 
 def _format_seconds(seconds: float) -> str:
@@ -324,11 +374,13 @@ def _estimate_one_tile(
     script_dir: Path,
     tmpdir: Path,
     matlab_lock: threading.Semaphore,
+    matlab_threads: int,
+    snr_weight_cap: float,
 ) -> tuple[int, np.ndarray | None, float, str | None]:
     chunk_start = time.perf_counter()
     y0, x0, y1, x1 = tile
     core = np.asarray(volume[:, y0:y1, x0:x1])
-    weight = _snr_weight(core)
+    weight = _snr_weight(core, weight_cap=snr_weight_cap)
     chunk = _extract_tile_with_halo(volume, y0, x0, y1, x1, pad_xy)
     read_elapsed = time.perf_counter() - chunk_start
 
@@ -352,6 +404,7 @@ def _estimate_one_tile(
                 psf_out_path,
                 n_iters,
                 script_dir,
+                matlab_threads,
             )
             matlab_elapsed = time.perf_counter() - matlab_start
     except RuntimeError as exc:
@@ -399,6 +452,8 @@ def estimate_psf_from_chunks(
     vram_gb: float | None = None,
     cache_dir: str | Path | None = None,
     use_cache: bool = True,
+    matlab_threads: int = 1,
+    snr_weight_cap: float = DEFAULT_SNR_WEIGHT_CAP,
 ) -> np.ndarray:
     """
     Estimate a PSF by running MATLAB deconvblind on spatial XY chunks of the
@@ -429,7 +484,9 @@ def estimate_psf_from_chunks(
         raise ValueError(f"Expected a 3-D volume, got shape {volume.shape}")
 
     nz, ny, nx = volume.shape
-    max_workers = max_workers if max_workers > 0 else max(1, min(4, os.cpu_count() or 1))
+    max_workers = resolve_worker_count(max_workers)
+    matlab_threads = min(2, max(1, matlab_threads))
+    snr_weight_cap = max(0.0, snr_weight_cap)
     chunk_xy = resolve_chunk_xy(
         chunk_xy,
         volume.shape,
@@ -444,7 +501,14 @@ def estimate_psf_from_chunks(
 
     cache_root = Path(cache_dir) if cache_dir else image_path.parent / ".psf_cache"
     cache_key = _psf_cache_key(
-        image_path, psf_seed, n_iters, chunk_xy, pad_xy, script_dir, "snr_weighted_mean"
+        image_path,
+        psf_seed,
+        n_iters,
+        chunk_xy,
+        pad_xy,
+        script_dir,
+        "snr_weighted_mean",
+        snr_weight_cap,
     )
     cache_path = cache_root / f"estimated_psf_{cache_key}.tif"
     if use_cache and cache_path.exists():
@@ -454,7 +518,8 @@ def estimate_psf_from_chunks(
     tile_origins = _tile_origins(ny, nx, chunk_xy)
 
     print(f"  Processing {len(tile_origins)} chunk(s) of size "
-          f"(nz={nz}, xy<={chunk_xy}, halo={pad_xy}, workers={max_workers})...",
+          f"(nz={nz}, xy<={chunk_xy}, halo={pad_xy}, workers={max_workers}, "
+          f"matlab_threads={matlab_threads}, snr_weight_cap={snr_weight_cap:g})...",
           flush=True)
 
     psf_estimates: list[np.ndarray] = []
@@ -484,6 +549,8 @@ def estimate_psf_from_chunks(
                             script_dir,
                             tmpdir,
                             matlab_slots,
+                            matlab_threads,
+                            snr_weight_cap,
                         )
                     )
                     next_idx += 1
@@ -521,7 +588,8 @@ def estimate_psf_from_chunks(
     print(f"Merging {len(psf_estimates)} PSF estimate(s) via SNR-weighted mean...", flush=True)
     stack = np.stack(psf_estimates, axis=0)
     weights = np.asarray(psf_weights, dtype=np.float32)
-    weights = np.clip(weights, 1e-3, None)
+    max_weight = snr_weight_cap if snr_weight_cap > 0 else None
+    weights = np.clip(weights, 1e-3, max_weight)
     weights = weights / weights.sum()
     merged = np.tensordot(weights, stack, axes=(0, 0)).astype(np.float32)
     merged = _normalise_psf(merged)
@@ -551,7 +619,11 @@ def main() -> None:
     parser.add_argument("--pad_xy",     type=int,   default=32,
                         help="XY halo per edge before deconvblind (pixels).")
     parser.add_argument("--blind_workers", type=int, default=0,
-                        help="Concurrent MATLAB deconvblind chunks. <=0 uses a bounded auto value.")
+                        help="Concurrent MATLAB deconvblind chunks. <=0 uses CPU affinity, falling back to 32.")
+    parser.add_argument("--matlab_threads", type=int, default=1,
+                        help="Threads per MATLAB deconvblind process; clamped to 1 or 2.")
+    parser.add_argument("--snr_weight_cap", type=float, default=DEFAULT_SNR_WEIGHT_CAP,
+                        help="Maximum per-chunk SNR weight before weighted PSF merge; <=0 disables cap.")
     parser.add_argument("--prefetch_chunks", type=int, default=0,
                         help="Number of PSF tiles to keep submitted/read ahead. <=0 uses 2x workers.")
     parser.add_argument("--vram_gb", type=float, default=None,
@@ -596,6 +668,8 @@ def main() -> None:
         vram_gb=args.vram_gb,
         cache_dir=args.cache_dir,
         use_cache=not args.no_psf_cache,
+        matlab_threads=args.matlab_threads,
+        snr_weight_cap=args.snr_weight_cap,
     )
 
     imwrite(args.output_path, merged_psf)
