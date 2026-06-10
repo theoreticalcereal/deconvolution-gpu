@@ -61,7 +61,7 @@ for c = 1:numFolders
     detectedChannels = [];
     detectedTimepoints = [];
     for i = 1:numel(tifFiles)
-        tokens = regexp(tifFiles(i).name, '^CH(\d+)_(\d+)_registered_consistent\.tiff?$', 'tokens', 'once');
+        tokens = regexp(tifFiles(i).name, '^CH(\d+)_(\d+)(?:_registered_consistent)?\.tiff?$', 'tokens', 'once');
         if ~isempty(tokens)
             detectedChannels(end + 1) = str2double(tokens{1}); %#ok<SAGROW>
             detectedTimepoints(end + 1) = str2double(tokens{2}); %#ok<SAGROW>
@@ -69,7 +69,7 @@ for c = 1:numFolders
     end
 
     if isempty(detectedChannels)
-        error('No CH##_######_registered_consistent TIFF files found in %s', inputDir);
+        error('No CH##_###### TIFF files found in %s', inputDir);
     end
 
     if ~exist('ChannelsToProcess', 'var') || isempty(ChannelsToProcess)
@@ -91,12 +91,15 @@ for c = 1:numFolders
             tic;
 
             % Build the expected filename for this channel/timepoint.
-            baseName = sprintf('CH%02d_%06d_registered_consistent', ChannelsToProcess(ch), t);
+            baseName = sprintf('CH%02d_%06d', ChannelsToProcess(ch), t);
+            registeredBaseName = sprintf('%s_registered_consistent', baseName);
 
             % Try both supported extensions.
             candidates = {
                 fullfile(inputDir, [baseName '.tif'])
                 fullfile(inputDir, [baseName '.tiff'])
+                fullfile(inputDir, [registeredBaseName '.tif'])
+                fullfile(inputDir, [registeredBaseName '.tiff'])
             };
 
             filepath = '';

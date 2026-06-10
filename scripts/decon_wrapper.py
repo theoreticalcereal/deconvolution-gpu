@@ -13,6 +13,7 @@
 #   core tile size; <=0 auto-sizes from available VRAM.
 
 import argparse
+import re
 import tempfile
 import time
 from glob import glob
@@ -30,6 +31,7 @@ from psf_estimation import (
     estimate_psf_from_chunks,
     generate_theoretical_psf,
     open_tiff_memmap,
+    resolve_dxy,
     resolve_chunk_xy,
 )
 
@@ -37,6 +39,38 @@ from psf_estimation import (
 # ---------------------------------------------------------------------------
 # Dask worker
 # ---------------------------------------------------------------------------
+
+CHANNEL_TIMEPOINT_RE = re.compile(r"^CH(?P<channel>\d+)_(?P<timepoint>\d+)(?:_registered_consistent)?$")
+
+
+def _parse_int_filter(value: str | None) -> set[int] | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    tokens = [token for token in re.split(r"[\s,]+", text) if token]
+    return {int(token) for token in tokens}
+
+
+def _filter_tiffs(
+    tiff_list: list[str],
+    channels: set[int] | None,
+    timepoints: set[int] | None,
+) -> list[str]:
+    filtered = []
+    for tiff_path in tiff_list:
+        match = CHANNEL_TIMEPOINT_RE.match(Path(tiff_path).stem)
+        if not match:
+            continue
+        channel = int(match.group("channel"))
+        timepoint = int(match.group("timepoint"))
+        if channels is not None and channel not in channels:
+            continue
+        if timepoints is not None and timepoint not in timepoints:
+            continue
+        filtered.append(tiff_path)
+    return filtered
 
 def _format_seconds(seconds: float) -> str:
     return f"{seconds:.2f}s"
@@ -218,7 +252,11 @@ def main() -> None:
 
     # Required options
     parser.add_argument("--image_path", required=True,
-                        help="Directory containing deskewed CH*_registered_consistent.tif files.")
+                        help="Directory containing deskewed CH*.tif files.")
+    parser.add_argument("--channels", default="",
+                        help="Optional channel filter, e.g. '0', '0 1 2', or '0,1,2'.")
+    parser.add_argument("--timepoints", default="",
+                        help="Optional timepoint filter, e.g. '0', '0 1', or '0,1'.")
 
     # PSF generation mode
     parser.add_argument("--no_blind", action="store_true",
@@ -268,11 +306,37 @@ def main() -> None:
 
     # Optional optical parameters (used for PSF seed / theoretical PSF)
     parser.add_argument("--na",          type=float, default=1.0,
-                        help="Numerical aperture.")
+                        help="Backward-compatible detection numerical aperture.")
+    parser.add_argument("--detection_na", type=float, default=None,
+                        help="Detection objective numerical aperture. Overrides --na when provided.")
+    parser.add_argument("--illumination_na", type=float, default=None,
+                        help="Illumination numerical aperture metadata; not used by psfmodels.")
     parser.add_argument("--wavelength",  type=float, default=0.525,
                         help="Emission wavelength in µm.")
     parser.add_argument("--ni",          type=float, default=1.33,
                         help="Refractive index of immersion medium.")
+    parser.add_argument("--ns",          type=float, default=None,
+                        help="Sample refractive index.")
+    parser.add_argument("--ni0",         type=float, default=None,
+                        help="Design immersion refractive index.")
+    parser.add_argument("--tg",          type=float, default=None,
+                        help="Experimental coverslip thickness in µm.")
+    parser.add_argument("--tg0",         type=float, default=None,
+                        help="Design coverslip thickness in µm.")
+    parser.add_argument("--ng",          type=float, default=None,
+                        help="Experimental coverslip refractive index.")
+    parser.add_argument("--ng0",         type=float, default=None,
+                        help="Design coverslip refractive index.")
+    parser.add_argument("--ti0",         type=float, default=None,
+                        help="Objective working distance in µm.")
+    parser.add_argument("--oversample_factor", type=int, default=3,
+                        help="PSF model oversampling factor.")
+    parser.add_argument("--psf_model", choices=("vectorial", "scalar", "gaussian"), default="vectorial",
+                        help="psfmodels PSF model.")
+    parser.add_argument("--camera_pixel_size", type=float, default=None,
+                        help="Camera pixel size in µm; used to derive dxy when --dxy <= 0.")
+    parser.add_argument("--magnification", type=float, default=None,
+                        help="Total magnification; used to derive dxy when --dxy <= 0.")
     parser.add_argument("--dxy",         type=float, default=0.1,
                         help="Lateral pixel size in µm.")
     parser.add_argument("--dz",          type=float, default=0.3,
@@ -292,26 +356,50 @@ def main() -> None:
 
     # Collect all deskewed TIFFs, sorted so index 0 is deterministic
     tiff_list = sorted(
-        glob(str(image_dir / "CH*_registered_consistent.tif")) +
-        glob(str(image_dir / "CH*_registered_consistent.tiff"))
+        glob(str(image_dir / "CH*.tif")) +
+        glob(str(image_dir / "CH*.tiff"))
     )
+    channels = _parse_int_filter(args.channels)
+    timepoints = _parse_int_filter(args.timepoints)
+    tiff_list = _filter_tiffs(tiff_list, channels, timepoints)
     if not tiff_list:
-        print(f"Error: no CH*_registered_consistent.tif files found in {image_dir}")
+        print(
+            f"Error: no CH*.tif files found in {image_dir} "
+            f"matching channels={args.channels!r}, timepoints={args.timepoints!r}"
+        )
         raise SystemExit(1)
 
-    print(f"Found {len(tiff_list)} TIFF(s) to process.", flush=True)
+    print(
+        f"Found {len(tiff_list)} TIFF(s) to process "
+        f"for channels={args.channels or 'all'}, timepoints={args.timepoints or 'all'}.",
+        flush=True,
+    )
 
     # ------------------------------------------------------------------
     # PSF resolution
     # ------------------------------------------------------------------
 
+    dxy = resolve_dxy(args.dxy, args.camera_pixel_size, args.magnification)
+    detection_na = args.detection_na if args.detection_na is not None else args.na
+
     # Build PSF seed from optical params regardless of mode — used as either
     # the blind-estimation seed or the final theoretical PSF.
     psf_seed = generate_theoretical_psf(
         na=args.na,
+        detection_na=args.detection_na,
+        illumination_na=args.illumination_na,
         wavelength=args.wavelength,
         ni=args.ni,
-        dxy=args.dxy,
+        ns=args.ns,
+        ni0=args.ni0,
+        tg=args.tg,
+        tg0=args.tg0,
+        ng=args.ng,
+        ng0=args.ng0,
+        ti0=args.ti0,
+        oversample_factor=args.oversample_factor,
+        psf_model=args.psf_model,
+        dxy=dxy,
         dz=args.dz,
         psf_size_z=args.psf_size_z,
         psf_size_xy=args.psf_size_xy,
@@ -357,9 +445,9 @@ def main() -> None:
             psf=psf,
             n_iters=args.iter,
             dz=args.dz,
-            dxy=args.dxy,
+            dxy=dxy,
             wavelength=args.wavelength,
-            na=args.na,
+            na=detection_na,
             ni=args.ni,
             chunk_xy=args.decon_chunk_xy,
             vram_gb=args.vram_gb,

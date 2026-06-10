@@ -6,7 +6,15 @@ include { DECON }  from './modules/deconvolution'
 include { PSF_SANITY_CHECK } from './modules/psf_sanity_check'
 
 workflow {
-    if (params.psf_sanity_check && params.psf_sanity_input_dir) {
+    if (params.decon_only) {
+        DECON(
+            params.decon_input_dir ?: params.image_path,
+            params.cell_name,
+            params.background,
+            params.iter,
+            params.output_dir
+        )
+    } else if (params.psf_sanity_check && params.psf_sanity_input_dir) {
         PSF_SANITY_CHECK(
             params.psf_sanity_input_dir,
             params.output_dir

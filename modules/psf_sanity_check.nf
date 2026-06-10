@@ -17,10 +17,23 @@ process PSF_SANITY_CHECK {
 
     script:
     def na_flag          = params.na          ? "--na ${params.na}"                   : ""
+    def detection_na_flag = params.detection_na ? "--detection_na ${params.detection_na}" : ""
+    def illumination_na_flag = params.illumination_na ? "--illumination_na ${params.illumination_na}" : ""
     def wavelength_flag  = params.wavelength  ? "--wavelength ${params.wavelength}"   : ""
     def ni_flag          = params.ni          ? "--ni ${params.ni}"                   : ""
-    def dxy_flag         = params.dxy         ? "--dxy ${params.dxy}"                 : ""
-    def dz_flag          = params.dz          ? "--dz ${params.dz}"                   : ""
+    def ns_flag          = params.ns          ? "--ns ${params.ns}"                   : ""
+    def ni0_flag         = params.ni0         ? "--ni0 ${params.ni0}"                 : ""
+    def tg_flag          = params.tg          ? "--tg ${params.tg}"                   : ""
+    def tg0_flag         = params.tg0         ? "--tg0 ${params.tg0}"                 : ""
+    def ng_flag          = params.ng          ? "--ng ${params.ng}"                   : ""
+    def ng0_flag         = params.ng0         ? "--ng0 ${params.ng0}"                 : ""
+    def ti0_flag         = params.ti0         ? "--ti0 ${params.ti0}"                 : ""
+    def oversample_factor_flag = params.oversample_factor ? "--oversample_factor ${params.oversample_factor}" : ""
+    def psf_model_flag   = params.psf_model   ? "--psf_model ${params.psf_model}"     : ""
+    def camera_pixel_size_flag = params.camera_pixel_size ? "--camera_pixel_size ${params.camera_pixel_size}" : ""
+    def magnification_flag = params.magnification ? "--magnification ${params.magnification}" : ""
+    def dxy_flag         = params.dxy != null ? "--dxy ${params.dxy}"                 : ""
+    def dz_flag          = params.dz != null  ? "--dz ${params.dz}"                   : ""
     def psf_size_z_flag  = params.psf_size_z  ? "--psf_size_z ${params.psf_size_z}"   : ""
     def psf_size_xy_flag = params.psf_size_xy ? "--psf_size_xy ${params.psf_size_xy}" : ""
     def blind_iters_flag = params.blind_iters ? "--blind_iters ${params.blind_iters}" : ""
@@ -47,11 +60,26 @@ process PSF_SANITY_CHECK {
         --image_path "${deskewed_dir}" \\
         --output_dir psf_sanity \\
         --script_dir "${projectDir}/scripts" \\
+        --channels "${params.channels}" \\
+        --timepoints "${params.timepoints}" \\
         ${tiff_index_flag} \\
         ${sanity_xy_flag} \\
         ${na_flag} \\
+        ${detection_na_flag} \\
+        ${illumination_na_flag} \\
         ${wavelength_flag} \\
         ${ni_flag} \\
+        ${ns_flag} \\
+        ${ni0_flag} \\
+        ${tg_flag} \\
+        ${tg0_flag} \\
+        ${ng_flag} \\
+        ${ng0_flag} \\
+        ${ti0_flag} \\
+        ${oversample_factor_flag} \\
+        ${psf_model_flag} \\
+        ${camera_pixel_size_flag} \\
+        ${magnification_flag} \\
         ${dxy_flag} \\
         ${dz_flag} \\
         ${psf_size_z_flag} \\

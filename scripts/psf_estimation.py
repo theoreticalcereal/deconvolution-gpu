@@ -205,8 +205,19 @@ def resolve_blind_worker_count(
 
 def generate_theoretical_psf(
     na: float = 1.0,
+    detection_na: float | None = None,
+    illumination_na: float | None = None,
     wavelength: float = 0.525,      # µm
     ni: float = 1.33,
+    ns: float | None = None,
+    ni0: float | None = None,
+    tg: float | None = None,
+    tg0: float | None = None,
+    ng: float | None = None,
+    ng0: float | None = None,
+    ti0: float | None = None,
+    oversample_factor: int = 3,
+    psf_model: str = "vectorial",
     dxy: float = 0.1,               # µm, lateral pixel size
     dz: float = 0.3,                # µm, axial step
     psf_size_z: int = 61,
@@ -216,22 +227,34 @@ def generate_theoretical_psf(
     """
     Generate a 3-D Gibson-Lanni PSF using psfmodels.
 
-    All parameters are optional; defaults are reasonable for a single-objective
-    light-sheet with water immersion at 525 nm.
+    psfmodels generates the detection PSF.  `illumination_na` is accepted for
+    pipeline metadata, but this scalar/vectorial PSF model does not use it.
 
     Returns float32 array of shape (psf_size_z, psf_size_xy, psf_size_xy),
     background-subtracted and normalised to sum = 1.
     """
+    detection_na = detection_na if detection_na is not None else na
     requested_kwargs = {
         "z": psf_size_z,
         "nx": psf_size_xy,
         "dz": dz,
         "dxy": dxy,
-        "NA": na,
+        "NA": detection_na,
         "wvl": wavelength,
         "ni": ni,
-        "model": "vectorial",
+        "oversample_factor": oversample_factor,
+        "model": psf_model,
     }
+    optional_kwargs = {
+        "ns": ns,
+        "ni0": ni0,
+        "tg": tg,
+        "tg0": tg0,
+        "ng": ng,
+        "ng0": ng0,
+        "ti0": ti0,
+    }
+    requested_kwargs.update({name: value for name, value in optional_kwargs.items() if value is not None})
     signature = inspect.signature(pm.make_psf)
     missing = [name for name in requested_kwargs if name not in signature.parameters]
     if missing:
@@ -246,6 +269,18 @@ def generate_theoretical_psf(
     if total > 0:
         psf /= total
     return psf
+
+
+def resolve_dxy(
+    dxy: float,
+    camera_pixel_size: float | None = None,
+    magnification: float | None = None,
+) -> float:
+    if dxy > 0:
+        return dxy
+    if camera_pixel_size and magnification and camera_pixel_size > 0 and magnification > 0:
+        return camera_pixel_size / magnification
+    raise ValueError("dxy must be > 0, or camera_pixel_size and magnification must be provided")
 
 
 # ---------------------------------------------------------------------------
@@ -900,8 +935,21 @@ def main() -> None:
 
     # Optional optical parameters for the PSF seed
     parser.add_argument("--na",         type=float, default=1.0)
+    parser.add_argument("--detection_na", type=float, default=None)
+    parser.add_argument("--illumination_na", type=float, default=None)
     parser.add_argument("--wavelength", type=float, default=0.525)
     parser.add_argument("--ni",         type=float, default=1.33)
+    parser.add_argument("--ns",         type=float, default=None)
+    parser.add_argument("--ni0",        type=float, default=None)
+    parser.add_argument("--tg",         type=float, default=None)
+    parser.add_argument("--tg0",        type=float, default=None)
+    parser.add_argument("--ng",         type=float, default=None)
+    parser.add_argument("--ng0",        type=float, default=None)
+    parser.add_argument("--ti0",        type=float, default=None)
+    parser.add_argument("--oversample_factor", type=int, default=3)
+    parser.add_argument("--psf_model", choices=("vectorial", "scalar", "gaussian"), default="vectorial")
+    parser.add_argument("--camera_pixel_size", type=float, default=None)
+    parser.add_argument("--magnification", type=float, default=None)
     parser.add_argument("--dxy",        type=float, default=0.1)
     parser.add_argument("--dz",         type=float, default=0.3)
     parser.add_argument("--psf_size_z", type=int,   default=61)
@@ -909,11 +957,23 @@ def main() -> None:
     parser.add_argument("--background", type=float, default=0.0)
     args = parser.parse_args()
 
+    dxy = resolve_dxy(args.dxy, args.camera_pixel_size, args.magnification)
     psf_seed = generate_theoretical_psf(
         na=args.na,
+        detection_na=args.detection_na,
+        illumination_na=args.illumination_na,
         wavelength=args.wavelength,
         ni=args.ni,
-        dxy=args.dxy,
+        ns=args.ns,
+        ni0=args.ni0,
+        tg=args.tg,
+        tg0=args.tg0,
+        ng=args.ng,
+        ng0=args.ng0,
+        ti0=args.ti0,
+        oversample_factor=args.oversample_factor,
+        psf_model=args.psf_model,
+        dxy=dxy,
         dz=args.dz,
         psf_size_z=args.psf_size_z,
         psf_size_xy=args.psf_size_xy,

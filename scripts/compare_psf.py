@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 import tempfile
 from pathlib import Path
 
@@ -13,17 +14,48 @@ from psf_estimation import (
     generate_theoretical_psf,
     estimate_psf_from_chunks,
     open_tiff_memmap,
+    resolve_dxy,
     select_blind_z_window,
 )
 
+CHANNEL_TIMEPOINT_RE = re.compile(r"^CH(?P<channel>\d+)_(?P<timepoint>\d+)(?:_registered_consistent)?$")
 
-def _find_input_tiff(image_dir: Path, index: int) -> Path:
+
+def _parse_int_filter(value: str | None) -> set[int] | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    tokens = [token for token in re.split(r"[\s,]+", text) if token]
+    return {int(token) for token in tokens}
+
+
+def _find_input_tiff(
+    image_dir: Path,
+    index: int,
+    channels: set[int] | None,
+    timepoints: set[int] | None,
+) -> Path:
     tiffs = sorted(
-        list(image_dir.glob("CH*_registered_consistent.tif"))
-        + list(image_dir.glob("CH*_registered_consistent.tiff"))
+        list(image_dir.glob("CH*.tif"))
+        + list(image_dir.glob("CH*.tiff"))
     )
+    filtered = []
+    for tiff in tiffs:
+        match = CHANNEL_TIMEPOINT_RE.match(tiff.stem)
+        if not match:
+            continue
+        channel = int(match.group("channel"))
+        timepoint = int(match.group("timepoint"))
+        if channels is not None and channel not in channels:
+            continue
+        if timepoints is not None and timepoint not in timepoints:
+            continue
+        filtered.append(tiff)
+    tiffs = filtered
     if not tiffs:
-        raise FileNotFoundError(f"No CH*_registered_consistent TIFFs found in {image_dir}")
+        raise FileNotFoundError(f"No matching CH*.tif TIFFs found in {image_dir}")
     if index < 0 or index >= len(tiffs):
         raise IndexError(f"TIFF index {index} out of range for {len(tiffs)} file(s)")
     return tiffs[index]
@@ -222,6 +254,8 @@ def main() -> None:
     parser.add_argument("--image_path", required=True, help="Deskewed Top_shear directory.")
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--script_dir", default=str(Path(__file__).parent))
+    parser.add_argument("--channels", default="")
+    parser.add_argument("--timepoints", default="")
     parser.add_argument("--tiff_index", type=int, default=0)
     parser.add_argument("--sanity_xy", type=int, default=512,
                         help="Center XY crop for sanity check. <=0 uses full XY.")
@@ -238,8 +272,21 @@ def main() -> None:
     parser.add_argument("--prefetch_chunks", type=int, default=0)
     parser.add_argument("--vram_gb", type=float, default=None)
     parser.add_argument("--na", type=float, default=1.0)
+    parser.add_argument("--detection_na", type=float, default=None)
+    parser.add_argument("--illumination_na", type=float, default=None)
     parser.add_argument("--wavelength", type=float, default=0.520)
     parser.add_argument("--ni", type=float, default=1.515)
+    parser.add_argument("--ns", type=float, default=None)
+    parser.add_argument("--ni0", type=float, default=None)
+    parser.add_argument("--tg", type=float, default=None)
+    parser.add_argument("--tg0", type=float, default=None)
+    parser.add_argument("--ng", type=float, default=None)
+    parser.add_argument("--ng0", type=float, default=None)
+    parser.add_argument("--ti0", type=float, default=None)
+    parser.add_argument("--oversample_factor", type=int, default=3)
+    parser.add_argument("--psf_model", choices=("vectorial", "scalar", "gaussian"), default="vectorial")
+    parser.add_argument("--camera_pixel_size", type=float, default=None)
+    parser.add_argument("--magnification", type=float, default=None)
     parser.add_argument("--dxy", type=float, default=0.118)
     parser.add_argument("--dz", type=float, default=0.118)
     parser.add_argument("--psf_size_z", type=int, default=101)
@@ -252,14 +299,28 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     script_dir = Path(args.script_dir)
 
-    input_tiff = _find_input_tiff(image_dir, args.tiff_index)
+    channels = _parse_int_filter(args.channels)
+    timepoints = _parse_int_filter(args.timepoints)
+    input_tiff = _find_input_tiff(image_dir, args.tiff_index, channels, timepoints)
     print(f"Using TIFF for PSF sanity check: {input_tiff}", flush=True)
 
+    dxy = resolve_dxy(args.dxy, args.camera_pixel_size, args.magnification)
     psf_seed = generate_theoretical_psf(
         na=args.na,
+        detection_na=args.detection_na,
+        illumination_na=args.illumination_na,
         wavelength=args.wavelength,
         ni=args.ni,
-        dxy=args.dxy,
+        ns=args.ns,
+        ni0=args.ni0,
+        tg=args.tg,
+        tg0=args.tg0,
+        ng=args.ng,
+        ng0=args.ng0,
+        ti0=args.ti0,
+        oversample_factor=args.oversample_factor,
+        psf_model=args.psf_model,
+        dxy=dxy,
         dz=args.dz,
         psf_size_z=args.psf_size_z,
         psf_size_xy=args.psf_size_xy,
@@ -326,8 +387,9 @@ def main() -> None:
         "blind_z_window": [z_window.start, z_window.stop],
         "blind_z_window_detail": z_detail,
         "parameters": vars(args),
+        "resolved_dxy": dxy,
         "psfs": {
-            name: _psf_stats(name, psf, dxy=args.dxy, dz=args.dz)
+            name: _psf_stats(name, psf, dxy=dxy, dz=args.dz)
             for name, psf in psfs.items()
         },
         "comparisons": {
