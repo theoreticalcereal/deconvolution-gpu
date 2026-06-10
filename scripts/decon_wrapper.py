@@ -43,6 +43,20 @@ from psf_estimation import (
 CHANNEL_TIMEPOINT_RE = re.compile(r"^CH(?P<channel>\d+)_(?P<timepoint>\d+)(?:_registered_consistent)?$")
 
 
+def _write_tiff_near_input_or_cwd(path: Path, data: np.ndarray) -> Path:
+    try:
+        imwrite(str(path), data)
+        return path
+    except OSError as exc:
+        fallback = Path.cwd() / path.name
+        print(
+            f"  WARNING: cannot write {path}: {exc}; writing {fallback} instead",
+            flush=True,
+        )
+        imwrite(str(fallback), data)
+        return fallback
+
+
 def _parse_int_filter(value: str | None) -> set[int] | None:
     if value is None:
         return None
@@ -431,7 +445,7 @@ def main() -> None:
             blind_z_slices=args.blind_z_slices,
         )
         psf_save_path = image_dir / "estimated_psf.tif"
-        imwrite(str(psf_save_path), psf)
+        psf_save_path = _write_tiff_near_input_or_cwd(psf_save_path, psf)
         print(f"Merged PSF saved to {psf_save_path}", flush=True)
 
     # ------------------------------------------------------------------

@@ -38,6 +38,42 @@ DEFAULT_BLIND_Z_SLICES = 128
 DEFAULT_BLIND_CHUNK_XY = 256
 
 
+def _ensure_writable_dir(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        dir=path,
+        prefix=".write_test_",
+        delete=True,
+    ):
+        pass
+
+
+def _resolve_psf_cache_root(image_path: Path, cache_dir: str | Path | None) -> Path:
+    if cache_dir:
+        cache_root = Path(cache_dir)
+        _ensure_writable_dir(cache_root)
+        return cache_root
+
+    preferred = image_path.parent / ".psf_cache"
+    fallback = Path.cwd() / ".psf_cache"
+    for cache_root in (preferred, fallback):
+        try:
+            _ensure_writable_dir(cache_root)
+        except OSError as exc:
+            if cache_root == preferred:
+                print(
+                    f"  WARNING: cannot use PSF cache {cache_root}: {exc}; "
+                    f"falling back to {fallback}",
+                    flush=True,
+                )
+            continue
+        return cache_root
+
+    raise PermissionError(
+        f"Unable to create PSF cache in {preferred} or fallback {fallback}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Theoretical PSF (fallback when --no_blind is passed)
 # ---------------------------------------------------------------------------
@@ -756,23 +792,25 @@ def estimate_psf_from_chunks(
         flush=True,
     )
 
-    cache_root = Path(cache_dir) if cache_dir else image_path.parent / ".psf_cache"
-    cache_key = _psf_cache_key(
-        image_path,
-        psf_seed,
-        n_iters,
-        chunk_xy,
-        pad_xy,
-        pad_z,
-        script_dir,
-        "snr_weighted_mean",
-        snr_weight_cap,
-        (z_start, z_stop),
-    )
-    cache_path = cache_root / f"estimated_psf_{cache_key}.tif"
-    if use_cache and cache_path.exists():
-        print(f"Using cached PSF estimate: {cache_path}", flush=True)
-        return _normalise_psf(imread(str(cache_path)))
+    cache_path = None
+    if use_cache:
+        cache_root = _resolve_psf_cache_root(image_path, cache_dir)
+        cache_key = _psf_cache_key(
+            image_path,
+            psf_seed,
+            n_iters,
+            chunk_xy,
+            pad_xy,
+            pad_z,
+            script_dir,
+            "snr_weighted_mean",
+            snr_weight_cap,
+            (z_start, z_stop),
+        )
+        cache_path = cache_root / f"estimated_psf_{cache_key}.tif"
+        if cache_path.exists():
+            print(f"Using cached PSF estimate: {cache_path}", flush=True)
+            return _normalise_psf(imread(str(cache_path)))
 
     tile_origins = _tile_origins(ny, nx, chunk_xy)
 
@@ -885,8 +923,7 @@ def estimate_psf_from_chunks(
     merged = np.tensordot(weights, stack, axes=(0, 0)).astype(np.float32)
     merged = _normalise_psf(merged)
 
-    if use_cache:
-        cache_root.mkdir(parents=True, exist_ok=True)
+    if cache_path is not None:
         imwrite(str(cache_path), merged)
         print(f"Cached PSF estimate: {cache_path}", flush=True)
 

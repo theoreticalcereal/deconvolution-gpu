@@ -3,7 +3,6 @@ nextflow.enable.dsl=2
 
 include { DESKEW } from './modules/deskew'
 include { DECON }  from './modules/deconvolution'
-include { PSF_SANITY_CHECK } from './modules/psf_sanity_check'
 
 workflow {
     if (params.decon_only) {
@@ -12,11 +11,6 @@ workflow {
             params.cell_name,
             params.background,
             params.iter,
-            params.output_dir
-        )
-    } else if (params.psf_sanity_check && params.psf_sanity_input_dir) {
-        PSF_SANITY_CHECK(
-            params.psf_sanity_input_dir,
             params.output_dir
         )
     } else {
@@ -33,19 +27,12 @@ workflow {
             params.output_dir
         )
 
-        if (params.psf_sanity_check) {
-            PSF_SANITY_CHECK(
-                DESKEW.out.deskewed_path,
-                params.output_dir
-            )
-        } else {
-            DECON(
-                DESKEW.out.deskewed_path,
-                params.cell_name,
-                params.background,
-                params.iter,
-                params.output_dir
-            )
-        }
+        DECON(
+            DESKEW.out.deskewed_path,
+            params.cell_name,
+            params.background,
+            params.iter,
+            params.output_dir
+        )
     }
 }
