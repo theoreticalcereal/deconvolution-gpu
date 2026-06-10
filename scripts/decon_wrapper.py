@@ -13,6 +13,7 @@
 #   core tile size; <=0 auto-sizes from available VRAM.
 
 import argparse
+import tempfile
 import time
 from glob import glob
 from pathlib import Path
@@ -64,6 +65,7 @@ def _decon_chunk(
     chunk: np.ndarray,
     otf_path: str,
     dz: float,
+    dxy: float,
     n_iters: int,
     total_chunks: int,
     block_info: dict | None = None,
@@ -83,7 +85,14 @@ def _decon_chunk(
     )
 
     start = time.perf_counter()
-    with RLContext(chunk.shape, otf_path, dzdata=dz) as ctx:
+    with RLContext(
+        chunk.shape,
+        otf_path,
+        dzdata=dz,
+        dxdata=dxy,
+        dzpsf=dz,
+        dxpsf=dxy,
+    ) as ctx:
         result = rl_decon(chunk, output_shape=ctx.out_shape, n_iters=n_iters)
     elapsed = time.perf_counter() - start
     avg_iter = elapsed / n_iters if n_iters > 0 else elapsed
@@ -112,6 +121,10 @@ def deconvolve_tiff(
     psf: np.ndarray,
     n_iters: int,
     dz: float,
+    dxy: float,
+    wavelength: float,
+    na: float,
+    ni: float,
     chunk_xy: int = 0,
     vram_gb: float | None = None,
     decon_workers: int = 1,
@@ -162,19 +175,34 @@ def deconvolve_tiff(
         flush=True,
     )
 
-    with TemporaryOTF(psf) as otf:
-        processed = lazy.map_overlap(
-            _decon_chunk,
-            depth={0: 0, 1: overlap_xy, 2: overlap_xy},
-            boundary="reflect",
-            dtype=np.uint16,
-            otf_path=otf.path,
-            dz=dz,
-            n_iters=n_iters,
-            total_chunks=total_chunks,
-        )
-        scheduler = "threads" if decon_workers > 1 else "single-threaded"
-        output = processed.compute(scheduler=scheduler, num_workers=decon_workers)
+    temp_psf = tempfile.NamedTemporaryFile(suffix=".tif", delete=False)
+    psf_path = Path(temp_psf.name)
+    temp_psf.close()
+    try:
+        imwrite(str(psf_path), psf.astype(np.float32, copy=False))
+        with TemporaryOTF(
+            str(psf_path),
+            dzpsf=dz,
+            dxpsf=dxy,
+            wavelength=int(round(wavelength * 1000)),
+            na=na,
+            nimm=ni,
+        ) as otf:
+            processed = lazy.map_overlap(
+                _decon_chunk,
+                depth={0: 0, 1: overlap_xy, 2: overlap_xy},
+                boundary="reflect",
+                dtype=np.uint16,
+                otf_path=otf.path,
+                dz=dz,
+                dxy=dxy,
+                n_iters=n_iters,
+                total_chunks=total_chunks,
+            )
+            scheduler = "threads" if decon_workers > 1 else "single-threaded"
+            output = processed.compute(scheduler=scheduler, num_workers=decon_workers)
+    finally:
+        psf_path.unlink(missing_ok=True)
 
     return output
 
@@ -205,6 +233,8 @@ def main() -> None:
                         help="Core XY tile size for CUDA deconvolution. <=0 auto-sizes from VRAM.")
     parser.add_argument("--pad_xy",      type=int, default=32,
                         help="XY halo per edge added to each blind PSF chunk (pixels).")
+    parser.add_argument("--pad_z",       type=int, default=20,
+                        help="Z halo per edge added before MATLAB deconvblind (pixels).")
     parser.add_argument("--blind_workers", type=int, default=1,
                         help="Concurrent MATLAB deconvblind chunks. <=0 uses CPU affinity, falling back to 32.")
     parser.add_argument("--matlab_threads", type=int, default=1,
@@ -299,6 +329,7 @@ def main() -> None:
             n_iters=args.blind_iters,
             chunk_xy=args.chunk_xy,
             pad_xy=args.pad_xy,
+            pad_z=args.pad_z,
             script_dir=args.script_dir,
             max_workers=args.blind_workers,
             prefetch_chunks=args.prefetch_chunks,
@@ -326,6 +357,10 @@ def main() -> None:
             psf=psf,
             n_iters=args.iter,
             dz=args.dz,
+            dxy=args.dxy,
+            wavelength=args.wavelength,
+            na=args.na,
+            ni=args.ni,
             chunk_xy=args.decon_chunk_xy,
             vram_gb=args.vram_gb,
             decon_workers=args.decon_workers,

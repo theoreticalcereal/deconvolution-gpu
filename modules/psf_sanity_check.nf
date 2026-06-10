@@ -1,27 +1,21 @@
-process DECON {
+process PSF_SANITY_CHECK {
     conda "${projectDir}/environment.yml"
-    tag "${cell_name}"
+    tag "psf_sanity"
 
-    publishDir "${params.output_dir}/deconvolved", mode: 'copy'
+    publishDir "${params.output_dir}/psf_sanity", mode: 'copy'
 
-    maxForks 8
-    cpus 8
+    cpus 4
     memory '32 GB'
-    clusterOptions '--gres=gpu:1'
+    queue 'super'
 
     input:
-    val  deskewed_dir
-    val  cell_name
-    val  background
-    val  iter
-    val  output_dir
+    val deskewed_dir
+    val output_dir
 
     output:
-    path "DB2_*", emit: decon_output
+    path "psf_sanity", emit: psf_sanity_output
 
     script:
-    // Build optional optical-parameter flags only if the user supplied them.
-    // All have defaults in decon_wrapper.py so omitting is safe but not recommended
     def na_flag          = params.na          ? "--na ${params.na}"                   : ""
     def wavelength_flag  = params.wavelength  ? "--wavelength ${params.wavelength}"   : ""
     def ni_flag          = params.ni          ? "--ni ${params.ni}"                   : ""
@@ -31,7 +25,6 @@ process DECON {
     def psf_size_xy_flag = params.psf_size_xy ? "--psf_size_xy ${params.psf_size_xy}" : ""
     def blind_iters_flag = params.blind_iters ? "--blind_iters ${params.blind_iters}" : ""
     def chunk_xy_flag    = params.chunk_xy    ? "--chunk_xy ${params.chunk_xy}"       : ""
-    def decon_chunk_xy_flag = params.decon_chunk_xy ? "--decon_chunk_xy ${params.decon_chunk_xy}" : ""
     def pad_xy_flag      = params.pad_xy      ? "--pad_xy ${params.pad_xy}"           : ""
     def pad_z_flag       = params.pad_z != null ? "--pad_z ${params.pad_z}"           : ""
     def blind_workers_flag = params.blind_workers ? "--blind_workers ${params.blind_workers}" : ""
@@ -41,27 +34,21 @@ process DECON {
     def blind_z_slices_flag = params.blind_z_slices ? "--blind_z_slices ${params.blind_z_slices}" : ""
     def snr_weight_cap_flag = params.snr_weight_cap != null ? "--snr_weight_cap ${params.snr_weight_cap}" : ""
     def prefetch_chunks_flag = params.prefetch_chunks ? "--prefetch_chunks ${params.prefetch_chunks}" : ""
-    def decon_workers_flag = params.decon_workers ? "--decon_workers ${params.decon_workers}" : ""
-    def overlap_xy_flag  = params.overlap_xy  ? "--overlap_xy ${params.overlap_xy}"   : ""
     def vram_gb_flag     = params.vram_gb     ? "--vram_gb ${params.vram_gb}"         : ""
-    def cache_dir_flag   = params.psf_cache_dir ? "--cache_dir ${params.psf_cache_dir}" : ""
-    def no_psf_cache_flag = params.no_psf_cache ? "--no_psf_cache"                    : ""
-    def no_blind_flag    = params.no_blind    ? "--no_blind"                          : ""
+    def tiff_index_flag  = params.psf_sanity_tiff_index != null ? "--tiff_index ${params.psf_sanity_tiff_index}" : ""
+    def sanity_xy_flag   = params.psf_sanity_xy != null ? "--sanity_xy ${params.psf_sanity_xy}" : ""
 
     """
-    module load cuda/11.8
     module load matlab/2024a
-    export LD_LIBRARY_PATH=\${CUDA_HOME:-}/lib64:/usr/local/cuda/lib64:\${LD_LIBRARY_PATH:-}
-    
-    echo "=== GPU Check ==="
-    nvidia-smi
-    echo "================="
 
-    python3 ${projectDir}/scripts/decon_wrapper.py \\
+    mkdir -p psf_sanity
+
+    python3 ${projectDir}/scripts/compare_psf.py \\
         --image_path "${deskewed_dir}" \\
-        --background ${background} \\
-        --iter ${iter} \\
+        --output_dir psf_sanity \\
         --script_dir "${projectDir}/scripts" \\
+        ${tiff_index_flag} \\
+        ${sanity_xy_flag} \\
         ${na_flag} \\
         ${wavelength_flag} \\
         ${ni_flag} \\
@@ -71,7 +58,6 @@ process DECON {
         ${psf_size_xy_flag} \\
         ${blind_iters_flag} \\
         ${chunk_xy_flag} \\
-        ${decon_chunk_xy_flag} \\
         ${pad_xy_flag} \\
         ${pad_z_flag} \\
         ${blind_workers_flag} \\
@@ -81,11 +67,6 @@ process DECON {
         ${blind_z_slices_flag} \\
         ${snr_weight_cap_flag} \\
         ${prefetch_chunks_flag} \\
-        ${decon_workers_flag} \\
-        ${overlap_xy_flag} \\
-        ${vram_gb_flag} \\
-        ${cache_dir_flag} \\
-        ${no_psf_cache_flag} \\
-        ${no_blind_flag}
+        ${vram_gb_flag}
     """
 }

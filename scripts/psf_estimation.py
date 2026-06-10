@@ -350,6 +350,7 @@ def _psf_cache_key(
     n_iters: int,
     chunk_xy: int,
     pad_xy: int,
+    pad_z: int,
     script_dir: Path,
     merge_mode: str,
     snr_weight_cap: float,
@@ -365,11 +366,12 @@ def _psf_cache_key(
         "n_iters": n_iters,
         "chunk_xy": chunk_xy,
         "pad_xy": pad_xy,
+        "pad_z": pad_z,
         "script_dir": str(script_dir.resolve()),
         "merge_mode": merge_mode,
         "snr_weight_cap": snr_weight_cap,
         "z_window": z_window,
-        "version": 2,
+        "version": 3,
     }
     encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()[:20]
@@ -398,6 +400,7 @@ def _run_matlab_deconvblind(
     psf_seed_path: Path,
     output_psf_path: Path,
     n_iters: int,
+    pad_z: int,
     script_dir: Path,
     matlab_threads: int,
     matlab_timeout: int,
@@ -411,13 +414,19 @@ def _run_matlab_deconvblind(
     _write_matlab_stack(psf_seed, psf_seed_path, scale_float=True)
 
     matlab_threads = min(2, max(1, matlab_threads))
+    pad_z = max(0, pad_z)
     matlab_thread_cmd = f"maxNumCompThreads({matlab_threads}); "
+    z_pad_cmd = (
+        f"chunk = padarray(chunk, [0 0 {pad_z}], 'symmetric'); "
+        if pad_z > 0 else ""
+    )
     matlab_cmd = (
         f"addpath('{script_dir}'); "
         f"{matlab_thread_cmd}"
         f"chunk = single(readtiffstack('{chunk_path}')); "
         f"psf_seed = single(readtiffstack('{psf_seed_path}')); "
         f"psf_seed = psf_seed / sum(psf_seed(:)); "
+        f"{z_pad_cmd}"
         f"[~, psf_est] = deconvblind(chunk, psf_seed, {n_iters}); "
         f"psf_est = single(psf_est); "
         f"psf_est = psf_est / sum(psf_est(:)); "
@@ -532,6 +541,7 @@ def _estimate_one_tile(
     tile: tuple[int, int, int, int],
     psf_seed: np.ndarray,
     pad_xy: int,
+    pad_z: int,
     n_iters: int,
     script_dir: Path,
     tmpdir: Path,
@@ -580,6 +590,7 @@ def _estimate_one_tile(
                 seed_path,
                 psf_out_path,
                 n_iters,
+                pad_z,
                 script_dir,
                 matlab_threads,
                 matlab_timeout,
@@ -624,6 +635,7 @@ def estimate_psf_from_chunks(
     n_iters: int = 10,
     chunk_xy: int = DEFAULT_BLIND_CHUNK_XY,
     pad_xy: int = 32,
+    pad_z: int = 20,
     script_dir: str | Path | None = None,
     max_workers: int = 0,
     prefetch_chunks: int = 0,
@@ -649,6 +661,7 @@ def estimate_psf_from_chunks(
     chunk_xy    : XY tile size.  <= 0 chooses a VRAM-aware size.
     pad_xy      : XY halo per edge before deconvblind. Interior tiles include
                   real neighboring pixels; only image borders are reflect-padded.
+    pad_z       : Z halo per edge before deconvblind, applied symmetrically in MATLAB.
     script_dir  : directory containing readtiffstack.m / writetiffstack.m.
                   Defaults to the directory of this script.
 
@@ -675,6 +688,7 @@ def estimate_psf_from_chunks(
     matlab_threads = min(2, max(1, matlab_threads))
     matlab_workers = max(1, matlab_workers)
     matlab_timeout = max(0, matlab_timeout)
+    pad_z = max(0, pad_z)
     snr_weight_cap = max(0.0, snr_weight_cap)
     chunk_xy = resolve_chunk_xy(
         chunk_xy,
@@ -714,6 +728,7 @@ def estimate_psf_from_chunks(
         n_iters,
         chunk_xy,
         pad_xy,
+        pad_z,
         script_dir,
         "snr_weighted_mean",
         snr_weight_cap,
@@ -727,7 +742,8 @@ def estimate_psf_from_chunks(
     tile_origins = _tile_origins(ny, nx, chunk_xy)
 
     print(f"  Processing {len(tile_origins)} chunk(s) of size "
-          f"(nz={nz}, xy<={chunk_xy}, halo={pad_xy}, io_workers={max_workers}, "
+          f"(nz={nz}, xy<={chunk_xy}, halo_xy={pad_xy}, pad_z={pad_z}, "
+          f"io_workers={max_workers}, "
           f"matlab_workers={matlab_workers}, "
           f"matlab_threads={matlab_threads}, matlab_timeout={matlab_timeout}s, "
           f"snr_weight_cap={snr_weight_cap:g})...",
@@ -760,6 +776,7 @@ def estimate_psf_from_chunks(
                             tile_origins[next_idx],
                             psf_seed,
                             pad_xy,
+                            pad_z,
                             n_iters,
                             script_dir,
                             tmpdir,
@@ -857,6 +874,8 @@ def main() -> None:
                         help="XY tile size. <=0 auto-sizes from available VRAM.")
     parser.add_argument("--pad_xy",     type=int,   default=32,
                         help="XY halo per edge before deconvblind (pixels).")
+    parser.add_argument("--pad_z",      type=int,   default=20,
+                        help="Z halo per edge before deconvblind (pixels).")
     parser.add_argument("--blind_workers", type=int, default=1,
                         help="Concurrent MATLAB deconvblind chunks. <=0 uses CPU affinity, falling back to 32.")
     parser.add_argument("--matlab_threads", type=int, default=1,
@@ -907,6 +926,7 @@ def main() -> None:
         n_iters=args.n_iters,
         chunk_xy=args.chunk_xy,
         pad_xy=args.pad_xy,
+        pad_z=args.pad_z,
         script_dir=args.script_dir,
         max_workers=args.blind_workers,
         prefetch_chunks=args.prefetch_chunks,
