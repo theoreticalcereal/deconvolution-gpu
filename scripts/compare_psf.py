@@ -1,4 +1,5 @@
 import argparse
+import inspect
 import json
 import re
 import os
@@ -207,7 +208,7 @@ def _run_matlab_deconvlucy(
             f"decMax = max(Dec2(:)); "
             f"if decMax > decMin; "
             f"Dec2 = (Dec2 - decMin) / (decMax - decMin); "
-            f"Dec2 = Dec2 * (maxE1 - minE1) + minE1; "
+            f"Dec2 = times(Dec2, maxE1 - minE1) + minE1; "
             f"end; "
             f"Dec2 = uint16(max(0, min(65535, Dec2))); "
             f"writetiffstack(Dec2, '{output_path}');"
@@ -541,26 +542,35 @@ def main() -> None:
     )
 
     print("Estimating pipeline-style chunked blind PSF on comparison crop...", flush=True)
-    chunked_blind = estimate_psf_from_chunks(
-        image_path=crop_tiff,
-        psf_seed=psf_seed,
-        n_iters=args.blind_iters,
-        blind_passes=args.blind_passes,
-        chunk_xy=args.chunk_xy,
-        pad_xy=args.pad_xy,
-        pad_z=args.pad_z,
-        script_dir=script_dir,
-        max_workers=args.blind_workers,
-        prefetch_chunks=args.prefetch_chunks,
-        vram_gb=args.vram_gb,
-        cache_dir=output_dir / ".psf_cache",
-        use_cache=False,
-        matlab_threads=args.matlab_threads,
-        matlab_workers=args.matlab_workers,
-        matlab_timeout=args.matlab_timeout,
-        snr_weight_cap=args.snr_weight_cap,
-        blind_z_slices=args.blind_z_slices,
-    )
+    psf_estimation_kwargs = {
+        "image_path": crop_tiff,
+        "psf_seed": psf_seed,
+        "n_iters": args.blind_iters,
+        "chunk_xy": args.chunk_xy,
+        "pad_xy": args.pad_xy,
+        "pad_z": args.pad_z,
+        "script_dir": script_dir,
+        "max_workers": args.blind_workers,
+        "prefetch_chunks": args.prefetch_chunks,
+        "vram_gb": args.vram_gb,
+        "cache_dir": output_dir / ".psf_cache",
+        "use_cache": False,
+        "matlab_threads": args.matlab_threads,
+        "matlab_workers": args.matlab_workers,
+        "matlab_timeout": args.matlab_timeout,
+        "snr_weight_cap": args.snr_weight_cap,
+        "blind_z_slices": args.blind_z_slices,
+    }
+    psf_signature = inspect.signature(estimate_psf_from_chunks)
+    if "blind_passes" in psf_signature.parameters:
+        psf_estimation_kwargs["blind_passes"] = args.blind_passes
+    elif args.blind_passes != 1:
+        print(
+            "  NOTE: this psf_estimation.py does not support blind_passes; "
+            "using its single-pass chunked blind PSF estimation.",
+            flush=True,
+        )
+    chunked_blind = estimate_psf_from_chunks(**psf_estimation_kwargs)
 
     print("Running pipeline-style CUDA Richardson-Lucy deconvolution...", flush=True)
     detection_na = args.detection_na if args.detection_na is not None else args.na
