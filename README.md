@@ -1,6 +1,6 @@
 # deconvolution-gpu
 
-A Nextflow DSL2 pipeline for GPU-accelerated deskewing and deconvolution of light-sheet microscopy (ctASLM) TIFF volumes. The pipeline runs on SLURM and uses a conda environment managed by **mamba**. It requires **Java 17+** and **mamba** to be available on the cluster.
+A Nextflow DSL2 pipeline for GPU-accelerated deskewing and deconvolution of light-sheet microscopy (ctASLM) TIFF volumes. The pipeline runs on SLURM and uses a conda environment managed by **mamba**. It requires **Java 17+** and **mamba** to be available on the cluster. Made for BioHPC @ UTSouthwestern. 
 
 ---
 
@@ -206,6 +206,6 @@ comparison/
 
 - The bundled `./nextflow` executable is a self-contained Nextflow launcher. Do not use a system-installed Nextflow unless it is version-compatible.
 - The pipeline profile `my_cluster` enables conda/mamba. The `docker` profile is also available for non-HPC use.
-- DESKEW runs on the `super` queue (4 CPUs, 32 GB). DECON runs on the `GPU` queue (8 CPUs, 32 GB, 1 GPU).
+- DESKEW runs on the `super` queue, while DECON runs on the `GPU` queue.
 - The active deconvolution PSF is always the merged blind estimate. The theoretical PSF generated from optical parameters is only a starting guess for blind estimation.
 - Nextflow work directories accumulate large intermediate files. Clean up with `nextflow clean -f` after a successful run.
