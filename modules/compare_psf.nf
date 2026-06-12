@@ -37,7 +37,6 @@ process COMPARE_PSF {
     def psf_size_z_flag  = params.psf_size_z  ? "--psf_size_z ${params.psf_size_z}"   : ""
     def psf_size_xy_flag = params.psf_size_xy ? "--psf_size_xy ${params.psf_size_xy}" : ""
     def blind_iters_flag = params.blind_iters ? "--blind_iters ${params.blind_iters}" : ""
-    def blind_passes_flag = params.blind_passes ? "--blind_passes ${params.blind_passes}" : ""
     def chunk_xy_flag    = params.chunk_xy    ? "--chunk_xy ${params.chunk_xy}"       : ""
     def decon_chunk_xy_flag = params.decon_chunk_xy ? "--decon_chunk_xy ${params.decon_chunk_xy}" : ""
     def pad_xy_flag      = params.pad_xy      ? "--pad_xy ${params.pad_xy}"           : ""
@@ -95,7 +94,6 @@ process COMPARE_PSF {
         ${psf_size_z_flag} \\
         ${psf_size_xy_flag} \\
         ${blind_iters_flag} \\
-        ${blind_passes_flag} \\
         ${chunk_xy_flag} \\
         ${decon_chunk_xy_flag} \\
         ${pad_xy_flag} \\

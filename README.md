@@ -123,7 +123,6 @@ All parameters can be passed on the command line as `--param_name value` or set 
 | Parameter | Default | Description |
 |---|---|---|
 | `--blind_iters` | `10` | MATLAB `deconvblind` iterations per chunk |
-| `--blind_passes` | `2` | Number of chunked blind PSF passes. Passes after the first use the previous merged PSF as the seed |
 | `--chunk_xy` | `256` | XY tile size for blind estimation (px). `<=0` auto-sizes from VRAM |
 | `--pad_xy` | `32` | XY halo added per edge before each blind chunk (px) |
 | `--pad_z` | `20` | Z halo added per edge before each blind chunk (slices) |
