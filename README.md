@@ -20,7 +20,7 @@ The conda environment (`decon_env`) is built automatically from `environment.yml
 
 ---
 
-## How It Works
+## Pipeline Process
 
 The pipeline has two sequential stages:
 
