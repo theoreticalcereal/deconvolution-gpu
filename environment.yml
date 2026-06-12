@@ -123,3 +123,4 @@ dependencies:
   - zstd=1.5.7=hb78ec9c_6
   - pip:
     - psfmodels
+    - antspyx

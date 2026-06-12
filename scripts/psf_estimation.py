@@ -75,7 +75,7 @@ def _resolve_psf_cache_root(image_path: Path, cache_dir: str | Path | None) -> P
 
 
 # ---------------------------------------------------------------------------
-# Theoretical PSF (fallback when --no_blind is passed)
+# Theoretical PSF seed for blind deconvolution
 # ---------------------------------------------------------------------------
 
 def _available_cpu_threads(default: int = DEFAULT_CPU_THREADS) -> int:

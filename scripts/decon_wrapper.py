@@ -1,11 +1,10 @@
 # decon_wrapper.py
-# Dask-orchestrated GPU deconvolution with optional blind PSF estimation.
+# Dask-orchestrated GPU deconvolution with blind PSF estimation.
 #
-# PSF resolution order:
-#   1. Blind (default): estimate PSF from first TIFF via chunked MATLAB deconvblind,
-#      merge per-chunk estimates with SNR weighting, save as estimated_psf.tif.
-#   2. No-blind (--no_blind): generate a theoretical Gibson-Lanni PSF from
-#      optical parameters.  All optical params are optional with defaults.
+# PSF resolution:
+#   Generate a theoretical Gibson-Lanni PSF from the optical parameters, use it
+#   only as the starting guess for chunked MATLAB deconvblind, then merge the
+#   recovered per-chunk blind PSFs with SNR weighting and save estimated_psf.tif.
 #
 # Deconvolution:
 #   pycudadecon (TemporaryOTF + RLContext) processes each TIFF as full-Z
@@ -272,11 +271,7 @@ def main() -> None:
     parser.add_argument("--timepoints", default="",
                         help="Optional timepoint filter, e.g. '0', '0 1', or '0,1'.")
 
-    # PSF generation mode
-    parser.add_argument("--no_blind", action="store_true",
-                        help="Skip blind PSF estimation; use a theoretical PSF instead.")
-
-    # Blind estimation options (only used when --no_blind is NOT set)
+    # Blind estimation options
     parser.add_argument("--blind_iters", type=int, default=10,
                         help="deconvblind iterations per chunk during PSF estimation.")
     parser.add_argument("--chunk_xy",    type=int, default=DEFAULT_BLIND_CHUNK_XY,
@@ -318,7 +313,7 @@ def main() -> None:
     parser.add_argument("--background", type=float, default=0.0,
                         help="Background value to subtract before decon.")
 
-    # Optional optical parameters (used for PSF seed / theoretical PSF)
+    # Optional optical parameters used to generate the blind-estimation PSF seed.
     parser.add_argument("--na",          type=float, default=1.0,
                         help="Backward-compatible detection numerical aperture.")
     parser.add_argument("--detection_na", type=float, default=None,
@@ -396,8 +391,9 @@ def main() -> None:
     dxy = resolve_dxy(args.dxy, args.camera_pixel_size, args.magnification)
     detection_na = args.detection_na if args.detection_na is not None else args.na
 
-    # Build PSF seed from optical params regardless of mode — used as either
-    # the blind-estimation seed or the final theoretical PSF.
+    # Build the optical-model PSF seed.  This is intentionally not accepted as
+    # the final deconvolution PSF because the measured blind estimates are much
+    # closer to the observed data.
     psf_seed = generate_theoretical_psf(
         na=args.na,
         detection_na=args.detection_na,
@@ -420,33 +416,29 @@ def main() -> None:
         background=args.background,
     )
 
-    if args.no_blind:
-        print("Using theoretical PSF (--no_blind).", flush=True)
-        psf = psf_seed
-    else:
-        print("Running blind PSF estimation on first TIFF...", flush=True)
-        psf = estimate_psf_from_chunks(
-            image_path=tiff_list[0],
-            psf_seed=psf_seed,
-            n_iters=args.blind_iters,
-            chunk_xy=args.chunk_xy,
-            pad_xy=args.pad_xy,
-            pad_z=args.pad_z,
-            script_dir=args.script_dir,
-            max_workers=args.blind_workers,
-            prefetch_chunks=args.prefetch_chunks,
-            vram_gb=args.vram_gb,
-            cache_dir=args.cache_dir,
-            use_cache=not args.no_psf_cache,
-            matlab_threads=args.matlab_threads,
-            matlab_workers=args.matlab_workers,
-            matlab_timeout=args.matlab_timeout,
-            snr_weight_cap=args.snr_weight_cap,
-            blind_z_slices=args.blind_z_slices,
-        )
-        psf_save_path = image_dir / "estimated_psf.tif"
-        psf_save_path = _write_tiff_near_input_or_cwd(psf_save_path, psf)
-        print(f"Merged PSF saved to {psf_save_path}", flush=True)
+    print("Running blind PSF estimation on first TIFF...", flush=True)
+    psf = estimate_psf_from_chunks(
+        image_path=tiff_list[0],
+        psf_seed=psf_seed,
+        n_iters=args.blind_iters,
+        chunk_xy=args.chunk_xy,
+        pad_xy=args.pad_xy,
+        pad_z=args.pad_z,
+        script_dir=args.script_dir,
+        max_workers=args.blind_workers,
+        prefetch_chunks=args.prefetch_chunks,
+        vram_gb=args.vram_gb,
+        cache_dir=args.cache_dir,
+        use_cache=not args.no_psf_cache,
+        matlab_threads=args.matlab_threads,
+        matlab_workers=args.matlab_workers,
+        matlab_timeout=args.matlab_timeout,
+        snr_weight_cap=args.snr_weight_cap,
+        blind_z_slices=args.blind_z_slices,
+    )
+    psf_save_path = image_dir / "estimated_psf.tif"
+    psf_save_path = _write_tiff_near_input_or_cwd(psf_save_path, psf)
+    print(f"Merged PSF saved to {psf_save_path}", flush=True)
 
     # ------------------------------------------------------------------
     # Deconvolve all TIFFs with the resolved PSF

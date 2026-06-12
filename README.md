@@ -16,7 +16,7 @@ A Nextflow DSL2 pipeline for GPU-accelerated deskewing and deconvolution of ligh
 | MATLAB | 2024a (loaded via `module load matlab/2024a`) |
 | GPU | 1× NVIDIA GPU per DECON job (`--gres=gpu:1`) |
 
-The conda environment (`decon_env`) is built automatically from `environment.yml` the first time the pipeline runs. Key packages: `pycudadecon 0.5.1`, `cudatoolkit 11.8`, `dask`, `tifffile`, `numpy`, `psfmodels`.
+The conda environment (`decon_env`) is built automatically from `environment.yml` the first time the pipeline runs. Key packages: `pycudadecon 0.5.1`, `cudatoolkit 11.8`, `dask`, `tifffile`, `numpy`, `psfmodels`, `antspyx`.
 
 ---
 
@@ -35,10 +35,7 @@ Calls MATLAB 2024a (`deskew.m`) via a Python wrapper (`deskew_wrapper.py`) to co
 
 Reads the deskewed `CH*.tif` files from `Top_shear/` and runs Richardson–Lucy GPU deconvolution via `pycudadecon`. Volumes are processed as full-Z XY tiles using Dask `map_overlap` with reflect-padded boundaries to suppress edge artifacts. Output files are named `DB2_<original_stem>.tif` and written to `<output_dir>/deconvolved/`.
 
-**PSF resolution has two modes (selected at runtime):**
-
-- **Blind (default):** Estimates the PSF from the first TIFF by tiling it into XY chunks, running MATLAB `deconvblind` on each tile, then merging the per-tile PSFs with SNR weighting. The merged PSF is saved as `estimated_psf.tif` alongside the input TIFFs and cached for reuse.
-- **Theoretical (`--no_blind`):** Generates a Gibson–Lanni PSF from the optical parameters you supply using `psfmodels`. No MATLAB call is needed in this mode.
+**PSF resolution always uses blind estimation.** The pipeline generates a theoretical Gibson-Lanni PSF from the optical parameters you supply, but uses it only as the starting guess for MATLAB `deconvblind`. It then estimates the PSF from the first TIFF by tiling it into XY chunks, running `deconvblind` on each tile, and merging the per-tile PSFs with SNR weighting. The merged blind PSF is saved as `estimated_psf.tif` alongside the input TIFFs and cached for reuse.
 
 ---
 
@@ -96,7 +93,7 @@ All parameters can be passed on the command line as `--param_name value` or set 
 | `--compare_psf` | `false` | Run the deconvolution comparison workflow instead of deskew/decon; enabled by `-profile compare_psf` |
 | `--decon_input_dir` | `''` | Input directory for `--decon_only` mode (overrides `--image_path`) |
 | `--tiff_index` | `0` | Matching input TIFF index used by the comparison workflow |
-| `--sanity_xy` | `512` | Center XY crop size used by the comparison workflow; `<=0` uses full XY |
+| `--sanity_xy` | `768` | Center XY crop size used by the comparison workflow; `<=0` uses full XY |
 
 ### Deskew
 
@@ -116,9 +113,8 @@ All parameters can be passed on the command line as `--param_name value` or set 
 |---|---|---|
 | `--iter` | `10` | Number of Richardson–Lucy iterations |
 | `--background` | `0` | Background value subtracted before deconvolution |
-| `--no_blind` | `false` | Use a theoretical PSF instead of blind estimation |
 
-### Blind PSF Estimation (ignored when `--no_blind` is set)
+### Blind PSF Estimation
 
 | Parameter | Default | Description |
 |---|---|---|
@@ -147,7 +143,7 @@ All parameters can be passed on the command line as `--param_name value` or set 
 
 ### Optical / PSF Parameters
 
-These are used to generate the PSF seed for blind estimation or the full theoretical PSF with `--no_blind`. All are optional with defaults.
+These are used to generate the theoretical PSF seed for blind estimation. The theoretical PSF is not used directly for final deconvolution. All are optional with defaults.
 
 | Parameter | Default | Description |
 |---|---|---|
@@ -180,11 +176,28 @@ These are used to generate the PSF seed for blind estimation or the full theoret
 ├── shear/              # Intermediate sheared volumes (from DESKEW)
 ├── Top_shear/          # Deskewed volumes passed to DECON
 │   ├── CH0_0.tif
-│   ├── estimated_psf.tif   # Saved only in blind mode
+│   ├── estimated_psf.tif   # Merged blind PSF used for deconvolution
 │   └── ...
 └── deconvolved/        # Final deconvolved TIFFs
     ├── DB2_CH0_0.tif
     └── ...
+```
+
+Comparison runs publish to `<output_dir>/comparison/`:
+
+```
+comparison/
+├── pipeline_cuda_DB2.tif
+├── reference_matlab_Dec2.tif
+├── decon_metrics.json
+├── decon_metrics.tsv         # Pearson, SSIM-style, and ANTsPy similarity metrics
+├── decon_cross_sections.tif
+├── psf_fwhm.tsv             # X/Y/Z Gaussian-fit and half-max FWHM per PSF
+├── psf_axis_profiles.tsv    # Raw and fitted X/Y/Z PSF line profiles
+├── psf_axis_profiles.svg    # Plotted raw and fitted PSF line profiles
+├── chunked_blind_psf.tif
+├── full_blind_psf.tif
+└── theoretical_psf.tif
 ```
 
 ---
@@ -194,5 +207,5 @@ These are used to generate the PSF seed for blind estimation or the full theoret
 - The bundled `./nextflow` executable is a self-contained Nextflow launcher. Do not use a system-installed Nextflow unless it is version-compatible.
 - The pipeline profile `my_cluster` enables conda/mamba. The `docker` profile is also available for non-HPC use.
 - DESKEW runs on the `super` queue (4 CPUs, 32 GB). DECON runs on the `GPU` queue (8 CPUs, 32 GB, 1 GPU).
-- The PSF file `scripts/ctASLM2-510nm.tif` is bundled and used as an optional reference. The active PSF is always determined at runtime by the blind or theoretical path.
+- The active deconvolution PSF is always the merged blind estimate. The theoretical PSF generated from optical parameters is only a starting guess for blind estimation.
 - Nextflow work directories accumulate large intermediate files. Clean up with `nextflow clean -f` after a successful run.

@@ -59,7 +59,6 @@ process DECON {
     def vram_gb_flag     = params.vram_gb     ? "--vram_gb ${params.vram_gb}"         : ""
     def cache_dir_flag   = params.psf_cache_dir ? "--cache_dir ${params.psf_cache_dir}" : ""
     def no_psf_cache_flag = params.no_psf_cache ? "--no_psf_cache"                    : ""
-    def no_blind_flag    = params.no_blind    ? "--no_blind"                          : ""
 
     """
     module load cuda/11.8
@@ -113,7 +112,6 @@ process DECON {
         ${overlap_xy_flag} \\
         ${vram_gb_flag} \\
         ${cache_dir_flag} \\
-        ${no_psf_cache_flag} \\
-        ${no_blind_flag}
+        ${no_psf_cache_flag}
     """
 }
