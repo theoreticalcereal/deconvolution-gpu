@@ -63,6 +63,17 @@ To skip deskewing and run deconvolution on already-deskewed data:
     --output_dir /path/to/output
 ```
 
+To compare the pipeline deconvolution against the reference MATLAB
+`deconvblind -> deconvlucy` flow on already-deskewed data:
+
+```bash
+./nextflow run main.nf -profile compare_psf \
+    --decon_input_dir /path/to/Top_shear \
+    --output_dir /path/to/output
+```
+
+Comparison outputs are published to `<output_dir>/comparison/`.
+
 ---
 
 ## Parameters
@@ -82,7 +93,10 @@ All parameters can be passed on the command line as `--param_name value` or set 
 |---|---|---|
 | `--output_dir` | `output` | Root directory for all outputs |
 | `--decon_only` | `false` | Skip deskewing; go straight to deconvolution |
+| `--compare_psf` | `false` | Run the deconvolution comparison workflow instead of deskew/decon; enabled by `-profile compare_psf` |
 | `--decon_input_dir` | `''` | Input directory for `--decon_only` mode (overrides `--image_path`) |
+| `--tiff_index` | `0` | Matching input TIFF index used by the comparison workflow |
+| `--sanity_xy` | `512` | Center XY crop size used by the comparison workflow; `<=0` uses full XY |
 
 ### Deskew
 
@@ -109,6 +123,7 @@ All parameters can be passed on the command line as `--param_name value` or set 
 | Parameter | Default | Description |
 |---|---|---|
 | `--blind_iters` | `10` | MATLAB `deconvblind` iterations per chunk |
+| `--blind_passes` | `2` | Number of chunked blind PSF passes. Passes after the first use the previous merged PSF as the seed |
 | `--chunk_xy` | `256` | XY tile size for blind estimation (px). `<=0` auto-sizes from VRAM |
 | `--pad_xy` | `32` | XY halo added per edge before each blind chunk (px) |
 | `--pad_z` | `20` | Z halo added per edge before each blind chunk (slices) |

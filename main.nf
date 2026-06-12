@@ -3,9 +3,14 @@ nextflow.enable.dsl=2
 
 include { DESKEW } from './modules/deskew'
 include { DECON }  from './modules/deconvolution'
+include { COMPARE_PSF } from './modules/compare_psf'
 
 workflow {
-    if (params.decon_only) {
+    if (params.compare_psf) {
+        COMPARE_PSF(
+            params.decon_input_dir ?: params.image_path
+        )
+    } else if (params.decon_only) {
         DECON(
             params.decon_input_dir ?: params.image_path,
             params.cell_name,

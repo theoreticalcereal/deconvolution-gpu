@@ -1,16 +1,19 @@
 import argparse
 import json
 import re
+import os
+import subprocess
 import tempfile
 from pathlib import Path
 
 import numpy as np
 from tifffile import imread, imwrite
 
+from decon_wrapper import deconvolve_tiff
 from psf_estimation import (
     _normalise_psf,
-    _run_matlab_deconvblind,
     _write_chunk,
+    _write_matlab_stack,
     generate_theoretical_psf,
     estimate_psf_from_chunks,
     open_tiff_memmap,
@@ -76,6 +79,7 @@ def _run_full_blind(
     volume: np.ndarray,
     psf_seed: np.ndarray,
     n_iters: int,
+    pad_xy: int,
     pad_z: int,
     script_dir: Path,
     matlab_threads: int,
@@ -87,23 +91,163 @@ def _run_full_blind(
         seed_path = tmpdir / "seed.tif"
         psf_out_path = tmpdir / "full_blind_psf.tif"
         _write_chunk(volume, chunk_path)
-        _run_matlab_deconvblind(
-            chunk_path=chunk_path,
-            psf_seed=psf_seed,
-            psf_seed_path=seed_path,
-            output_psf_path=psf_out_path,
-            n_iters=n_iters,
-            pad_z=pad_z,
-            script_dir=script_dir,
-            matlab_threads=matlab_threads,
-            matlab_timeout=matlab_timeout,
+        _write_matlab_stack(psf_seed, seed_path, scale_float=True)
+
+        matlab_threads = min(2, max(1, matlab_threads))
+        pad_xy = max(0, pad_xy)
+        pad_z = max(0, pad_z)
+        matlab_thread_cmd = f"maxNumCompThreads({matlab_threads}); "
+        pad_cmd = (
+            f"chunk = padarray(chunk, [{pad_xy} {pad_xy} {pad_z}], 'symmetric'); "
+            if pad_xy > 0 or pad_z > 0 else ""
         )
+        matlab_cmd = (
+            f"addpath('{script_dir}'); "
+            f"{matlab_thread_cmd}"
+            f"chunk = single(readtiffstack('{chunk_path}')); "
+            f"psf_seed = single(readtiffstack('{seed_path}')); "
+            f"psf_seed = psf_seed / sum(psf_seed(:)); "
+            f"{pad_cmd}"
+            f"[~, psf_est] = deconvblind(chunk, psf_seed, {n_iters}); "
+            f"psf_est = single(psf_est); "
+            f"psf_est = psf_est / sum(psf_est(:)); "
+            f"writetiffstack(psf_est, '{psf_out_path}');"
+        )
+        matlab_args = ["matlab"]
+        if matlab_threads == 1:
+            matlab_args.append("-singleCompThread")
+        matlab_args.extend(["-batch", matlab_cmd])
+        env = os.environ.copy()
+        for name in (
+            "OMP_NUM_THREADS",
+            "OMP_THREAD_LIMIT",
+            "MKL_NUM_THREADS",
+            "OPENBLAS_NUM_THREADS",
+            "NUMEXPR_NUM_THREADS",
+        ):
+            env[name] = str(matlab_threads)
+
+        try:
+            result = subprocess.run(
+                matlab_args,
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=matlab_timeout if matlab_timeout > 0 else None,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"MATLAB full-window deconvblind timed out after {matlab_timeout}s.\n"
+                f"STDOUT: {exc.stdout or ''}\nSTDERR: {exc.stderr or ''}"
+            ) from exc
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"MATLAB full-window deconvblind failed (returncode={result.returncode}).\n"
+                f"STDOUT: {result.stdout}\nSTDERR: {result.stderr}"
+            )
         if not psf_out_path.exists():
             raise RuntimeError("MATLAB produced no full-blind PSF output")
         psf = imread(str(psf_out_path)).astype(np.float32)
     if psf.shape != psf_seed.shape:
         raise ValueError(f"Full-blind PSF shape {psf.shape} != seed shape {psf_seed.shape}")
     return _normalise_psf(psf)
+
+
+def _run_matlab_deconvlucy(
+    volume: np.ndarray,
+    psf: np.ndarray,
+    n_iters: int,
+    pad_xy: int,
+    pad_z: int,
+    script_dir: Path,
+    matlab_threads: int,
+    matlab_timeout: int,
+) -> np.ndarray:
+    """
+    Mirror the reference script's second pass:
+    pad image -> deconvlucy(image, psfr, iter) -> crop -> rescale to input range.
+    """
+    with tempfile.TemporaryDirectory(prefix="full_lucy_decon_") as tmpdir:
+        tmpdir = Path(tmpdir)
+        image_path = tmpdir / "full_window.tif"
+        psf_path = tmpdir / "psfr.tif"
+        output_path = tmpdir / "Dec2.tif"
+        _write_chunk(volume, image_path)
+        _write_matlab_stack(psf, psf_path, scale_float=True)
+
+        matlab_threads = min(2, max(1, matlab_threads))
+        pad_xy = max(0, pad_xy)
+        pad_z = max(0, pad_z)
+        matlab_thread_cmd = f"maxNumCompThreads({matlab_threads}); "
+        pad_cmd = (
+            f"E1 = padarray(E1, [{pad_xy} {pad_xy} {pad_z}], 'symmetric'); "
+            if pad_xy > 0 or pad_z > 0 else ""
+        )
+        crop_cmd = (
+            f"Dec2 = Dec2({pad_xy + 1}:{pad_xy}+mImage, "
+            f"{pad_xy + 1}:{pad_xy}+nImage, "
+            f"{pad_z + 1}:{pad_z}+NumberImages); "
+        )
+        matlab_cmd = (
+            f"addpath('{script_dir}'); "
+            f"{matlab_thread_cmd}"
+            f"FinalImage = readtiffstack('{image_path}'); "
+            f"mImage = size(FinalImage, 1); "
+            f"nImage = size(FinalImage, 2); "
+            f"NumberImages = size(FinalImage, 3); "
+            f"E1 = single(FinalImage); "
+            f"maxE1 = max(E1(:)); "
+            f"minE1 = min(E1(:)); "
+            f"psfr = single(readtiffstack('{psf_path}')); "
+            f"psfr = psfr / sum(psfr(:)); "
+            f"{pad_cmd}"
+            f"Dec2 = deconvlucy(E1, psfr, {n_iters}); "
+            f"{crop_cmd}"
+            f"decMin = min(Dec2(:)); "
+            f"decMax = max(Dec2(:)); "
+            f"if decMax > decMin; "
+            f"Dec2 = (Dec2 - decMin) / (decMax - decMin); "
+            f"Dec2 = Dec2 * (maxE1 - minE1) + minE1; "
+            f"end; "
+            f"Dec2 = uint16(max(0, min(65535, Dec2))); "
+            f"writetiffstack(Dec2, '{output_path}');"
+        )
+
+        matlab_args = ["matlab"]
+        if matlab_threads == 1:
+            matlab_args.append("-singleCompThread")
+        matlab_args.extend(["-batch", matlab_cmd])
+        env = os.environ.copy()
+        for name in (
+            "OMP_NUM_THREADS",
+            "OMP_THREAD_LIMIT",
+            "MKL_NUM_THREADS",
+            "OPENBLAS_NUM_THREADS",
+            "NUMEXPR_NUM_THREADS",
+        ):
+            env[name] = str(matlab_threads)
+
+        try:
+            result = subprocess.run(
+                matlab_args,
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=matlab_timeout if matlab_timeout > 0 else None,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"MATLAB deconvlucy timed out after {matlab_timeout}s.\n"
+                f"STDOUT: {exc.stdout or ''}\nSTDERR: {exc.stderr or ''}"
+            ) from exc
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"MATLAB deconvlucy failed (returncode={result.returncode}).\n"
+                f"STDOUT: {result.stdout}\nSTDERR: {result.stderr}"
+            )
+        if not output_path.exists():
+            raise RuntimeError("MATLAB produced no Lucy-Richardson Dec2 output")
+        return imread(str(output_path)).astype(np.uint16, copy=False)
 
 
 def _fwhm_pixels(line: np.ndarray) -> float:
@@ -150,8 +294,6 @@ def _psf_stats(name: str, psf: np.ndarray, dxy: float, dz: float) -> dict:
 
 
 def _pair_metrics(a: np.ndarray, b: np.ndarray) -> dict:
-    a = _normalise_psf(a)
-    b = _normalise_psf(b)
     av = a.ravel().astype(np.float64)
     bv = b.ravel().astype(np.float64)
     da = av - av.mean()
@@ -181,6 +323,22 @@ def _pair_metrics(a: np.ndarray, b: np.ndarray) -> dict:
         "mse": float(np.mean(diff * diff)),
         "mae": float(np.mean(np.abs(diff))),
         "max_abs_diff": float(np.max(np.abs(diff))),
+    }
+
+
+def _volume_stats(name: str, volume: np.ndarray) -> dict:
+    values = np.asarray(volume).astype(np.float64, copy=False)
+    return {
+        "name": name,
+        "shape": list(volume.shape),
+        "dtype": str(volume.dtype),
+        "min": float(np.min(values)),
+        "max": float(np.max(values)),
+        "mean": float(np.mean(values)),
+        "std": float(np.std(values)),
+        "p1": float(np.percentile(values, 1)),
+        "p50": float(np.percentile(values, 50)),
+        "p99": float(np.percentile(values, 99)),
     }
 
 
@@ -227,8 +385,39 @@ def _make_cross_section_montage(psfs: dict[str, np.ndarray]) -> np.ndarray:
     return np.stack(panels, axis=0)
 
 
+def _make_decon_montage(volumes: dict[str, np.ndarray]) -> np.ndarray:
+    panels = []
+    target_shape = (256, 256)
+    reference = volumes["reference_matlab_dec2"]
+    zc = reference.shape[0] // 2
+    yc = reference.shape[1] // 2
+    xc = reference.shape[2] // 2
+    for name in ("pipeline_cuda_db2", "reference_matlab_dec2"):
+        volume = volumes[name]
+        planes = [
+            volume[zc, :, :],
+            volume[:, yc, :],
+            volume[:, :, xc],
+        ]
+        row = [_resize_nearest(_normalise_plane(p), target_shape) for p in planes]
+        panels.append(np.concatenate(row, axis=1))
+
+    diff = np.abs(
+        volumes["pipeline_cuda_db2"].astype(np.float32)
+        - volumes["reference_matlab_dec2"].astype(np.float32)
+    )
+    planes = [
+        diff[zc, :, :],
+        diff[:, yc, :],
+        diff[:, :, xc],
+    ]
+    row = [_resize_nearest(_normalise_plane(p), target_shape) for p in planes]
+    panels.append(np.concatenate(row, axis=1))
+    return np.stack(panels, axis=0)
+
+
 def _write_metrics(metrics: dict, output_dir: Path) -> None:
-    (output_dir / "psf_metrics.json").write_text(
+    (output_dir / "decon_metrics.json").write_text(
         json.dumps(metrics, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
@@ -246,11 +435,16 @@ def _write_metrics(metrics: dict, output_dir: Path) -> None:
                 ]
             )
         )
-    (output_dir / "psf_metrics.tsv").write_text("\n".join(rows) + "\n", encoding="utf-8")
+    (output_dir / "decon_metrics.tsv").write_text("\n".join(rows) + "\n", encoding="utf-8")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Compare theoretical, chunked blind, and full blind PSFs.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Compare this pipeline's chunked blind + CUDA RL deconvolution "
+            "against the reference MATLAB deconvblind -> deconvlucy output."
+        )
+    )
     parser.add_argument("--image_path", required=True, help="Deskewed Top_shear directory.")
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--script_dir", default=str(Path(__file__).parent))
@@ -261,16 +455,25 @@ def main() -> None:
                         help="Center XY crop for sanity check. <=0 uses full XY.")
     parser.add_argument("--blind_iters", type=int, default=3)
     parser.add_argument("--chunk_xy", type=int, default=256)
+    parser.add_argument("--blind_passes", type=int, default=2,
+                        help="Chunked blind PSF passes for the pipeline-style output.")
+    parser.add_argument("--decon_chunk_xy", type=int, default=0,
+                        help="Core XY tile size for CUDA deconvolution. <=0 auto-sizes from VRAM.")
     parser.add_argument("--pad_xy", type=int, default=32)
     parser.add_argument("--pad_z", type=int, default=20)
     parser.add_argument("--blind_workers", type=int, default=1)
     parser.add_argument("--matlab_threads", type=int, default=1)
     parser.add_argument("--matlab_workers", type=int, default=1)
     parser.add_argument("--matlab_timeout", type=int, default=1800)
+    parser.add_argument("--lucy_iters", type=int, default=10,
+                        help="MATLAB deconvlucy iterations for the second-pass Dec2 output.")
     parser.add_argument("--blind_z_slices", type=int, default=64)
     parser.add_argument("--snr_weight_cap", type=float, default=100.0)
     parser.add_argument("--prefetch_chunks", type=int, default=0)
     parser.add_argument("--vram_gb", type=float, default=None)
+    parser.add_argument("--decon_workers", type=int, default=1)
+    parser.add_argument("--overlap_xy", type=int, default=0,
+                        help="Override CUDA decon XY overlap. <=0 uses the pipeline default.")
     parser.add_argument("--na", type=float, default=1.0)
     parser.add_argument("--detection_na", type=float, default=None)
     parser.add_argument("--illumination_na", type=float, default=None)
@@ -302,7 +505,7 @@ def main() -> None:
     channels = _parse_int_filter(args.channels)
     timepoints = _parse_int_filter(args.timepoints)
     input_tiff = _find_input_tiff(image_dir, args.tiff_index, channels, timepoints)
-    print(f"Using TIFF for PSF sanity check: {input_tiff}", flush=True)
+    print(f"Using TIFF for deconvolution comparison: {input_tiff}", flush=True)
 
     dxy = resolve_dxy(args.dxy, args.camera_pixel_size, args.magnification)
     psf_seed = generate_theoretical_psf(
@@ -337,11 +540,12 @@ def main() -> None:
         flush=True,
     )
 
-    print("Estimating chunked blind PSF on sanity crop...", flush=True)
+    print("Estimating pipeline-style chunked blind PSF on comparison crop...", flush=True)
     chunked_blind = estimate_psf_from_chunks(
         image_path=crop_tiff,
         psf_seed=psf_seed,
         n_iters=args.blind_iters,
+        blind_passes=args.blind_passes,
         chunk_xy=args.chunk_xy,
         pad_xy=args.pad_xy,
         pad_z=args.pad_z,
@@ -358,7 +562,31 @@ def main() -> None:
         blind_z_slices=args.blind_z_slices,
     )
 
-    print("Estimating full-window blind PSF on same sanity crop/window...", flush=True)
+    print("Running pipeline-style CUDA Richardson-Lucy deconvolution...", flush=True)
+    detection_na = args.detection_na if args.detection_na is not None else args.na
+    pipeline_decon = deconvolve_tiff(
+        image_path=crop_tiff,
+        psf=chunked_blind,
+        n_iters=args.lucy_iters,
+        dz=args.dz,
+        dxy=dxy,
+        wavelength=args.wavelength,
+        na=detection_na,
+        ni=args.ni,
+        chunk_xy=args.decon_chunk_xy,
+        vram_gb=args.vram_gb,
+        decon_workers=args.decon_workers,
+        overlap_xy=args.overlap_xy,
+    )
+    pipeline_decon_path = output_dir / "pipeline_cuda_DB2.tif"
+    imwrite(str(pipeline_decon_path), pipeline_decon)
+    print(
+        f"Saved pipeline-style deconvolution output: "
+        f"{pipeline_decon_path} shape={pipeline_decon.shape}",
+        flush=True,
+    )
+
+    print("Estimating reference full-window blind PSF on same comparison crop/window...", flush=True)
     full_volume = open_tiff_memmap(crop_tiff)
     full_window = np.asarray(full_volume)
     print(f"Full blind window shape={full_window.shape}", flush=True)
@@ -366,10 +594,30 @@ def main() -> None:
         volume=full_window,
         psf_seed=psf_seed,
         n_iters=args.blind_iters,
+        pad_xy=args.pad_xy,
         pad_z=args.pad_z,
         script_dir=script_dir,
         matlab_threads=args.matlab_threads,
         matlab_timeout=args.matlab_timeout,
+    )
+
+    print("Running reference MATLAB second-pass Lucy-Richardson deconvolution...", flush=True)
+    reference_decon = _run_matlab_deconvlucy(
+        volume=full_window,
+        psf=full_blind,
+        n_iters=args.lucy_iters,
+        pad_xy=args.pad_xy,
+        pad_z=args.pad_z,
+        script_dir=script_dir,
+        matlab_threads=args.matlab_threads,
+        matlab_timeout=args.matlab_timeout,
+    )
+    reference_decon_path = output_dir / "reference_matlab_Dec2.tif"
+    imwrite(str(reference_decon_path), reference_decon)
+    print(
+        f"Saved reference MATLAB deconvolution output: "
+        f"{reference_decon_path} shape={reference_decon.shape}",
+        flush=True,
     )
 
     psfs = {
@@ -380,27 +628,47 @@ def main() -> None:
     for name, psf in psfs.items():
         imwrite(str(output_dir / f"{name}_psf.tif"), psf.astype(np.float32, copy=False))
 
+    decon_outputs = {
+        "pipeline_cuda_db2": pipeline_decon,
+        "reference_matlab_dec2": reference_decon,
+    }
+    if pipeline_decon.shape != reference_decon.shape:
+        raise ValueError(
+            f"Deconvolution shapes differ: pipeline={pipeline_decon.shape}, "
+            f"reference={reference_decon.shape}"
+        )
+
     metrics = {
         "input_tiff": str(input_tiff),
-        "sanity_crop_shape_zyx": list(cropped.shape),
-        "full_blind_window_shape_zyx": list(full_window.shape),
+        "comparison_crop_shape_zyx": list(cropped.shape),
+        "reference_window_shape_zyx": list(full_window.shape),
         "blind_z_window": [z_window.start, z_window.stop],
         "blind_z_window_detail": z_detail,
+        "outputs": {
+            "pipeline_cuda_db2": str(pipeline_decon_path),
+            "reference_matlab_dec2": str(reference_decon_path),
+            "decon_montage": str(output_dir / "decon_cross_sections.tif"),
+        },
         "parameters": vars(args),
         "resolved_dxy": dxy,
+        "decon_outputs": {
+            name: _volume_stats(name, volume)
+            for name, volume in decon_outputs.items()
+        },
         "psfs": {
             name: _psf_stats(name, psf, dxy=dxy, dz=args.dz)
             for name, psf in psfs.items()
         },
         "comparisons": {
-            "chunked_blind_vs_full_blind": _pair_metrics(psfs["chunked_blind"], psfs["full_blind"]),
-            "chunked_blind_vs_theoretical": _pair_metrics(psfs["chunked_blind"], psfs["theoretical"]),
-            "full_blind_vs_theoretical": _pair_metrics(psfs["full_blind"], psfs["theoretical"]),
+            "pipeline_cuda_db2_vs_reference_matlab_dec2": _pair_metrics(
+                pipeline_decon,
+                reference_decon,
+            ),
         },
     }
     _write_metrics(metrics, output_dir)
-    imwrite(str(output_dir / "psf_cross_sections.tif"), _make_cross_section_montage(psfs))
-    print(f"PSF sanity outputs written to {output_dir}", flush=True)
+    imwrite(str(output_dir / "decon_cross_sections.tif"), _make_decon_montage(decon_outputs))
+    print(f"Deconvolution comparison outputs written to {output_dir}", flush=True)
 
 
 if __name__ == "__main__":
