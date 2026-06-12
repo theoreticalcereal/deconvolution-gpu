@@ -343,6 +343,41 @@ def _volume_stats(name: str, volume: np.ndarray) -> dict:
     }
 
 
+def _center_crop_to_shape(volume: np.ndarray, shape: tuple[int, int, int]) -> np.ndarray:
+    if volume.ndim != 3:
+        raise ValueError(f"Expected 3-D volume, got shape {volume.shape}")
+    slices = []
+    for current, target in zip(volume.shape, shape):
+        if target > current:
+            raise ValueError(f"Cannot crop shape {volume.shape} to larger shape {shape}")
+        start = (current - target) // 2
+        slices.append(slice(start, start + target))
+    return np.asarray(volume[tuple(slices)])
+
+
+def _align_decon_outputs(
+    pipeline: np.ndarray,
+    reference: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, dict]:
+    if pipeline.ndim != 3 or reference.ndim != 3:
+        raise ValueError(
+            f"Expected 3-D deconvolution outputs, got "
+            f"pipeline={pipeline.shape}, reference={reference.shape}"
+        )
+    common_shape = tuple(min(a, b) for a, b in zip(pipeline.shape, reference.shape))
+    alignment = {
+        "original_pipeline_shape_zyx": list(pipeline.shape),
+        "original_reference_shape_zyx": list(reference.shape),
+        "comparison_shape_zyx": list(common_shape),
+        "center_cropped_for_comparison": pipeline.shape != reference.shape,
+    }
+    return (
+        _center_crop_to_shape(pipeline, common_shape),
+        _center_crop_to_shape(reference, common_shape),
+        alignment,
+    )
+
+
 def _normalise_plane(plane: np.ndarray) -> np.ndarray:
     plane = np.asarray(plane, dtype=np.float32)
     plane = plane - float(plane.min())
@@ -638,15 +673,35 @@ def main() -> None:
     for name, psf in psfs.items():
         imwrite(str(output_dir / f"{name}_psf.tif"), psf.astype(np.float32, copy=False))
 
+    pipeline_compare, reference_compare, shape_alignment = _align_decon_outputs(
+        pipeline_decon,
+        reference_decon,
+    )
+    if shape_alignment["center_cropped_for_comparison"]:
+        print(
+            "Deconvolution shapes differ; center-cropping both outputs to "
+            f"{tuple(shape_alignment['comparison_shape_zyx'])} for metrics.",
+            flush=True,
+        )
+        imwrite(str(output_dir / "pipeline_cuda_DB2_aligned.tif"), pipeline_compare)
+        imwrite(str(output_dir / "reference_matlab_Dec2_aligned.tif"), reference_compare)
+
     decon_outputs = {
         "pipeline_cuda_db2": pipeline_decon,
         "reference_matlab_dec2": reference_decon,
     }
-    if pipeline_decon.shape != reference_decon.shape:
-        raise ValueError(
-            f"Deconvolution shapes differ: pipeline={pipeline_decon.shape}, "
-            f"reference={reference_decon.shape}"
-        )
+    decon_comparison_outputs = {
+        "pipeline_cuda_db2": pipeline_compare,
+        "reference_matlab_dec2": reference_compare,
+    }
+    output_paths = {
+        "pipeline_cuda_db2": str(pipeline_decon_path),
+        "reference_matlab_dec2": str(reference_decon_path),
+        "decon_montage": str(output_dir / "decon_cross_sections.tif"),
+    }
+    if shape_alignment["center_cropped_for_comparison"]:
+        output_paths["pipeline_cuda_db2_aligned"] = str(output_dir / "pipeline_cuda_DB2_aligned.tif")
+        output_paths["reference_matlab_dec2_aligned"] = str(output_dir / "reference_matlab_Dec2_aligned.tif")
 
     metrics = {
         "input_tiff": str(input_tiff),
@@ -654,11 +709,8 @@ def main() -> None:
         "reference_window_shape_zyx": list(full_window.shape),
         "blind_z_window": [z_window.start, z_window.stop],
         "blind_z_window_detail": z_detail,
-        "outputs": {
-            "pipeline_cuda_db2": str(pipeline_decon_path),
-            "reference_matlab_dec2": str(reference_decon_path),
-            "decon_montage": str(output_dir / "decon_cross_sections.tif"),
-        },
+        "outputs": output_paths,
+        "shape_alignment": shape_alignment,
         "parameters": vars(args),
         "resolved_dxy": dxy,
         "decon_outputs": {
@@ -671,13 +723,13 @@ def main() -> None:
         },
         "comparisons": {
             "pipeline_cuda_db2_vs_reference_matlab_dec2": _pair_metrics(
-                pipeline_decon,
-                reference_decon,
+                pipeline_compare,
+                reference_compare,
             ),
         },
     }
     _write_metrics(metrics, output_dir)
-    imwrite(str(output_dir / "decon_cross_sections.tif"), _make_decon_montage(decon_outputs))
+    imwrite(str(output_dir / "decon_cross_sections.tif"), _make_decon_montage(decon_comparison_outputs))
     print(f"Deconvolution comparison outputs written to {output_dir}", flush=True)
 
 
