@@ -9,7 +9,7 @@ A Nextflow DSL2 pipeline for GPU-accelerated deskewing and deconvolution of ligh
 | Requirement | Version / Notes |
 |---|---|
 | Java | 17 or later (required by Nextflow) |
-| Nextflow | Bundled (`./nextflow` wrapper included) |
+| Nextflow | Must be loadable from the cluster module system |
 | Mamba | Must be loadable via `module load mamba` |
 | SLURM | Pipeline submits jobs to `super` (DESKEW) and `GPU` (DECON) queues |
 | CUDA | 11.8 (loaded via `module load cuda/11.8`) |
@@ -42,7 +42,7 @@ Reads the deskewed `CH*.tif` files from `Top_shear/` and runs Richardson–Lucy 
 ## Running the Pipeline
 
 ```bash
-./nextflow run main.nf -profile my_cluster \
+nextflow run main.nf -profile my_cluster \
     --image_path /path/to/raw/tiffs \
     --cell_name MyCellName \
     --output_dir /path/to/output
@@ -53,7 +53,7 @@ Add `-resume` to restart from the last successful checkpoint after a failure.
 To skip deskewing and run deconvolution on already-deskewed data:
 
 ```bash
-./nextflow run main.nf -profile my_cluster \
+nextflow run main.nf -profile my_cluster \
     --decon_only true \
     --decon_input_dir /path/to/Top_shear \
     --cell_name MyCellName \
@@ -64,7 +64,7 @@ To compare the pipeline deconvolution against the reference MATLAB
 `deconvblind -> deconvlucy` flow on already-deskewed data:
 
 ```bash
-./nextflow run main.nf -profile compare_psf \
+nextflow run main.nf -profile compare_psf \
     --decon_input_dir /path/to/Top_shear \
     --output_dir /path/to/output
 ```
@@ -204,7 +204,7 @@ comparison/
 
 ## Notes
 
-- The bundled `./nextflow` executable is a self-contained Nextflow launcher. Do not use a system-installed Nextflow unless it is version-compatible.
+- Load the cluster Nextflow module before running the pipeline.
 - The pipeline profile `my_cluster` enables conda/mamba. The `docker` profile is also available for non-HPC use.
 - DESKEW runs on the `super` queue (4 CPUs, 32 GB). DECON runs on the `GPU` queue (8 CPUs, 32 GB, 1 GPU).
 - The active deconvolution PSF is always the merged blind estimate. The theoretical PSF generated from optical parameters is only a starting guess for blind estimation.

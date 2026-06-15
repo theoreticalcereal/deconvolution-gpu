@@ -153,6 +153,27 @@ def _decon_chunk(
     return np.clip(result, 0, 65535).astype(np.uint16)
 
 
+def _match_input_intensity_range(output: np.ndarray, input_volume: np.ndarray) -> np.ndarray:
+    """Map deconvolved output to the original TIFF intensity range."""
+    in_min = float(np.min(input_volume))
+    in_max = float(np.max(input_volume))
+    out_min = float(np.min(output))
+    out_max = float(np.max(output))
+    dtype_max = float(np.iinfo(np.uint16).max)
+
+    if not np.isfinite([in_min, in_max, out_min, out_max]).all():
+        raise ValueError("Cannot rescale deconvolution output with non-finite intensity bounds")
+
+    if out_max > out_min and in_max > in_min:
+        scaled = output.astype(np.float32, copy=False)
+        scaled = (scaled - out_min) / (out_max - out_min)
+        scaled = scaled * (in_max - in_min) + in_min
+    else:
+        scaled = output
+
+    return np.clip(np.rint(scaled), 0, dtype_max).astype(np.uint16)
+
+
 # ---------------------------------------------------------------------------
 # Per-TIFF deconvolution
 # ---------------------------------------------------------------------------
@@ -250,6 +271,13 @@ def deconvolve_tiff(
             output = processed.compute(scheduler=scheduler, num_workers=decon_workers)
     finally:
         psf_path.unlink(missing_ok=True)
+
+    output = _match_input_intensity_range(output, volume)
+    print(
+        f"  Matched deconvolution intensity range to input: "
+        f"min={int(output.min())}, max={int(output.max())}",
+        flush=True,
+    )
 
     return output
 
