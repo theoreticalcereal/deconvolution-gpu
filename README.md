@@ -41,8 +41,10 @@ Reads the deskewed `CH*.tif` files from `Top_shear/` and runs Richardson–Lucy 
 
 ## Running the Pipeline
 
+For light-sheet/ctASLM data that still needs deskewing:
+
 ```bash
-nextflow run main.nf -profile my_cluster \
+nextflow run main.nf -profile light_sheet \
     --image_path /path/to/raw/tiffs \
     --cell_name MyCellName \
     --output_dir /path/to/output
@@ -50,15 +52,22 @@ nextflow run main.nf -profile my_cluster \
 
 Add `-resume` to restart from the last successful checkpoint after a failure.
 
-To skip deskewing and run deconvolution on already-deskewed data:
+For wide-frame or already-stacked 3-D TIFFs that should not be deskewed:
 
 ```bash
-nextflow run main.nf -profile my_cluster \
-    --decon_only true \
-    --decon_input_dir /path/to/Top_shear \
-    --cell_name MyCellName \
+nextflow run main.nf -profile wide_frame \
+    --decon_input_dir /path/to/renamed_stack_tiffs \
+    --channels 0 \
+    --timepoints 0 \
+    --wavelength 0.525 \
     --output_dir /path/to/output
 ```
+
+The `wide_frame` profile defaults to `--decon_only true`, `--psf_mode single`,
+`--dxy 0.167`, `--dz 1.0`, `--ni 1.56`, `--ns 1.56`, and NA `0.7`.
+The `light_sheet` profile uses `--psf_mode light_sheet`, which builds the
+blind-estimation seed from detection PSF times a rotated illumination PSF.
+Override any of these on the command line when a dataset differs.
 
 To compare the pipeline deconvolution against the reference MATLAB
 `deconvblind -> deconvlucy` flow on already-deskewed data:
@@ -161,6 +170,8 @@ These are used to generate the theoretical PSF seed for blind estimation. The th
 | `--psf_size_z` | `101` | Z dimension of PSF volume (voxels) |
 | `--psf_size_xy` | `61` | XY dimension of PSF volume (voxels) |
 | `--psf_model` | `vectorial` | PSF model type: `vectorial`, `scalar`, or `gaussian` |
+| `--psf_mode` | `single` | Seed mode: `single` detection PSF or `light_sheet` detection × rotated illumination PSF |
+| `--light_sheet_angle` | `90` | Illumination PSF rotation angle in degrees for `--psf_mode light_sheet` |
 | `--oversample_factor` | `3` | PSF model oversampling factor |
 | `--camera_pixel_size` | `''` | Camera pixel size (µm); used to derive `dxy` when `--dxy <= 0` |
 | `--magnification` | `''` | Total magnification; used to derive `dxy` when `--dxy <= 0` |
@@ -203,7 +214,8 @@ comparison/
 ## Notes
 
 - Load the cluster Nextflow module before running the pipeline.
-- The pipeline profile `my_cluster` enables conda/mamba. The `docker` profile is also available for non-HPC use.
+- The `light_sheet` profile runs DESKEW then DECON; the `wide_frame` profile skips DESKEW and expects `CH##_######.tif(f)` 3-D stacks.
+- The `my_cluster` profile only enables cluster conda/mamba defaults. The `docker` profile is also available for non-HPC use.
 - DESKEW runs on the `super` queue, while DECON runs on the `GPU` queue.
 - The active deconvolution PSF is always the merged blind estimate. The theoretical PSF generated from optical parameters is only a starting guess for blind estimation.
 - Nextflow work directories accumulate large intermediate files. Clean up with `nextflow clean -f` after a successful run.

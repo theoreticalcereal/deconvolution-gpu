@@ -28,11 +28,11 @@ from psf_estimation import (
     DEFAULT_BLIND_Z_SLICES,
     DEFAULT_SNR_WEIGHT_CAP,
     estimate_psf_from_chunks,
-    generate_theoretical_psf,
     open_tiff_memmap,
     resolve_dxy,
     resolve_chunk_xy,
 )
+from psf_modes import generate_psf_seed
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +370,10 @@ def main() -> None:
                         help="PSF model oversampling factor.")
     parser.add_argument("--psf_model", choices=("vectorial", "scalar", "gaussian"), default="vectorial",
                         help="psfmodels PSF model.")
+    parser.add_argument("--psf_mode", choices=("single", "light_sheet"), default="single",
+                        help="Seed PSF mode: single detection PSF or light-sheet detection x rotated illumination PSF.")
+    parser.add_argument("--light_sheet_angle", type=float, default=90.0,
+                        help="Degrees to rotate illumination PSF in Z/X for light_sheet PSF mode.")
     parser.add_argument("--camera_pixel_size", type=float, default=None,
                         help="Camera pixel size in µm; used to derive dxy when --dxy <= 0.")
     parser.add_argument("--magnification", type=float, default=None,
@@ -419,10 +423,11 @@ def main() -> None:
     dxy = resolve_dxy(args.dxy, args.camera_pixel_size, args.magnification)
     detection_na = args.detection_na if args.detection_na is not None else args.na
 
-    # Build the optical-model PSF seed.  This is intentionally not accepted as
+    # Build the optical-model PSF seed. This is intentionally not accepted as
     # the final deconvolution PSF because the measured blind estimates are much
     # closer to the observed data.
-    psf_seed = generate_theoretical_psf(
+    psf_seed = generate_psf_seed(
+        psf_mode=args.psf_mode,
         na=args.na,
         detection_na=args.detection_na,
         illumination_na=args.illumination_na,
@@ -442,6 +447,12 @@ def main() -> None:
         psf_size_z=args.psf_size_z,
         psf_size_xy=args.psf_size_xy,
         background=args.background,
+        light_sheet_angle=args.light_sheet_angle,
+    )
+    print(
+        f"Using PSF seed mode={args.psf_mode}, shape={psf_seed.shape}, "
+        f"sum={float(psf_seed.sum()):.6g}",
+        flush=True,
     )
 
     print("Running blind PSF estimation on first TIFF...", flush=True)

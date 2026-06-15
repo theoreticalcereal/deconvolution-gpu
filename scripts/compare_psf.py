@@ -38,12 +38,12 @@ from psf_estimation import (
     _normalise_psf,
     _write_chunk,
     _write_matlab_stack,
-    generate_theoretical_psf,
     estimate_psf_from_chunks,
     open_tiff_memmap,
     resolve_dxy,
     select_blind_z_window,
 )
+from psf_modes import generate_psf_seed
 
 CHANNEL_TIMEPOINT_RE = re.compile(r"^CH(?P<channel>\d+)_(?P<timepoint>\d+)(?:_registered_consistent)?$")
 GAUSSIAN_FWHM_FACTOR = 2.0 * np.sqrt(2.0 * np.log(2.0))
@@ -883,6 +883,8 @@ def main() -> None:
     parser.add_argument("--ti0", type=float, default=None)
     parser.add_argument("--oversample_factor", type=int, default=3)
     parser.add_argument("--psf_model", choices=("vectorial", "scalar", "gaussian"), default="vectorial")
+    parser.add_argument("--psf_mode", choices=("single", "light_sheet"), default="single")
+    parser.add_argument("--light_sheet_angle", type=float, default=90.0)
     parser.add_argument("--camera_pixel_size", type=float, default=None)
     parser.add_argument("--magnification", type=float, default=None)
     parser.add_argument("--dxy", type=float, default=0.118)
@@ -905,7 +907,8 @@ def main() -> None:
     # Generate the same theoretical PSF seed for both the chunked pipeline path
     # and the full-window MATLAB reference path.
     dxy = resolve_dxy(args.dxy, args.camera_pixel_size, args.magnification)
-    psf_seed = generate_theoretical_psf(
+    psf_seed = generate_psf_seed(
+        psf_mode=args.psf_mode,
         na=args.na,
         detection_na=args.detection_na,
         illumination_na=args.illumination_na,
@@ -925,6 +928,12 @@ def main() -> None:
         psf_size_z=args.psf_size_z,
         psf_size_xy=args.psf_size_xy,
         background=args.background,
+        light_sheet_angle=args.light_sheet_angle,
+    )
+    print(
+        f"Using PSF seed mode={args.psf_mode}, shape={psf_seed.shape}, "
+        f"sum={float(psf_seed.sum()):.6g}",
+        flush=True,
     )
 
     # The comparison crop is intentionally larger than one chunk where possible

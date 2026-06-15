@@ -36,6 +36,8 @@ process DECON {
     def ti0_flag         = params.ti0         ? "--ti0 ${params.ti0}"                 : ""
     def oversample_factor_flag = params.oversample_factor ? "--oversample_factor ${params.oversample_factor}" : ""
     def psf_model_flag   = params.psf_model   ? "--psf_model ${params.psf_model}"     : ""
+    def psf_mode_flag    = params.psf_mode    ? "--psf_mode ${params.psf_mode}"       : ""
+    def light_sheet_angle_flag = params.light_sheet_angle != null ? "--light_sheet_angle ${params.light_sheet_angle}" : ""
     def camera_pixel_size_flag = params.camera_pixel_size ? "--camera_pixel_size ${params.camera_pixel_size}" : ""
     def magnification_flag = params.magnification ? "--magnification ${params.magnification}" : ""
     def dxy_flag         = params.dxy != null ? "--dxy ${params.dxy}"                 : ""
@@ -90,6 +92,8 @@ process DECON {
         ${ti0_flag} \\
         ${oversample_factor_flag} \\
         ${psf_model_flag} \\
+        ${psf_mode_flag} \\
+        ${light_sheet_angle_flag} \\
         ${camera_pixel_size_flag} \\
         ${magnification_flag} \\
         ${dxy_flag} \\
