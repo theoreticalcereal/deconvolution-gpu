@@ -1,6 +1,6 @@
 # deconvolution-gpu
 
-A Nextflow DSL2 pipeline for GPU-accelerated deskewing and deconvolution of light-sheet microscopy (ctASLM) TIFF volumes. The pipeline runs on SLURM and uses a conda environment managed by **mamba**. It requires **Java 17+** and **mamba** to be available on the cluster.
+A Nextflow DSL2 pipeline for GPU-accelerated deskewing and deconvolution of light-sheet microscopy (ctASLM) TIFF volumes. The pipeline runs on SLURM and uses a conda environment managed by **mamba**. It requires **Java 17+** and **mamba** to be available on the cluster. Made for BioHPC @ UTSouthwestern. 
 
 ---
 
@@ -20,7 +20,7 @@ The conda environment (`decon_env`) is built automatically from `environment.yml
 
 ---
 
-## How It Works
+## Pipeline Process
 
 The pipeline has two sequential stages:
 
@@ -90,10 +90,8 @@ All parameters can be passed on the command line as `--param_name value` or set 
 |---|---|---|
 | `--output_dir` | `output` | Root directory for all outputs |
 | `--decon_only` | `false` | Skip deskewing; go straight to deconvolution |
-| `--compare_psf` | `false` | Run the deconvolution comparison workflow instead of deskew/decon; enabled by `-profile compare_psf` |
 | `--decon_input_dir` | `''` | Input directory for `--decon_only` mode (overrides `--image_path`) |
 | `--tiff_index` | `0` | Matching input TIFF index used by the comparison workflow |
-| `--sanity_xy` | `768` | Center XY crop size used by the comparison workflow; `<=0` uses full XY |
 
 ### Deskew
 
@@ -206,6 +204,6 @@ comparison/
 
 - Load the cluster Nextflow module before running the pipeline.
 - The pipeline profile `my_cluster` enables conda/mamba. The `docker` profile is also available for non-HPC use.
-- DESKEW runs on the `super` queue (4 CPUs, 32 GB). DECON runs on the `GPU` queue (8 CPUs, 32 GB, 1 GPU).
+- DESKEW runs on the `super` queue, while DECON runs on the `GPU` queue.
 - The active deconvolution PSF is always the merged blind estimate. The theoretical PSF generated from optical parameters is only a starting guess for blind estimation.
 - Nextflow work directories accumulate large intermediate files. Clean up with `nextflow clean -f` after a successful run.
