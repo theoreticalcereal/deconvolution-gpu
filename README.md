@@ -52,22 +52,72 @@ nextflow run main.nf -profile light_sheet \
 
 Add `-resume` to restart from the last successful checkpoint after a failure.
 
-For wide-frame or already-stacked 3-D TIFFs that should not be deskewed:
+For wide-frame data:
 
 ```bash
 nextflow run main.nf -profile wide_frame \
-    --decon_input_dir /path/to/renamed_stack_tiffs \
-    --channels 0 \
-    --timepoints 0 \
+    --image_path /path/to/raw/tiffs \
+    --cell_name MyCellName \
+    --camera_pixel_size 6.5 \
+    --magnification 36 \
+    --dxy 0.167 \
+    --dz 1.0 \
+    --ni 1.56 \
+    --ns 1.56 \
+    --detection_na 0.7 \
+    --illumination_na 0.7 \
     --wavelength 0.525 \
     --output_dir /path/to/output
 ```
 
-The `wide_frame` profile defaults to `--decon_only true`, `--psf_mode single`,
-`--dxy 0.167`, `--dz 1.0`, `--ni 1.56`, `--ns 1.56`, and NA `0.7`.
-The `light_sheet` profile uses `--psf_mode light_sheet`, which builds the
-blind-estimation seed from detection PSF times a rotated illumination PSF.
-Override any of these on the command line when a dataset differs.
+For already-stacked wide-frame 3-D TIFFs that should not be deskewed, add
+`--decon_only true` and use `--decon_input_dir`:
+
+```bash
+nextflow run main.nf -profile wide_frame \
+    --decon_only true \
+    --decon_input_dir /path/to/stack_tiffs \
+    --channels 0 \
+    --timepoints 0 \
+    --camera_pixel_size 6.5 \
+    --magnification 36 \
+    --dxy 0.167 \
+    --dz 1.0 \
+    --ni 1.56 \
+    --ns 1.56 \
+    --detection_na 0.7 \
+    --illumination_na 0.7 \
+    --wavelength 0.525 \
+    --output_dir /path/to/output
+```
+
+The `wide_frame` profile only selects `--psf_mode single`; pass voxel size,
+refractive index, NA, wavelength, and camera calibration values for each run.
+It does not skip deskew unless `--decon_only true` is passed.
+
+For already-stacked light-sheet data that should not be deskewed:
+
+```bash
+nextflow run main.nf -profile light_sheet_decon \
+    --decon_input_dir /path/to/renamed_stack_tiffs \
+    --channels 0 \
+    --timepoints 0 \
+    --camera_pixel_size 6.5 \
+    --magnification 36 \
+    --dxy 0.167 \
+    --dz 1.0 \
+    --ni 1.56 \
+    --ns 1.56 \
+    --detection_na 0.7 \
+    --illumination_na 0.7 \
+    --wavelength 0.525 \
+    --output_dir /path/to/output
+```
+
+The `light_sheet_decon` profile uses `--decon_only true` and
+`--psf_mode light_sheet`, which builds the blind-estimation seed from detection
+PSF times a rotated illumination PSF. Pass dataset-specific optical parameters
+on every run.
 
 To compare the pipeline deconvolution against the reference MATLAB
 `deconvblind -> deconvlucy` flow on already-deskewed data:
@@ -77,6 +127,10 @@ nextflow run main.nf -profile compare_psf \
     --decon_input_dir /path/to/Top_shear \
     --output_dir /path/to/output
 ```
+
+Add `--compare_psf_modes true` to run both wide-frame (`psf_mode single`)
+and light-sheet (`psf_mode light_sheet`) comparisons and write a pairwise
+summary across the generated pipeline and MATLAB outputs.
 
 Comparison outputs are published to `<output_dir>/comparison/`.
 
@@ -171,6 +225,7 @@ These are used to generate the theoretical PSF seed for blind estimation. The th
 | `--psf_size_xy` | `61` | XY dimension of PSF volume (voxels) |
 | `--psf_model` | `vectorial` | PSF model type: `vectorial`, `scalar`, or `gaussian` |
 | `--psf_mode` | `single` | Seed mode: `single` detection PSF or `light_sheet` detection × rotated illumination PSF |
+| `--compare_psf_modes` | `false` | In `compare_psf` mode, run both wide-frame and light-sheet PSF seeds and summarize all outputs pairwise |
 | `--light_sheet_angle` | `90` | Illumination PSF rotation angle in degrees for `--psf_mode light_sheet` |
 | `--oversample_factor` | `3` | PSF model oversampling factor |
 | `--camera_pixel_size` | `''` | Camera pixel size (µm); used to derive `dxy` when `--dxy <= 0` |
@@ -214,7 +269,9 @@ comparison/
 ## Notes
 
 - Load the cluster Nextflow module before running the pipeline.
-- The `light_sheet` profile runs DESKEW then DECON; the `wide_frame` profile skips DESKEW and expects `CH##_######.tif(f)` 3-D stacks.
+- The `light_sheet` profile runs DESKEW then DECON.
+- The `wide_frame` profile skips DESKEW only when `--decon_only true` is passed.
+- The `light_sheet_decon` profile skips DESKEW and expects `CH##_######.tif(f)` 3-D stacks.
 - The `my_cluster` profile only enables cluster conda/mamba defaults. The `docker` profile is also available for non-HPC use.
 - DESKEW runs on the `super` queue, while DECON runs on the `GPU` queue.
 - The active deconvolution PSF is always the merged blind estimate. The theoretical PSF generated from optical parameters is only a starting guess for blind estimation.

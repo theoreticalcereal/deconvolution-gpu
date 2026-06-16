@@ -12,10 +12,12 @@ metrics, and per-axis Gaussian/FWHM profile summaries for the PSFs.
 import argparse
 import html
 import inspect
+import itertools
 import json
 import re
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -832,6 +834,114 @@ def _write_psf_profile_svg(metrics: dict, output_dir: Path) -> None:
     (output_dir / "psf_axis_profiles.svg").write_text("\n".join(parts) + "\n", encoding="utf-8")
 
 
+def _subprocess_args_for_mode(args: argparse.Namespace, psf_mode: str, output_dir: Path) -> list[str]:
+    """Build a single-mode invocation from the current multi-mode arguments."""
+    command = [sys.executable, str(Path(__file__).resolve())]
+    skip_keys = {"compare_psf_modes", "psf_mode", "output_dir"}
+    for key, value in vars(args).items():
+        if key in skip_keys or value is None:
+            continue
+        flag = f"--{key}"
+        if isinstance(value, bool):
+            if value:
+                command.append(flag)
+            continue
+        command.extend([flag, str(value)])
+    command.extend(["--psf_mode", psf_mode, "--output_dir", str(output_dir)])
+    return command
+
+
+def _write_pairwise_summary(metrics: dict, output_dir: Path) -> None:
+    rows = [
+        "comparison\tpearson_correlation\tncc\tssim_global\tmse\tmae\tmax_abs_diff\t"
+        "comparison_shape_zyx\tleft_shape_zyx\tright_shape_zyx"
+    ]
+    for name, values in metrics["comparisons"].items():
+        alignment = values["shape_alignment"]
+        rows.append(
+            "\t".join(
+                [
+                    name,
+                    f"{values['metrics']['pearson_correlation']:.8g}",
+                    f"{values['metrics']['ncc']:.8g}",
+                    f"{values['metrics']['ssim_global']:.8g}",
+                    f"{values['metrics']['mse']:.8g}",
+                    f"{values['metrics']['mae']:.8g}",
+                    f"{values['metrics']['max_abs_diff']:.8g}",
+                    "x".join(str(v) for v in alignment["comparison_shape_zyx"]),
+                    "x".join(str(v) for v in alignment["original_pipeline_shape_zyx"]),
+                    "x".join(str(v) for v in alignment["original_reference_shape_zyx"]),
+                ]
+            )
+        )
+    (output_dir / "compare_psf_modes_summary.tsv").write_text(
+        "\n".join(rows) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _run_compare_psf_modes(args: argparse.Namespace) -> None:
+    """Run wide-frame and light-sheet PSF comparisons, then summarize pairwise outputs."""
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    mode_specs = [
+        ("wide_frame", "single"),
+        ("light_sheet", "light_sheet"),
+    ]
+    mode_metrics = {}
+    for label, psf_mode in mode_specs:
+        mode_output_dir = output_dir / label
+        mode_output_dir.mkdir(parents=True, exist_ok=True)
+        print(
+            f"Running {label} comparison with psf_mode={psf_mode}: {mode_output_dir}",
+            flush=True,
+        )
+        subprocess.run(
+            _subprocess_args_for_mode(args, psf_mode, mode_output_dir),
+            check=True,
+        )
+        metrics_path = mode_output_dir / "decon_metrics.json"
+        if not metrics_path.exists():
+            raise RuntimeError(f"Mode comparison did not write {metrics_path}")
+        mode_metrics[label] = json.loads(metrics_path.read_text(encoding="utf-8"))
+
+    volumes = {}
+    output_paths = {}
+    for label, metrics in mode_metrics.items():
+        for output_name in ("pipeline_cuda_db2", "reference_matlab_dec2"):
+            path = Path(metrics["outputs"][output_name])
+            if not path.exists():
+                path = output_dir / label / path.name
+            key = f"{label}_{output_name}"
+            volumes[key] = imread(str(path))
+            output_paths[key] = str(path)
+
+    comparisons = {}
+    for left_name, right_name in itertools.combinations(volumes, 2):
+        left, right, alignment = _align_decon_outputs(volumes[left_name], volumes[right_name])
+        comparisons[f"{left_name}_vs_{right_name}"] = {
+            "shape_alignment": alignment,
+            "metrics": _pair_metrics(left, right),
+        }
+
+    combined_metrics = {
+        "mode_runs": mode_metrics,
+        "outputs": output_paths,
+        "decon_outputs": {
+            name: _volume_stats(name, volume)
+            for name, volume in volumes.items()
+        },
+        "comparisons": comparisons,
+        "parameters": vars(args),
+    }
+    (output_dir / "compare_psf_modes_metrics.json").write_text(
+        json.dumps(combined_metrics, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    _write_pairwise_summary(combined_metrics, output_dir)
+    print(f"Combined PSF-mode comparison outputs written to {output_dir}", flush=True)
+
+
 def main() -> None:
     """Parse CLI arguments, run both deconvolution paths, and write artifacts."""
     parser = argparse.ArgumentParser(
@@ -884,6 +994,8 @@ def main() -> None:
     parser.add_argument("--oversample_factor", type=int, default=3)
     parser.add_argument("--psf_model", choices=("vectorial", "scalar", "gaussian"), default="vectorial")
     parser.add_argument("--psf_mode", choices=("single", "light_sheet"), default="single")
+    parser.add_argument("--compare_psf_modes", action="store_true",
+                        help="Run both wide-frame/single and light-sheet PSF modes and summarize all outputs pairwise.")
     parser.add_argument("--light_sheet_angle", type=float, default=90.0)
     parser.add_argument("--camera_pixel_size", type=float, default=None)
     parser.add_argument("--magnification", type=float, default=None)
@@ -893,6 +1005,10 @@ def main() -> None:
     parser.add_argument("--psf_size_xy", type=int, default=61)
     parser.add_argument("--background", type=float, default=0.0)
     args = parser.parse_args()
+
+    if args.compare_psf_modes:
+        _run_compare_psf_modes(args)
+        return
 
     image_dir = Path(args.image_path)
     output_dir = Path(args.output_dir)

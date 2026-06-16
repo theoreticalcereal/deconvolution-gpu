@@ -55,6 +55,7 @@ process COMPARE_PSF {
     def vram_gb_flag     = params.vram_gb     ? "--vram_gb ${params.vram_gb}"         : ""
     def tiff_index_flag  = params.tiff_index != null ? "--tiff_index ${params.tiff_index}" : ""
     def sanity_xy_flag   = params.sanity_xy != null ? "--sanity_xy ${params.sanity_xy}" : ""
+    def compare_psf_modes_flag = params.compare_psf_modes ? "--compare_psf_modes" : ""
 
     """
     module load cuda/11.8
@@ -111,7 +112,8 @@ process COMPARE_PSF {
         ${prefetch_chunks_flag} \\
         ${decon_workers_flag} \\
         ${overlap_xy_flag} \\
-        ${vram_gb_flag}
+        ${vram_gb_flag} \\
+        ${compare_psf_modes_flag}
     """
 
     stub:
