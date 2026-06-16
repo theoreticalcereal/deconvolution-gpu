@@ -4,29 +4,13 @@ A Nextflow DSL2 pipeline for GPU-accelerated deskewing and deconvolution of ligh
 
 ---
 
-## Requirements
-
-| Requirement | Version / Notes |
-|---|---|
-| Java | 17 or later (required by Nextflow) |
-| Nextflow | Must be loadable from the cluster module system |
-| Mamba | Must be loadable via `module load mamba` |
-| SLURM | Pipeline submits jobs to `super` (DESKEW) and `GPU` (DECON) queues |
-| CUDA | 11.8 (loaded via `module load cuda/11.8`) |
-| MATLAB | 2024a (loaded via `module load matlab/2024a`) |
-| GPU | 1× NVIDIA GPU per DECON job (`--gres=gpu:1`) |
-
-The conda environment (`decon_env`) is built automatically from `environment.yml` the first time the pipeline runs. Key packages: `pycudadecon 0.5.1`, `cudatoolkit 11.8`, `dask`, `tifffile`, `numpy`, `psfmodels`, `antspyx`.
-
----
-
 ## Pipeline Process
 
-The pipeline has two sequential stages:
+Pipeline has two sequential stages:
 
 ### 1. DESKEW
 
-Calls MATLAB 2024a (`deskew.m`) via a Python wrapper (`deskew_wrapper.py`) to correct the oblique acquisition angle of ctASLM data. It applies a 3-D shear transform (`imrotate3`) to each selected channel/timepoint TIFF and writes output into two folders:
+Calls MATLAB via a Python wrapper to correct the oblique acquisition angle of ctASLM data. It applies a 3-D shear transform to each selected channel/timepoint TIFF and writes output into two folders:
 
 - `<output_dir>/shear/` — intermediate sheared volumes
 - `<output_dir>/Top_shear/` — final deskewed volumes (passed to DECON)
