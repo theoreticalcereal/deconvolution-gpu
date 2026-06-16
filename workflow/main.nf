@@ -1,8 +1,8 @@
 #!/usr/bin/env nextflow
 nextflow.enable.dsl=2
 
-include { DESKEW } from './modules/deskew'
-include { DECON }  from './modules/deconvolution'
+include { DESKEW } from './modules'
+include { DECON }  from './modules'
 
 workflow {
     if (params.decon_only) {

@@ -1,0 +1,121 @@
+#
+# metadata for the AlphaFold3 workflow package
+#
+
+# -----------------------------------------------------------------------------
+# BASIC INFORMATION
+# -----------------------------------------------------------------------------
+
+# A unique identifier for the workflow package, text/underscores only
+name: 'astrocyte_alphafold3'
+# Who wrote this?
+author: 'Ricky Wang'
+# A contact email address for questions
+email: 'ricky.wang@utsouthwestern.edu'
+# A more informative title for the workflow package
+title: 'ctASLM2 Deskew/Deconvolution workflow'
+# A summary of the workflow package in plain text
+description: |
+  This workflow implements AlphaFold3 3.0.0. It selects SLURM partition GPUA100 or GPU4A100 automatically.
+
+#### New Features in Astrocyte 0.4.0 and above ####
+citation: |
+  Please acknowledge our contribution:
+  This research was supported in part by the computational resources provided by the BioHPC supercomputing facility
+  located in the Lyda Hill Department of Bioinformatics, UT Southwestern Medical Center.
+
+# The minimum Astrocyte version that requires to run this workflow. For old pipelines, which do not have this label
+# a default value of 0.3.1 will be assigned automatically. A request of minimum version less than 0.4.0 will be ignored.
+minimum_astrocyte_version: '2.1.0'
+# The Nextflow version that requires to run this workflow.  For old pipelines, which do not have this label
+# a default value of 0.31.0 will be assigned automatically. Please make sure the requested nextflow version is available
+# in the module list.
+nextflow_version: '23.04.3'
+# (Optional) The Nextflow config file to use for this workflow. If provided, the file should exist in workflow/configs
+nextflow_config: 'biohpc.config'
+# The container to use for this workflow, none/singularity. If omitted, the default value 'none' will be used.
+container: 'singularity'
+# The version of singularity to use. This is required if container == 'singularity'
+singularity_version: '3.9.9'
+
+
+# -----------------------------------------------------------------------------
+# DOCUMENTATION
+# -----------------------------------------------------------------------------
+
+# A list of documentation file in .md format that should be viewable from the
+# web interface. These files are in the 'docs' subdirectory. The first file
+# listed will be used as a documentation index and is index.md by convention
+# To supply a title for documentation use a pair of [ 'filename', 'title' ]
+
+documentation_files:
+  - [ 'index.md', 'AlphaFold Help' ]
+
+# -----------------------------------------------------------------------------
+# NEXTFLOW WORKFLOW CONFIGURATION
+# -----------------------------------------------------------------------------
+
+# Remember - The workflow file is always named 'workflow/main.f'
+#            The workflow must publish all final output into $baseDir
+
+# A list of cluster environment modules that this workflow requires to run.
+# Specify versioned module names to ensure reproducibility.
+workflow_modules:
+  - alphafold3/3.0.0
+
+# A list of parameters used by the workflow, defining how to present them,
+# options etc in the web interface. For each parameter:
+#
+# REQUIRED INFORMATION
+#  id:         The name of the parameter in the NEXTFLOW workflow
+#  type:       The type of the parameter, one of:
+#                string      - A free-format string
+#                integer     - An integer
+#                real        - A real number
+#                file        - A single file from user data
+#                files       - One or more files from user data
+#                select      - A selection from a list of values
+#                multiselect - One or more selections from a list of values
+#  required:    true/false, must the parameter be entered/chosen?
+#  description: A user friendly description of the meaning of the parameter
+#
+# OPTIONAL INFORMATION
+#  default:   A default value for the parameter (optional)
+#  min:       Minium value/characters/files for number/string/files types
+#  max:       Maximum value/characters/files for number/string/files types
+#  regex:     A regular expression that describes valid entries / filenames
+#
+# SELECT TYPE
+#  choices:   A set of choices presented to the user for the parameter.
+#             Each choice is a pair of value and description, e.g.
+#
+#             choices:
+#               - [ 'myval', 'The first option']
+#               - [ 'myval', 'The second option']
+#
+# NOTE - All parameters are passed to NEXTFLOW as strings... but they
+#        are validated by astrocyte using the information provided above
+
+workflow_parameters:
+
+  - id: query_sequence
+    type: files
+    required: true
+    description: |
+      AlphaFold 3 uses a custom JSON input format, which contains FASTA sequences. The file name needs to end with .json.
+      See https://github.com/google-deepmind/alphafold3 for more information.
+    regex: ".*(json)"
+    min: 1
+
+
+  # - id: db_dir
+  #   type: select
+  #   required: true
+  #   default: "full_dbs"
+  #   description: |
+  #     Choose preset MSA database configuration - smaller genetic database config (reduced_dbs) or
+  #     full genetic database config (full_dbs) (default: 'full_dbs')
+  #   choices:
+  #     - [ 'single_input', 'Use the --json_path flag followed by the path to a single JSON file' ]
+  #     - [ 'multiple_input', 'Use the --input_dir flag followed by the path to a directory of JSON files' ]
+      

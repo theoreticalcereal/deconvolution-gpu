@@ -1,0 +1,14 @@
+# Run our tests against a specific version of astrocyte
+before_script:
+  - module load nextflow
+  - module load java/oracle/jdk-21.0.3
+  - module load mamba/2.3.0
+
+stages:
+    - check
+
+# This performs validation of the astrocyte_pkg.yml file
+astrocyte_check:
+  stage: check
+  script:
+  - astrocyte_cli check "$CI_PROJECT_DIR"
