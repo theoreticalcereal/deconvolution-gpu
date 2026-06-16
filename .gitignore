@@ -1,1 +1,7 @@
-output
+output/
+work/
+.nextflow/
+.nextflow.log*
+.conda_env/
+__pycache__/
+*.py[cod]

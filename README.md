@@ -119,21 +119,6 @@ The `light_sheet_decon` profile uses `--decon_only true` and
 PSF times a rotated illumination PSF. Pass dataset-specific optical parameters
 on every run.
 
-To compare the pipeline deconvolution against the reference MATLAB
-`deconvblind -> deconvlucy` flow on already-deskewed data:
-
-```bash
-nextflow run main.nf -profile compare_psf \
-    --decon_input_dir /path/to/Top_shear \
-    --output_dir /path/to/output
-```
-
-Add `--compare_psf_modes true` to run both wide-frame (`psf_mode single`)
-and light-sheet (`psf_mode light_sheet`) comparisons and write a pairwise
-summary across the generated pipeline and MATLAB outputs.
-
-Comparison outputs are published to `<output_dir>/comparison/`.
-
 ---
 
 ## Parameters
@@ -154,7 +139,6 @@ All parameters can be passed on the command line as `--param_name value` or set 
 | `--output_dir` | `output` | Root directory for all outputs |
 | `--decon_only` | `false` | Skip deskewing; go straight to deconvolution |
 | `--decon_input_dir` | `''` | Input directory for `--decon_only` mode (overrides `--image_path`) |
-| `--tiff_index` | `0` | Matching input TIFF index used by the comparison workflow |
 
 ### Deskew
 
@@ -225,7 +209,6 @@ These are used to generate the theoretical PSF seed for blind estimation. The th
 | `--psf_size_xy` | `61` | XY dimension of PSF volume (voxels) |
 | `--psf_model` | `vectorial` | PSF model type: `vectorial`, `scalar`, or `gaussian` |
 | `--psf_mode` | `single` | Seed mode: `single` detection PSF or `light_sheet` detection × rotated illumination PSF |
-| `--compare_psf_modes` | `false` | In `compare_psf` mode, run both wide-frame and light-sheet PSF seeds and summarize all outputs pairwise |
 | `--light_sheet_angle` | `90` | Illumination PSF rotation angle in degrees for `--psf_mode light_sheet` |
 | `--oversample_factor` | `3` | PSF model oversampling factor |
 | `--camera_pixel_size` | `''` | Camera pixel size (µm); used to derive `dxy` when `--dxy <= 0` |
@@ -245,23 +228,6 @@ These are used to generate the theoretical PSF seed for blind estimation. The th
 └── deconvolved/        # Final deconvolved TIFFs
     ├── DB2_CH0_0.tif
     └── ...
-```
-
-Comparison runs publish to `<output_dir>/comparison/`:
-
-```
-comparison/
-├── pipeline_cuda_DB2.tif
-├── reference_matlab_Dec2.tif
-├── decon_metrics.json
-├── decon_metrics.tsv         # Pearson, SSIM-style, and ANTsPy similarity metrics
-├── decon_cross_sections.tif
-├── psf_fwhm.tsv             # X/Y/Z Gaussian-fit and half-max FWHM per PSF
-├── psf_axis_profiles.tsv    # Raw and fitted X/Y/Z PSF line profiles
-├── psf_axis_profiles.svg    # Plotted raw and fitted PSF line profiles
-├── chunked_blind_psf.tif
-├── full_blind_psf.tif
-└── theoretical_psf.tif
 ```
 
 ---
