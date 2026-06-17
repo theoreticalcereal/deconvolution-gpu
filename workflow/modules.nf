@@ -1,5 +1,6 @@
 process DESKEW {
     tag "${cell_name}"
+    module 'matlab/2024a'
 
     publishDir "${params.output_dir}", mode: 'copy'
 
@@ -21,8 +22,6 @@ process DESKEW {
 
     script:
     """
-    module load matlab/2024a
-
     python3 ${projectDir}/scripts/deskew_wrapper.py \\
         --image_path "${image_path}" \\
         --cell_name "${cell_name}" \\
@@ -39,6 +38,7 @@ process DESKEW {
 
 process BUILD_DECON_CONTAINER {
     tag "decon_env"
+    module 'singularity/3.9.9'
 
     cpus 2
     memory '8 GB'
@@ -75,6 +75,7 @@ process BUILD_DECON_CONTAINER {
 
 process DECON {
     tag "${cell_name}"
+    module 'singularity/3.9.9:matlab/2024a'
     container { decon_container.toString() }
 
     publishDir "${params.output_dir}/deconvolved", mode: 'copy', pattern: 'DB2_*'
