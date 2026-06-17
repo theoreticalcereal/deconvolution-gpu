@@ -22,8 +22,9 @@ citation: |
   the BioHPC supercomputing facility located in the Lyda Hill Department of
   Bioinformatics, UT Southwestern Medical Center.
 
+export MODULEPATH=/project/apps/apps_rhel9/modulefiles:/project/apps/apps_rhel9/spack/share/spack/modules/linux-rhel9-x86_64:/project/apps/apps_rhel9/spack/share/spack/modules/linux-rhel9-x86_64_v2
 minimum_astrocyte_version: '2.1.0'
-nextflow_version: '22.04.5'
+nextflow_version: '24.10.0'
 nextflow_config: 'nextflow.config'
 container: 'singularity'
 singularity_version: '3.9.9'
