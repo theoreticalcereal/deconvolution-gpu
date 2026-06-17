@@ -74,7 +74,6 @@ process BUILD_DECON_CONTAINER {
 }
 
 process DECON {
-    conda "${projectDir}/../environment.yml"
     tag "${cell_name}"
     container { decon_container.toString() }
 
@@ -142,12 +141,14 @@ process DECON {
     def no_psf_cache_flag = params.no_psf_cache ? "--no_psf_cache"                    : ""
 
     """
-    module load cuda/11.8
-    module load matlab/2024a
-    export LD_LIBRARY_PATH=\${CUDA_HOME:-}/lib64:/usr/local/cuda/lib64:\${LD_LIBRARY_PATH:-}
+    export LD_LIBRARY_PATH=\${CONDA_PREFIX:-/opt/conda/envs/decon_env}/lib:\${LD_LIBRARY_PATH:-}
     
     echo "=== GPU Check ==="
-    nvidia-smi
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        nvidia-smi
+    else
+        echo "nvidia-smi not found inside container; continuing."
+    fi
     echo "================="
 
     python3 ${projectDir}/scripts/decon_wrapper.py \\
