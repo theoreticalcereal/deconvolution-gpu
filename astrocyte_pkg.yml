@@ -45,7 +45,6 @@ documentation_files:
 # -----------------------------------------------------------------------------
 
 workflow_modules:
-  - java/oracle/jdk-21.0.3
   - nextflow/24.10.0
   - mamba/2.3.0
 
