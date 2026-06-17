@@ -47,9 +47,9 @@ documentation_files:
 # -----------------------------------------------------------------------------
 
 workflow_modules:
-  - 'nextflow/24.10.0'
-  - 'singularity/3.9.9'
-  - 'matlab/2024a'
+  - 'nextflow'
+  - 'singularity'
+  - 'matlab'
 
 workflow_parameters:
 
