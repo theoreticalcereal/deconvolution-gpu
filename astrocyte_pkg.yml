@@ -1,121 +1,284 @@
 #
-# metadata for the AlphaFold3 workflow package
+# Metadata for the ctASLM2 deskew/deconvolution workflow package.
 #
 
 # -----------------------------------------------------------------------------
 # BASIC INFORMATION
 # -----------------------------------------------------------------------------
 
-# A unique identifier for the workflow package, text/underscores only
-name: 'astrocyte_alphafold3'
-# Who wrote this?
+name: 'ctaslm2_deconvolution'
 author: 'Ricky Wang'
-# A contact email address for questions
 email: 'ricky.wang@utsouthwestern.edu'
-# A more informative title for the workflow package
-title: 'ctASLM2 Deskew/Deconvolution workflow'
-# A summary of the workflow package in plain text
+title: 'ctASLM2 Deskew/Deconvolution Workflow'
 description: |
-  This workflow implements AlphaFold3 3.0.0. It selects SLURM partition GPUA100 or GPU4A100 automatically.
+  This workflow deskews ctASLM/light-sheet microscopy TIFF data, estimates a
+  blind PSF, and runs GPU-accelerated Richardson-Lucy deconvolution. It supports
+  full light-sheet deskew plus deconvolution runs, light-sheet decon-only runs,
+  and wide-frame deconvolution from existing 3-D TIFF stacks.
 
-#### New Features in Astrocyte 0.4.0 and above ####
 citation: |
   Please acknowledge our contribution:
-  This research was supported in part by the computational resources provided by the BioHPC supercomputing facility
-  located in the Lyda Hill Department of Bioinformatics, UT Southwestern Medical Center.
+  This research was supported in part by the computational resources provided by
+  the BioHPC supercomputing facility located in the Lyda Hill Department of
+  Bioinformatics, UT Southwestern Medical Center.
 
-# The minimum Astrocyte version that requires to run this workflow. For old pipelines, which do not have this label
-# a default value of 0.3.1 will be assigned automatically. A request of minimum version less than 0.4.0 will be ignored.
 minimum_astrocyte_version: '2.1.0'
-# The Nextflow version that requires to run this workflow.  For old pipelines, which do not have this label
-# a default value of 0.31.0 will be assigned automatically. Please make sure the requested nextflow version is available
-# in the module list.
-nextflow_version: '23.04.3'
-# (Optional) The Nextflow config file to use for this workflow. If provided, the file should exist in workflow/configs
-nextflow_config: 'biohpc.config'
-# The container to use for this workflow, none/singularity. If omitted, the default value 'none' will be used.
+nextflow_version: '24.10.0'
+nextflow_config: 'nextflow.config'
 container: 'singularity'
-# The version of singularity to use. This is required if container == 'singularity'
 singularity_version: '3.9.9'
-
 
 # -----------------------------------------------------------------------------
 # DOCUMENTATION
 # -----------------------------------------------------------------------------
 
-# A list of documentation file in .md format that should be viewable from the
-# web interface. These files are in the 'docs' subdirectory. The first file
-# listed will be used as a documentation index and is index.md by convention
-# To supply a title for documentation use a pair of [ 'filename', 'title' ]
-
 documentation_files:
-  - [ 'index.md', 'AlphaFold Help' ]
+  - [ 'index.md', 'ctASLM2 Deskew/Deconvolution Help' ]
 
 # -----------------------------------------------------------------------------
 # NEXTFLOW WORKFLOW CONFIGURATION
 # -----------------------------------------------------------------------------
 
-# Remember - The workflow file is always named 'workflow/main.f'
-#            The workflow must publish all final output into $baseDir
-
-# A list of cluster environment modules that this workflow requires to run.
-# Specify versioned module names to ensure reproducibility.
 workflow_modules:
-  - alphafold3/3.0.0
-
-# A list of parameters used by the workflow, defining how to present them,
-# options etc in the web interface. For each parameter:
-#
-# REQUIRED INFORMATION
-#  id:         The name of the parameter in the NEXTFLOW workflow
-#  type:       The type of the parameter, one of:
-#                string      - A free-format string
-#                integer     - An integer
-#                real        - A real number
-#                file        - A single file from user data
-#                files       - One or more files from user data
-#                select      - A selection from a list of values
-#                multiselect - One or more selections from a list of values
-#  required:    true/false, must the parameter be entered/chosen?
-#  description: A user friendly description of the meaning of the parameter
-#
-# OPTIONAL INFORMATION
-#  default:   A default value for the parameter (optional)
-#  min:       Minium value/characters/files for number/string/files types
-#  max:       Maximum value/characters/files for number/string/files types
-#  regex:     A regular expression that describes valid entries / filenames
-#
-# SELECT TYPE
-#  choices:   A set of choices presented to the user for the parameter.
-#             Each choice is a pair of value and description, e.g.
-#
-#             choices:
-#               - [ 'myval', 'The first option']
-#               - [ 'myval', 'The second option']
-#
-# NOTE - All parameters are passed to NEXTFLOW as strings... but they
-#        are validated by astrocyte using the information provided above
+  - nextflow/24.10.0
+  - openjdk/17.0.11_9
 
 workflow_parameters:
 
-  - id: query_sequence
-    type: files
-    required: true
+  - id: image_path
+    type: string
+    required: false
     description: |
-      AlphaFold 3 uses a custom JSON input format, which contains FASTA sequences. The file name needs to end with .json.
-      See https://github.com/google-deepmind/alphafold3 for more information.
-    regex: ".*(json)"
+      Directory containing raw TIFFs for deskewing. Required for normal
+      light-sheet or wide-frame runs unless decon_only is true and
+      decon_input_dir is supplied.
+
+  - id: decon_input_dir
+    type: string
+    required: false
+    default: ''
+    description: |
+      Directory containing already deskewed or stacked 3-D TIFFs for decon-only
+      runs. Used when decon_only is true.
+
+  - id: cell_name
+    type: string
+    required: true
+    default: ''
+    description: |
+      Dataset or cell prefix used to locate and label input files.
+
+  - id: cell_index
+    type: string
+    required: false
+    default: ''
+    description: |
+      Optional cell index suffix for raw MATLAB-style input folder naming.
+
+  - id: output_dir
+    type: string
+    required: true
+    default: './workflow/output'
+    description: |
+      Directory where shear, Top_shear, and deconvolved outputs are published.
+
+  - id: decon_only
+    type: select
+    required: true
+    default: 'false'
+    description: |
+      Skip deskewing and run deconvolution directly from decon_input_dir.
+    choices:
+      - [ 'false', 'Run deskew, then deconvolution' ]
+      - [ 'true', 'Skip deskew and run deconvolution only' ]
+
+  - id: channels
+    type: string
+    required: false
+    default: ''
+    description: |
+      Optional channel filter such as 0 or 0,1. Leave empty to process all
+      discovered channels.
+
+  - id: timepoints
+    type: string
+    required: false
+    default: ''
+    description: |
+      Optional timepoint filter such as 0 or 0,1. Leave empty to process all
+      discovered timepoints.
+
+  - id: dx
+    type: real
+    required: false
+    default: 0.118
+    min: 0
+    description: |
+      Deskew voxel size in X/Y, in microns.
+
+  - id: dz
+    type: real
+    required: false
+    default: 0.118
+    min: 0
+    description: |
+      Deskew/deconvolution voxel size in Z, in microns.
+
+  - id: angle
+    type: real
+    required: false
+    default: 40
+    description: |
+      Deskew shear angle in degrees.
+
+  - id: flip
+    type: integer
+    required: false
+    default: 1
+    description: |
+      Deskew flip/orientation flag passed to the deskew code. Usually 1 or -1.
+
+  - id: iter
+    type: integer
+    required: false
+    default: 10
     min: 1
+    description: |
+      Richardson-Lucy iteration count for CUDA deconvolution.
 
+  - id: background
+    type: real
+    required: false
+    default: 0
+    description: |
+      Constant background subtraction value applied during PSF generation and
+      deconvolution handling.
 
-  # - id: db_dir
-  #   type: select
-  #   required: true
-  #   default: "full_dbs"
-  #   description: |
-  #     Choose preset MSA database configuration - smaller genetic database config (reduced_dbs) or
-  #     full genetic database config (full_dbs) (default: 'full_dbs')
-  #   choices:
-  #     - [ 'single_input', 'Use the --json_path flag followed by the path to a single JSON file' ]
-  #     - [ 'multiple_input', 'Use the --input_dir flag followed by the path to a directory of JSON files' ]
-      
+  - id: psf_mode
+    type: select
+    required: false
+    default: 'single'
+    description: |
+      Seed PSF mode used before blind PSF estimation.
+    choices:
+      - [ 'single', 'Single detection PSF' ]
+      - [ 'light_sheet', 'Detection PSF times rotated illumination PSF' ]
+
+  - id: psf_model
+    type: select
+    required: false
+    default: 'vectorial'
+    description: |
+      Theoretical PSF model used as the blind-estimation seed.
+    choices:
+      - [ 'vectorial', 'Vectorial Gibson-Lanni model' ]
+      - [ 'scalar', 'Scalar Gibson-Lanni model' ]
+      - [ 'gaussian', 'Gaussian approximation' ]
+
+  - id: dxy
+    type: real
+    required: false
+    default: 0.118
+    min: 0
+    description: |
+      Final sample pixel size in X/Y, in microns, unless derived from camera
+      settings.
+
+  - id: camera_pixel_size
+    type: string
+    required: false
+    default: ''
+    description: |
+      Camera pixel size in microns. With magnification, this can derive dxy.
+
+  - id: magnification
+    type: string
+    required: false
+    default: ''
+    description: |
+      Objective/tube magnification. With camera_pixel_size, this can derive dxy.
+
+  - id: wavelength
+    type: real
+    required: false
+    default: 0.520
+    min: 0
+    description: |
+      Emission wavelength in microns for PSF generation and CUDA deconvolution.
+
+  - id: na
+    type: real
+    required: false
+    default: 1.0
+    min: 0
+    description: |
+      Fallback numerical aperture used when detection_na is unset.
+
+  - id: detection_na
+    type: string
+    required: false
+    default: ''
+    description: |
+      Detection objective numerical aperture. Leave empty to use na.
+
+  - id: illumination_na
+    type: string
+    required: false
+    default: ''
+    description: |
+      Illumination objective numerical aperture for light-sheet PSF metadata.
+
+  - id: ni
+    type: real
+    required: false
+    default: 1.515
+    min: 0
+    description: |
+      Immersion refractive index for PSF generation.
+
+  - id: ns
+    type: string
+    required: false
+    default: ''
+    description: |
+      Specimen/sample refractive index. Leave empty to use the PSF code default.
+
+  - id: blind_iters
+    type: integer
+    required: false
+    default: 10
+    min: 1
+    description: |
+      MATLAB deconvblind iteration count per blind PSF chunk.
+
+  - id: chunk_xy
+    type: integer
+    required: false
+    default: 256
+    description: |
+      XY tile size for blind PSF estimation. Values <= 0 auto-size
+      conservatively.
+
+  - id: decon_chunk_xy
+    type: integer
+    required: false
+    default: 0
+    description: |
+      Core XY tile size for CUDA deconvolution. Values <= 0 auto-size from
+      available VRAM.
+
+  - id: decon_workers
+    type: integer
+    required: false
+    default: 1
+    min: 1
+    description: |
+      Parallel CUDA deconvolution workers per process.
+
+  - id: vram_gb
+    type: real
+    required: false
+    default: 0
+    min: 0
+    description: |
+      Optional manual GPU memory budget in GB. Use 0 to query available VRAM.

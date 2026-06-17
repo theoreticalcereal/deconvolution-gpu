@@ -1,5 +1,44 @@
+process DESKEW {
+    tag "${cell_name}"
+
+    publishDir "${params.output_dir}", mode: 'copy'
+
+    input:
+    val image_path
+    val cell_name
+    val cell_index
+    val channels
+    val timepoints
+    val dx
+    val dz
+    val angle
+    val flip
+    val output_dir
+
+    output:
+    path "Top_shear", emit: deskewed_path
+    path "shear", optional: true, emit: shear_output
+
+    script:
+    """
+    module load matlab/2024a
+
+    python3 ${projectDir}/scripts/deskew_wrapper.py \\
+        --image_path "${image_path}" \\
+        --cell_name "${cell_name}" \\
+        --cell_index "${cell_index}" \\
+        --channels "${channels}" \\
+        --timepoints "${timepoints}" \\
+        --dx ${dx} \\
+        --dz ${dz} \\
+        --angle ${angle} \\
+        --flip ${flip} \\
+        --output_dir .
+    """
+}
+
 process DECON {
-    conda "${projectDir}/environment.yml"
+    conda "${projectDir}/../environment.yml"
     tag "${cell_name}"
 
     publishDir "${params.output_dir}/deconvolved", mode: 'copy'
@@ -118,43 +157,4 @@ process DECON {
         ${cache_dir_flag} \\
         ${no_psf_cache_flag}
     """
-}
-
-#!/usr/bin/env nextflow
-nextflow.enable.dsl=2
-
-include { DESKEW } from './modules/deskew'
-include { DECON }  from './modules/deconvolution'
-
-workflow {
-    if (params.decon_only) {
-        DECON(
-            params.decon_input_dir ?: params.image_path,
-            params.cell_name,
-            params.background,
-            params.iter,
-            params.output_dir
-        )
-    } else {
-        DESKEW(
-            params.image_path,
-            params.cell_name,
-            params.cell_index,
-            params.channels,
-            params.timepoints,
-            params.dx,
-            params.dz,
-            params.angle,
-            params.flip,
-            params.output_dir
-        )
-
-        DECON(
-            DESKEW.out.deskewed_path,
-            params.cell_name,
-            params.background,
-            params.iter,
-            params.output_dir
-        )
-    }
 }
