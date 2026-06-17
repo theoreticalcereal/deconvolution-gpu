@@ -2,7 +2,7 @@
 
 Runtime defaults and profiles live in `workflow/configs/nextflow.config`.
 Astrocyte uses `workflow/configs/astrocyte.config`, which includes the standard
-config and enables the packaged Singularity image for `DECON` by default.
+config and enables Nextflow's Conda/Mamba environment handling for `DECON`.
 
 ## Profiles
 
@@ -13,24 +13,15 @@ config and enables the packaged Singularity image for `DECON` by default.
 | `wide_frame` | Uses single-detection PSF seed settings. It does not skip deskew automatically. |
 | `light_sheet_decon` | Enables decon-only mode and light-sheet PSF seed settings. |
 | `docker` | Enables Docker. |
-| `singularity` | Enables Singularity and uses `workflow/images/decon_env.sif` for `DECON`. |
 
-## Astrocyte Container Config
+## Astrocyte Environment Config
 
 `astrocyte_pkg.yml` points Astrocyte at `astrocyte.config`. That config includes
-`nextflow.config`, disables conda for the containerized path, enables
-Singularity, and sets `build_decon_container = true`.
+`nextflow.config` and enables Conda/Mamba.
 
-When `build_decon_container` is true, the workflow runs `BUILD_DECON_CONTAINER`
-before `DECON`. That process builds `decon_env.sif` from
-`workflow/images/decon_env.def` in the Nextflow work directory, then passes the
-built image path to `DECON`.
-
-The build process requires the Singularity executable. Astrocyte metadata
-requests `singularity/3.9.9`, matching `singularity_version`.
-
-`DESKEW` still runs on the host with the MATLAB module because the packaged
-container is the Python/CUDA deconvolution environment.
+`DECON` declares `environment.yml`, so Nextflow builds and activates that
+environment for GPU deconvolution. `DESKEW` still runs on the host with the
+MATLAB module and does not use the deconvolution environment.
 
 ## Light-Sheet Profile
 
@@ -101,9 +92,9 @@ expanded to produce multiple independent calls.
 
 ## Environment Setup
 
-The manual cluster profile enables conda and mamba. For non-container `DECON`
-runs, the config loads `mamba/2.3.0` and creates a small activation shim so
-Nextflow can activate the environment reliably on compute nodes.
+The cluster profiles enable conda and mamba. For `DECON`, the config loads
+`mamba/2.3.0` and creates a small activation shim so Nextflow can activate the
+environment reliably on compute nodes.
 
 The process script then loads:
 

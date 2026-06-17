@@ -25,8 +25,7 @@ citation: |
 minimum_astrocyte_version: '2.1.0'
 nextflow_version: '24.10.0'
 nextflow_config: 'astrocyte.config'
-container: 'singularity'
-singularity_version: '3.9.9'
+container: 'conda'
 
 # -----------------------------------------------------------------------------
 # DOCUMENTATION
@@ -49,13 +48,13 @@ documentation_files:
 workflow_modules:
   - nextflow/24.10.0
   - java/oracle/jdk-21.0.3
-  - singularity/3.9.9
+  - mamba/2.3.0
 
 workflow_parameters:
 
   - id: input
     type: files
-    required: true
+    required: false
     description: |
       --input. Select the TIFF files to process. Choose files from only one
       channel at a time. This workflow estimates one PSF from the first selected
@@ -66,7 +65,7 @@ workflow_parameters:
 
   - id: cell_name
     type: string
-    required: true
+    required: false
     default: ''
     description: |
       Dataset or cell prefix used to locate and label input files.
@@ -89,7 +88,7 @@ workflow_parameters:
 
   - id: decon_only
     type: select
-    required: true
+    required: false
     default: 'false'
     description: |
       Skip deskewing and run deconvolution directly from the selected TIFF
@@ -97,6 +96,14 @@ workflow_parameters:
     choices:
       - [ 'false', 'Run deskew, then deconvolution' ]
       - [ 'true', 'Skip deskew and run deconvolution only' ]
+
+  - id: decon_input_dir
+    type: string
+    required: false
+    default: ''
+    description: |
+      Directory containing already deskewed or already stacked TIFFs for
+      decon-only runs. Used by the light_sheet_decon profile.
 
   - id: channels
     type: string

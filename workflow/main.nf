@@ -2,25 +2,16 @@
 nextflow.enable.dsl=2
 
 include { DESKEW } from './modules'
-include { BUILD_DECON_CONTAINER } from './modules'
 include { DECON }  from './modules'
 
 workflow {
-    if (params.build_decon_container) {
-        BUILD_DECON_CONTAINER()
-        decon_container_ch = BUILD_DECON_CONTAINER.out.image
-    } else {
-        decon_container_ch = Channel.value("${projectDir}/images/decon_env.sif")
-    }
-
     if (params.decon_only) {
         DECON(
             params.decon_input_dir ?: params.image_path,
             params.cell_name,
             params.background,
             params.iter,
-            params.output_dir,
-            decon_container_ch
+            params.output_dir
         )
     } else {
         DESKEW(
@@ -41,8 +32,7 @@ workflow {
             params.cell_name,
             params.background,
             params.iter,
-            params.output_dir,
-            decon_container_ch
+            params.output_dir
         )
     }
 }

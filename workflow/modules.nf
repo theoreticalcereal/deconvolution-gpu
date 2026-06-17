@@ -37,46 +37,9 @@ process DESKEW {
     """
 }
 
-process BUILD_DECON_CONTAINER {
-    tag "decon_env"
-
-    cpus 2
-    memory '8 GB'
-    queue 'super'
-
-    output:
-    path "decon_env.sif", emit: image
-
-    script:
-    """
-    set -euo pipefail
-
-    if command -v module >/dev/null 2>&1; then
-        module load singularity/3.9.9 || module load singularity || true
-    fi
-
-    if ! command -v singularity >/dev/null 2>&1; then
-        echo "ERROR: singularity is required to build the deconvolution container." >&2
-        exit 127
-    fi
-
-    packaged_sif="${projectDir}/images/decon_env.sif"
-    if [ -s "\$packaged_sif" ] && ! head -n 1 "\$packaged_sif" | grep -q 'git-lfs.github.com/spec'; then
-        ln -s "\$packaged_sif" decon_env.sif
-    else
-        out="\$PWD/decon_env.sif"
-        tmp="\$PWD/decon_env.sif.tmp"
-        cd "${projectDir}/images"
-        singularity build "\$tmp" decon_env.def
-        mv "\$tmp" "\$out"
-    fi
-    """
-}
-
 process DECON {
     conda "${projectDir}/../environment.yml"
     tag "${cell_name}"
-    container { decon_container.toString() }
 
     publishDir "${params.output_dir}/deconvolved", mode: 'copy', pattern: 'DB2_*'
     publishDir "${params.output_dir}", mode: 'copy', pattern: 'estimated_psf.tif'
@@ -92,7 +55,6 @@ process DECON {
     val  background
     val  iter
     val  output_dir
-    val  decon_container
 
     output:
     path "DB2_*", emit: decon_output
