@@ -6,6 +6,9 @@ From: mambaorg/micromamba:2.3.0
 
 %post
     set -eu
+    apt-get update
+    apt-get install -y --no-install-recommends procps
+    rm -rf /var/lib/apt/lists/*
     micromamba env create -y -f /environment.yml
     micromamba clean -a -y
 
