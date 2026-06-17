@@ -23,7 +23,7 @@ citation: |
   Bioinformatics, UT Southwestern Medical Center.
 
 minimum_astrocyte_version: '2.1.0'
-nextflow_version: '23.04.3'
+nextflow_version: '22.04.5'
 nextflow_config: 'nextflow.config'
 container: 'singularity'
 singularity_version: '3.9.9'
