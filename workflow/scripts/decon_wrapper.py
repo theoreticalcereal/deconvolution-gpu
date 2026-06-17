@@ -477,6 +477,9 @@ def main() -> None:
     )
     psf_save_path = image_dir / "estimated_psf.tif"
     psf_save_path = _write_tiff_near_input_or_cwd(psf_save_path, psf)
+    published_psf_path = Path.cwd() / "estimated_psf.tif"
+    if psf_save_path.resolve() != published_psf_path.resolve():
+        imwrite(str(published_psf_path), psf)
     print(f"Merged PSF saved to {psf_save_path}", flush=True)
 
     # ------------------------------------------------------------------

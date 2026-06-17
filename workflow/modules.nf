@@ -41,7 +41,8 @@ process DECON {
     conda "${projectDir}/../environment.yml"
     tag "${cell_name}"
 
-    publishDir "${params.output_dir}/deconvolved", mode: 'copy'
+    publishDir "${params.output_dir}/deconvolved", mode: 'copy', pattern: 'DB2_*'
+    publishDir "${params.output_dir}", mode: 'copy', pattern: 'estimated_psf.tif'
 
     maxForks 8
     cpus 8
@@ -57,6 +58,7 @@ process DECON {
 
     output:
     path "DB2_*", emit: decon_output
+    path "estimated_psf.tif", emit: psf_output
 
     script:
     // Build optional optical-parameter flags only if the user supplied them.

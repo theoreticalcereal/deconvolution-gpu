@@ -1,0 +1,88 @@
+# Workflow Overview
+
+The pipeline is a Nextflow DSL2 workflow with two named processes:
+
+1. `DESKEW`
+2. `DECON`
+
+The control path is defined in `workflow/main.nf`.
+
+## Full Light-Sheet Path
+
+When `params.decon_only` is false, the workflow runs:
+
+1. `DESKEW(...)`
+2. `DECON(DESKEW.out.deskewed_path, ...)`
+
+The deskew process publishes two directories:
+
+- `shear`: intermediate sheared volumes.
+- `Top_shear`: final deskewed top-view stacks.
+
+The `DECON` process receives the `Top_shear` path emitted by `DESKEW`, filters
+the `CH*.tif` files inside it, estimates a blind PSF from the first selected
+TIFF, and deconvolves every selected TIFF.
+
+## Decon-Only Path
+
+When `params.decon_only` is true, the workflow skips `DESKEW` and runs:
+
+```text
+DECON(params.decon_input_dir ?: params.image_path, ...)
+```
+
+Use this mode for:
+
+- Already deskewed light-sheet stacks.
+- Wide-frame 3-D TIFF stacks.
+- Any data that already matches the deconvolution input naming pattern.
+
+If `decon_input_dir` is empty, the workflow falls back to `image_path`.
+
+## Process Boundaries
+
+`DESKEW` is CPU/MATLAB work. It loads `matlab/2024a`, runs
+`deskew_wrapper.py`, and calls `deskew.m` through `matlab -batch`.
+
+`DECON` is GPU work. It loads CUDA and MATLAB, activates the conda environment,
+checks the GPU with `nvidia-smi`, estimates the PSF, and runs CUDA
+Richardson-Lucy deconvolution.
+
+## Data Flow
+
+```text
+raw TIFF folder
+    |
+    | full light-sheet mode
+    v
+DESKEW
+    |-- shear/
+    `-- Top_shear/
+            |
+            v
+          DECON
+            |-- estimated_psf.tif
+            `-- DB2_*.tif
+
+already stacked TIFF folder
+    |
+    | decon-only mode
+    v
+DECON
+    |-- estimated_psf.tif
+    `-- DB2_*.tif
+```
+
+## Publishing Behavior
+
+Nextflow runs each process in its own work directory. `publishDir` copies
+selected outputs into the configured `output_dir`.
+
+`DESKEW` publishes `shear` and `Top_shear` into `output_dir`.
+
+`DECON` publishes files matching `DB2_*` into `output_dir/deconvolved` and
+publishes the merged blind PSF as `output_dir/estimated_psf.tif`.
+
+The PSF file may also be written next to the deconvolution input directory when
+that location is writable, but the published copy in `output_dir` is the stable
+workflow result.

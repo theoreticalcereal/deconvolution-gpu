@@ -34,6 +34,13 @@ singularity_version: '3.9.9'
 
 documentation_files:
   - [ 'index.md', 'ctASLM2 Deskew/Deconvolution Help' ]
+  - [ 'workflow-overview.md', 'Workflow Overview' ]
+  - [ 'deskew-process.md', 'Deskew Process' ]
+  - [ 'psf-estimation-process.md', 'PSF Estimation Process' ]
+  - [ 'gpu-deconvolution-process.md', 'GPU Deconvolution Process' ]
+  - [ 'profiles-and-parameters.md', 'Profiles and Parameters' ]
+  - [ 'workflow-output.md', 'workflow/output - Output from the Workflow' ]
+  - [ 'outputs-and-troubleshooting.md', 'Outputs and Troubleshooting' ]
 
 # -----------------------------------------------------------------------------
 # NEXTFLOW WORKFLOW CONFIGURATION
@@ -81,7 +88,9 @@ workflow_parameters:
     required: true
     default: './workflow/output'
     description: |
-      Directory where shear, Top_shear, and deconvolved outputs are published.
+      Directory where all final workflow outputs are published. Defaults to
+      ./workflow/output so results remain available after Astrocyte cleans
+      Nextflow work directories.
 
   - id: decon_only
     type: select

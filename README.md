@@ -19,7 +19,7 @@ Calls MATLAB via a Python wrapper to correct the oblique acquisition angle of ct
 
 Reads the deskewed `CH*.tif` files from `Top_shear/` and runs Richardson–Lucy GPU deconvolution via `pycudadecon`. Volumes are processed as full-Z XY tiles using Dask `map_overlap` with reflect-padded boundaries to suppress edge artifacts. Output files are named `DB2_<original_stem>.tif` and written to `<output_dir>/deconvolved/`.
 
-**PSF resolution always uses blind estimation.** The pipeline generates a theoretical Gibson-Lanni PSF from the optical parameters you supply, but uses it only as the starting guess for MATLAB `deconvblind`. It then estimates the PSF from the first TIFF by tiling it into XY chunks, running `deconvblind` on each tile, and merging the per-tile PSFs with SNR weighting. The merged blind PSF is saved as `estimated_psf.tif` alongside the input TIFFs and cached for reuse.
+**PSF resolution always uses blind estimation.** The pipeline generates a theoretical Gibson-Lanni PSF from the optical parameters you supply, but uses it only as the starting guess for MATLAB `deconvblind`. It then estimates the PSF from the first TIFF by tiling it into XY chunks, running `deconvblind` on each tile, and merging the per-tile PSFs with SNR weighting. The merged blind PSF is published as `<output_dir>/estimated_psf.tif` and cached for reuse.
 
 ---
 
@@ -120,7 +120,7 @@ All parameters can be passed on the command line as `--param_name value` or set 
 
 | Parameter | Default | Description |
 |---|---|---|
-| `--output_dir` | `output` | Root directory for all outputs |
+| `--output_dir` | `./workflow/output` | Root directory for all published outputs |
 | `--decon_only` | `false` | Skip deskewing; go straight to deconvolution |
 | `--decon_input_dir` | `''` | Input directory for `--decon_only` mode (overrides `--image_path`) |
 
@@ -207,8 +207,8 @@ These are used to generate the theoretical PSF seed for blind estimation. The th
 ├── shear/              # Intermediate sheared volumes (from DESKEW)
 ├── Top_shear/          # Deskewed volumes passed to DECON
 │   ├── CH0_0.tif
-│   ├── estimated_psf.tif   # Merged blind PSF used for deconvolution
 │   └── ...
+├── estimated_psf.tif   # Merged blind PSF used for deconvolution
 └── deconvolved/        # Final deconvolved TIFFs
     ├── DB2_CH0_0.tif
     └── ...
