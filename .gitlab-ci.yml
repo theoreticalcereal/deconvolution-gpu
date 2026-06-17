@@ -12,4 +12,5 @@ stages:
 astrocyte_check:
   stage: check
   script:
+  - export MODULEPATH=/project/apps/apps_rhel9/modulefiles:/project/apps/apps_rhel9/spack/share/spack/modules/linux-rhel9-x86_64:/project/apps/apps_rhel9/spack/share/spack/modules/linux-rhel9-x86_64_v2
   - astrocyte_cli check "$CI_PROJECT_DIR"
