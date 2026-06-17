@@ -7,7 +7,7 @@ This Astrocyte workflow runs a Nextflow DSL2 pipeline for ctASLM and related 3-D
 
 The workflow is designed for BioHPC SLURM execution. Python and CUDA deconvolution dependencies are packaged in the workflow container, while cluster modules provide workflow/runtime tools such as Nextflow, Java, CUDA, and MATLAB.
 
-## The Input Data
+## Input Data
 
 Provide an input directory containing TIFF stacks for one acquisition. For full light-sheet processing, use `image_path` to point at the raw TIFF directory and set `cell_name` to the dataset/cell prefix used by the deskew code.
 
@@ -94,7 +94,7 @@ This workflow supports three main run modes:
 2. `wide_frame`: run wide-frame deconvolution settings; use `decon_only=true` when the input is already stacked.
 3. `light_sheet_decon`: skip deskewing and run light-sheet deconvolution from an existing stack directory.
 
-Optical metadata should be set per dataset. The most commonly adjusted values are `camera_pixel_size`, `magnification`, `dxy`, `dz`, `wavelength`, `detection_na`, `illumination_na`, `ni`, and `ns`.
+Optical metadata should be set per dataset. The most commonly adjusted values are `camera_pixel_size`, `magnification`, `dxy`, `dz`, `wavelength`, `detection_na`, `illumination_na`, `ni`, and `ns`. More information on parameters is available in documentation.
 
 Large runs can generate substantial intermediate data in Nextflow work directories. After confirming the published outputs, clean old work directories according to local BioHPC guidance.
 

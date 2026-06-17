@@ -9,9 +9,9 @@
 name: 'ctaslm2_deconvolution'
 author: 'Ricky Wang'
 email: 'ricky.wang@utsouthwestern.edu'
-title: 'ctASLM2 Deskew/Deconvolution Workflow'
+title: 'ctASLM2 Deskew + Deconvolution Workflow'
 description: |
-  This workflow deskews ctASLM/light-sheet microscopy TIFF data, estimates a
+  This workflow deskews light-sheet microscopy TIFF data, estimates a
   blind PSF, and runs GPU-accelerated Richardson-Lucy deconvolution. It supports
   full light-sheet deskew plus deconvolution runs, light-sheet decon-only runs,
   and wide-frame deconvolution from existing 3-D TIFF stacks.
@@ -41,7 +41,8 @@ documentation_files:
 
 workflow_modules:
   - nextflow/24.10.0
-  - openjdk/17.0.11_9
+  - java/oracle/jdk-21.0.3
+  - mamba/2.3.0
 
 workflow_parameters:
 
