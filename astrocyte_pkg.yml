@@ -24,7 +24,7 @@ citation: |
 
 minimum_astrocyte_version: '2.1.0'
 nextflow_version: '23.04.3'
-nextflow_config: 'astrocyte.config'
+nextflow_config: 'nextflow.config'
 container: 'singularity'
 singularity_version: '3.9.9'
 
