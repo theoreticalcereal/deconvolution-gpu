@@ -25,7 +25,12 @@ Reads the deskewed `CH*.tif` files from `Top_shear/` and runs Richardson–Lucy 
 
 ## Running the Pipeline
 
-For light-sheet/ctASLM data that still needs deskewing:
+For Astrocyte runs, select TIFF files with the file picker. Select files from
+only one channel at a time. The workflow estimates one PSF from the first
+selected TIFF and applies it to every selected TIFF; mixing channels with
+different wavelengths can skew deconvolution results.
+
+For manual light-sheet/ctASLM runs that still need deskewing:
 
 ```bash
 nextflow run main.nf -profile light_sheet \

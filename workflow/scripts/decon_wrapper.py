@@ -85,6 +85,15 @@ def _filter_tiffs(
         filtered.append(tiff_path)
     return filtered
 
+
+def _detected_channels(tiff_list: list[str]) -> list[int]:
+    detected = set()
+    for tiff_path in tiff_list:
+        match = CHANNEL_TIMEPOINT_RE.match(Path(tiff_path).stem)
+        if match:
+            detected.add(int(match.group("channel")))
+    return sorted(detected)
+
 def _format_seconds(seconds: float) -> str:
     return f"{seconds:.2f}s"
 
@@ -415,6 +424,15 @@ def main() -> None:
         f"for channels={args.channels or 'all'}, timepoints={args.timepoints or 'all'}.",
         flush=True,
     )
+    selected_channels = _detected_channels(tiff_list)
+    if len(selected_channels) > 1:
+        print(
+            "WARNING: Multiple channels were detected in the selected TIFFs: "
+            f"{selected_channels}. This workflow estimates one PSF from the first "
+            "selected TIFF and applies it to all selected TIFFs. Process one "
+            "channel at a time unless applying one PSF across wavelengths is intentional.",
+            flush=True,
+        )
 
     # ------------------------------------------------------------------
     # PSF resolution

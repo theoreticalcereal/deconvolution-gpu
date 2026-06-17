@@ -24,23 +24,20 @@ and MATLAB.
 
 ## Input Data
 
-Provide an input directory containing TIFF stacks for one acquisition. For full
-light-sheet processing, use `image_path` to point at the raw TIFF parent
-directory and set `cell_name` to the dataset/cell folder used by the deskew
-code.
+Select the TIFF stacks for one acquisition with the Astrocyte file picker.
+Astrocyte handles file ingestion for the workflow package.
 
-For data that has already been deskewed or is already stored as 3-D stacks, set
-`decon_only` to `true` and provide `decon_input_dir`. The deconvolution input
-directory should contain TIFF files named like `CH0_0.tif`, `CH1_0.tif`, or
-`CH0_0_registered_consistent.tif`.
+Select files from only one channel at a time. The workflow estimates one PSF
+from the first selected TIFF and applies it to all selected TIFFs; mixing
+channels with different wavelengths can skew deconvolution results.
 
 ## Example Modes
 
-| Mode | image_path | decon_input_dir | cell_name | channels | timepoints | decon_only |
-|------|------------|-----------------|-----------|----------|------------|------------|
-| Light-sheet deskew + decon | `/project/app/astrocyte/astrocyte_incoming/YOUR_ID/raw_tiffs` | | `Cell001` | | | `false` |
-| Light-sheet decon only | | `/project/app/astrocyte/astrocyte_incoming/YOUR_ID/Top_shear` | `Cell001` | `0` | `0` | `true` |
-| Wide-frame decon only | | `/project/app/astrocyte/astrocyte_incoming/YOUR_ID/stack_tiffs` | `Sample001` | `0` | `0` | `true` |
+| Mode | input files | cell_name | channels | timepoints | decon_only |
+|------|-------------|-----------|----------|------------|------------|
+| Light-sheet deskew + decon | Raw `CH##_######.tif[f]` files from one channel | `Cell001` | | | `false` |
+| Light-sheet decon only | Already deskewed `CH<channel>_<timepoint>.tif[f]` files from one channel | `Cell001` | `0` | `0` | `true` |
+| Wide-frame decon only | Stacked `CH<channel>_<timepoint>.tif[f]` files from one channel | `Sample001` | `0` | `0` | `true` |
 
 ## Main Run Modes
 
@@ -58,12 +55,11 @@ effective PSF seed mode.
 
 | Parameter | Description |
 |-----------|-------------|
-| `image_path` | Directory containing raw TIFFs for deskewing. |
+| `input` | TIFF files selected in Astrocyte. Select one channel at a time. |
 | `cell_name` | Dataset or cell prefix used to locate and label input files. |
 | `output_dir` | Directory where final outputs are published; defaults to `./workflow/output`. |
 | `decon_only` | Skip deskewing and run only deconvolution. |
-| `decon_input_dir` | Directory containing already deskewed or stacked TIFFs for decon-only runs. |
-| `channels` | Optional channel filter, for example `0` or `0,1`. Empty means all discovered channels. |
+| `channels` | Optional channel filter, for example `0`. Empty means all selected TIFFs. |
 | `timepoints` | Optional timepoint filter, for example `0` or `0,1`. Empty means all discovered timepoints. |
 | `dx` | Deskew lateral pixel size in microns. |
 | `dz` | Deskew/deconvolution axial spacing in microns. |
@@ -96,6 +92,7 @@ directories. See [workflow/output](workflow-output.md) for details.
 | `workflow/main.nf` | Connects `DESKEW` and `DECON` based on `params.decon_only`. |
 | `workflow/modules.nf` | Defines process resources, scripts, published outputs, and command-line flags. |
 | `workflow/configs/nextflow.config` | Defines defaults, profiles, SLURM queues, conda/mamba setup, and GPU requests. |
+| `workflow/configs/astrocyte.config` | Astrocyte entry config that builds and enables the Singularity image for `DECON`. |
 | `workflow/scripts/deskew_wrapper.py` | Builds the MATLAB batch command for `deskew.m`. |
 | `workflow/scripts/deskew.m` | Reads raw TIFF stacks, applies shear correction, rotates top view, and writes TIFF outputs. |
 | `workflow/scripts/decon_wrapper.py` | Selects TIFF inputs, resolves PSF, runs GPU deconvolution, and writes `DB2_*` outputs. |

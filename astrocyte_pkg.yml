@@ -24,7 +24,7 @@ citation: |
 
 minimum_astrocyte_version: '2.1.0'
 nextflow_version: '24.10.0'
-nextflow_config: 'nextflow.config'
+nextflow_config: 'astrocyte.config'
 container: 'singularity'
 singularity_version: '3.9.9'
 
@@ -49,25 +49,20 @@ documentation_files:
 workflow_modules:
   - nextflow/24.10.0
   - java/oracle/jdk-21.0.3
-  - mamba/2.3.0
+  - singularity/3.9.9
 
 workflow_parameters:
 
-  - id: image_path
-    type: string
-    required: false
+  - id: input
+    type: files
+    required: true
     description: |
-      Directory containing raw TIFFs for deskewing. Required for normal
-      light-sheet or wide-frame runs unless decon_only is true and
-      decon_input_dir is supplied.
-
-  - id: decon_input_dir
-    type: string
-    required: false
-    default: ''
-    description: |
-      Directory containing already deskewed or stacked 3-D TIFFs for decon-only
-      runs. Used when decon_only is true.
+      --input. Select the TIFF files to process. Choose files from only one
+      channel at a time. This workflow estimates one PSF from the first selected
+      TIFF and applies it to all selected TIFFs; mixing channels with different
+      wavelengths can skew deconvolution results.
+    min: 1
+    regex: ".*(\\.tif|\\.tiff|\\.TIF|\\.TIFF)$"
 
   - id: cell_name
     type: string
@@ -97,7 +92,8 @@ workflow_parameters:
     required: true
     default: 'false'
     description: |
-      Skip deskewing and run deconvolution directly from decon_input_dir.
+      Skip deskewing and run deconvolution directly from the selected TIFF
+      files. Use this for already deskewed or already stacked 3-D TIFFs.
     choices:
       - [ 'false', 'Run deskew, then deconvolution' ]
       - [ 'true', 'Skip deskew and run deconvolution only' ]
@@ -107,8 +103,9 @@ workflow_parameters:
     required: false
     default: ''
     description: |
-      Optional channel filter such as 0 or 0,1. Leave empty to process all
-      discovered channels.
+      Optional channel filter such as 0. Leave empty to process all selected
+      TIFFs. Select files from only one channel unless you intentionally want to
+      process multiple wavelengths with the same estimated PSF.
 
   - id: timepoints
     type: string

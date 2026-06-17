@@ -6,6 +6,9 @@ deconvolution. It is implemented by `workflow/scripts/deskew_wrapper.py` and
 
 ## Inputs
 
+Astrocyte handles file ingestion for package runs. Manual CLI runs can still
+pass an existing `image_path` directory.
+
 The process receives these values from Nextflow:
 
 | Value | Meaning |

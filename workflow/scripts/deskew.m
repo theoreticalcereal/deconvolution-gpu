@@ -83,6 +83,12 @@ for c = 1:numFolders
     disp(sprintf('Detected timepoints: %s', mat2str(unique(detectedTimepoints))));
     disp(sprintf('Processing channels: %s', mat2str(ChannelsToProcess)));
     disp(sprintf('Processing timepoints: %s', mat2str(timepoints)));
+    if numel(unique(ChannelsToProcess)) > 1
+        warning(['Multiple channels are selected for deskew. The downstream ', ...
+                 'deconvolution step estimates one PSF from the first selected ', ...
+                 'TIFF and applies it to all selected TIFFs. Process one channel ', ...
+                 'at a time unless applying one PSF across wavelengths is intentional.']);
+    end
 
     % Process each detected/requested timepoint and channel
     for ti = 1:numel(timepoints)

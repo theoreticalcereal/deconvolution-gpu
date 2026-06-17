@@ -5,7 +5,8 @@ The `DECON` process runs Richardson-Lucy deconvolution on GPU with
 
 ## Input Discovery
 
-The wrapper scans the selected input directory for:
+Astrocyte handles file ingestion for package runs. The wrapper scans the
+selected input directory for:
 
 ```text
 CH*.tif
@@ -29,6 +30,10 @@ CH0_0_registered_consistent.tif
 The deskew process currently writes raw-style names such as
 `CH00_000000.tif`. Those still match the deconvolution regex because the
 channel and timepoint captures accept any number of digits.
+
+Select files from one channel at a time. The PSF is estimated from the first
+selected TIFF and reused for every selected TIFF, so mixing wavelengths/channels
+can skew the result.
 
 ## PSF to OTF Conversion
 

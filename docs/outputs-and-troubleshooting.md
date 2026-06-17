@@ -73,6 +73,12 @@ If no PSF exists, inspect the blind PSF estimation messages first.
 
 ## Common Errors
 
+### Multiple Channels Selected
+
+Select TIFFs from one channel unless you intentionally want one estimated PSF
+applied across multiple wavelengths. The workflow estimates one PSF from the
+first selected TIFF and applies it to all selected TIFFs.
+
 ### No TIFFs Found During Deskew
 
 The deskew process looks in:

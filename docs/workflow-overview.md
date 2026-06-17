@@ -1,9 +1,10 @@
 # Workflow Overview
 
-The pipeline is a Nextflow DSL2 workflow with two named processes:
+The pipeline is a Nextflow DSL2 workflow with these named processes:
 
 1. `DESKEW`
-2. `DECON`
+2. `BUILD_DECON_CONTAINER`
+3. `DECON`
 
 The control path is defined in `workflow/main.nf`.
 
@@ -28,7 +29,7 @@ TIFF, and deconvolves every selected TIFF.
 When `params.decon_only` is true, the workflow skips `DESKEW` and runs:
 
 ```text
-DECON(params.decon_input_dir ?: params.image_path, ...)
+DECON(decon_input, ...)
 ```
 
 Use this mode for:
@@ -37,7 +38,8 @@ Use this mode for:
 - Wide-frame 3-D TIFF stacks.
 - Any data that already matches the deconvolution input naming pattern.
 
-If `decon_input_dir` is empty, the workflow falls back to `image_path`.
+The Astrocyte frontend handles file ingestion. Manual CLI runs still support
+the backward-compatible directory parameters `image_path` and `decon_input_dir`.
 
 ## Process Boundaries
 

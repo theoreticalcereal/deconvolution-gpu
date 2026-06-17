@@ -1,6 +1,8 @@
 # Profiles and Parameters
 
 Runtime defaults and profiles live in `workflow/configs/nextflow.config`.
+Astrocyte uses `workflow/configs/astrocyte.config`, which includes the standard
+config and enables the packaged Singularity image for `DECON` by default.
 
 ## Profiles
 
@@ -12,6 +14,23 @@ Runtime defaults and profiles live in `workflow/configs/nextflow.config`.
 | `light_sheet_decon` | Enables decon-only mode and light-sheet PSF seed settings. |
 | `docker` | Enables Docker. |
 | `singularity` | Enables Singularity and uses `workflow/images/decon_env.sif` for `DECON`. |
+
+## Astrocyte Container Config
+
+`astrocyte_pkg.yml` points Astrocyte at `astrocyte.config`. That config includes
+`nextflow.config`, disables conda for the containerized path, enables
+Singularity, and sets `build_decon_container = true`.
+
+When `build_decon_container` is true, the workflow runs `BUILD_DECON_CONTAINER`
+before `DECON`. That process builds `decon_env.sif` from
+`workflow/images/decon_env.def` in the Nextflow work directory, then passes the
+built image path to `DECON`.
+
+The build process requires the Singularity executable. Astrocyte metadata
+requests `singularity/3.9.9`, matching `singularity_version`.
+
+`DESKEW` still runs on the host with the MATLAB module because the packaged
+container is the Python/CUDA deconvolution environment.
 
 ## Light-Sheet Profile
 
@@ -82,9 +101,9 @@ expanded to produce multiple independent calls.
 
 ## Environment Setup
 
-The cluster profile enables conda and mamba. For `DECON`, the config loads
-`mamba/2.3.0` and creates a small activation shim so Nextflow can activate the
-environment reliably on compute nodes.
+The manual cluster profile enables conda and mamba. For non-container `DECON`
+runs, the config loads `mamba/2.3.0` and creates a small activation shim so
+Nextflow can activate the environment reliably on compute nodes.
 
 The process script then loads:
 
@@ -102,19 +121,24 @@ before launching Python.
 
 | Parameter | Purpose |
 |---|---|
-| `image_path` | Raw input parent directory, or fallback decon-only directory. |
+| `input` | TIFF files selected in Astrocyte. Select one channel at a time. |
+| `image_path` | Backward-compatible raw input parent directory for manual CLI runs. |
 | `cell_name` | Dataset folder name used by deskew. |
 | `output_dir` | Published output root. |
 | `decon_only` | Skip `DESKEW` and run `DECON` directly. |
-| `decon_input_dir` | Directory of already deskewed or stacked TIFFs. |
+| `decon_input_dir` | Backward-compatible directory of already deskewed or stacked TIFFs. |
 
 ### Selection
 
 | Parameter | Purpose |
 |---|---|
 | `cell_index` | Optional MATLAB `CellIndex` injection. |
-| `channels` | Channel filter such as `0` or `0,1`; empty means all discovered channels. |
+| `channels` | Channel filter such as `0`; empty means all selected/discovered channels. |
 | `timepoints` | Timepoint filter such as `0` or `0,1`; empty means all discovered timepoints. |
+
+Selected TIFFs should come from the same channel. The workflow estimates one
+PSF and applies it to the selected files, so mixed wavelengths can skew
+deconvolution results.
 
 ### Deskew Geometry
 
