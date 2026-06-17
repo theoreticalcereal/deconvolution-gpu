@@ -325,6 +325,8 @@ def main() -> None:
                         help="Threads per MATLAB deconvblind process; clamped to 1 or 2.")
     parser.add_argument("--matlab_workers", type=int, default=1,
                         help="Concurrent MATLAB deconvblind processes; default 1 avoids MATLAB orchestration hangs.")
+    parser.add_argument("--matlab_bin", default="matlab",
+                        help="MATLAB executable used for deconvblind.")
     parser.add_argument("--matlab_timeout", type=int, default=1800,
                         help="Seconds before killing one MATLAB deconvblind chunk. <=0 disables.")
     parser.add_argument("--blind_z_slices", type=int, default=DEFAULT_BLIND_Z_SLICES,
@@ -489,6 +491,7 @@ def main() -> None:
         use_cache=not args.no_psf_cache,
         matlab_threads=args.matlab_threads,
         matlab_workers=args.matlab_workers,
+        matlab_bin=args.matlab_bin,
         matlab_timeout=args.matlab_timeout,
         snr_weight_cap=args.snr_weight_cap,
         blind_z_slices=args.blind_z_slices,

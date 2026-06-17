@@ -130,6 +130,7 @@ process DECON {
     def blind_workers_flag = params.blind_workers ? "--blind_workers ${params.blind_workers}" : ""
     def matlab_workers_flag = params.matlab_workers ? "--matlab_workers ${params.matlab_workers}" : ""
     def matlab_threads_flag = params.matlab_threads ? "--matlab_threads ${params.matlab_threads}" : ""
+    def matlab_bin_flag = params.matlab_bin ? "--matlab_bin ${params.matlab_bin}" : ""
     def matlab_timeout_flag = params.matlab_timeout ? "--matlab_timeout ${params.matlab_timeout}" : ""
     def blind_z_slices_flag = params.blind_z_slices ? "--blind_z_slices ${params.blind_z_slices}" : ""
     def snr_weight_cap_flag = params.snr_weight_cap != null ? "--snr_weight_cap ${params.snr_weight_cap}" : ""
@@ -188,6 +189,7 @@ process DECON {
         ${blind_workers_flag} \\
         ${matlab_workers_flag} \\
         ${matlab_threads_flag} \\
+        ${matlab_bin_flag} \\
         ${matlab_timeout_flag} \\
         ${blind_z_slices_flag} \\
         ${snr_weight_cap_flag} \\

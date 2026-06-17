@@ -473,6 +473,7 @@ def _run_matlab_deconvblind(
     n_iters: int,
     pad_z: int,
     script_dir: Path,
+    matlab_bin: str,
     matlab_threads: int,
     matlab_timeout: int,
 ) -> None:
@@ -503,7 +504,7 @@ def _run_matlab_deconvblind(
         f"psf_est = psf_est / sum(psf_est(:)); "
         f"writetiffstack(psf_est, '{output_psf_path}');"
     )
-    matlab_args = ["matlab"]
+    matlab_args = [matlab_bin, "-nojvm", "-nodisplay", "-nosplash"]
     if matlab_threads == 1:
         matlab_args.append("-singleCompThread")
     matlab_args.extend(["-batch", matlab_cmd])
@@ -525,6 +526,11 @@ def _run_matlab_deconvblind(
             env=env,
             timeout=matlab_timeout if matlab_timeout > 0 else None,
         )
+    except OSError as exc:
+        raise RuntimeError(
+            f"Unable to start MATLAB executable '{matlab_bin}' for chunk "
+            f"{chunk_path.name}: {exc}"
+        ) from exc
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError(
             f"MATLAB deconvblind timed out for chunk {chunk_path.name} "
@@ -618,6 +624,7 @@ def _estimate_one_tile(
     tmpdir: Path,
     matlab_lock: threading.Semaphore,
     matlab_threads: int,
+    matlab_bin: str,
     matlab_timeout: int,
     snr_weight_cap: float,
 ) -> tuple[int, np.ndarray | None, float, str | None]:
@@ -663,6 +670,7 @@ def _estimate_one_tile(
                 n_iters,
                 pad_z,
                 script_dir,
+                matlab_bin,
                 matlab_threads,
                 matlab_timeout,
             )
@@ -715,6 +723,7 @@ def estimate_psf_from_chunks(
     use_cache: bool = True,
     matlab_threads: int = 1,
     matlab_workers: int = 1,
+    matlab_bin: str = "matlab",
     matlab_timeout: int = 1800,
     snr_weight_cap: float = DEFAULT_SNR_WEIGHT_CAP,
     blind_z_slices: int = DEFAULT_BLIND_Z_SLICES,
@@ -855,6 +864,7 @@ def estimate_psf_from_chunks(
                             tmpdir,
                             matlab_slots,
                             matlab_threads,
+                            matlab_bin,
                             matlab_timeout,
                             snr_weight_cap,
                         )
@@ -954,6 +964,8 @@ def main() -> None:
                         help="Threads per MATLAB deconvblind process; clamped to 1 or 2.")
     parser.add_argument("--matlab_workers", type=int, default=1,
                         help="Concurrent MATLAB deconvblind processes; default 1 avoids MATLAB orchestration hangs.")
+    parser.add_argument("--matlab_bin", default="matlab",
+                        help="MATLAB executable used for deconvblind.")
     parser.add_argument("--matlab_timeout", type=int, default=1800,
                         help="Seconds before killing one MATLAB deconvblind chunk. <=0 disables.")
     parser.add_argument("--blind_z_slices", type=int, default=DEFAULT_BLIND_Z_SLICES,
@@ -1032,6 +1044,7 @@ def main() -> None:
         use_cache=not args.no_psf_cache,
         matlab_threads=args.matlab_threads,
         matlab_workers=args.matlab_workers,
+        matlab_bin=args.matlab_bin,
         matlab_timeout=args.matlab_timeout,
         snr_weight_cap=args.snr_weight_cap,
         blind_z_slices=args.blind_z_slices,
