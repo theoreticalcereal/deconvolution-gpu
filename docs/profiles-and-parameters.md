@@ -2,7 +2,7 @@
 
 Runtime defaults and profiles live in `workflow/configs/nextflow.config`.
 Astrocyte uses `workflow/configs/astrocyte.config`, which includes the standard
-config and enables Nextflow's Conda/Mamba environment handling for `DECON`.
+config and enables the Singularity image for `DECON`.
 
 ## Profiles
 
@@ -13,15 +13,22 @@ config and enables Nextflow's Conda/Mamba environment handling for `DECON`.
 | `wide_frame` | Uses single-detection PSF seed settings. It does not skip deskew automatically. |
 | `light_sheet_decon` | Enables decon-only mode and light-sheet PSF seed settings. |
 | `docker` | Enables Docker. |
+| `singularity` | Enables Singularity and builds or uses `workflow/images/decon_env.sif` for `DECON`. |
 
-## Astrocyte Environment Config
+## Astrocyte Container Config
 
 `astrocyte_pkg.yml` points Astrocyte at `astrocyte.config`. That config includes
-`nextflow.config` and enables Conda/Mamba.
+`nextflow.config`, disables conda for the containerized path, enables
+Singularity, and sets `build_decon_container = true`.
 
-`DECON` declares `environment.yml`, so Nextflow builds and activates that
-environment for GPU deconvolution. `DESKEW` still runs on the host with the
-MATLAB module and does not use the deconvolution environment.
+When `build_decon_container` is true, the workflow runs `BUILD_DECON_CONTAINER`
+before `DECON`. That process reuses `workflow/images/decon_env.sif` when a real
+Git LFS image is present; otherwise it builds `decon_env.sif` from
+`workflow/images/decon_env.def` in the Nextflow work directory, then passes the
+image path to `DECON`.
+
+`DESKEW` still runs on the host with the MATLAB module because the container is
+the Python/CUDA deconvolution environment.
 
 ## Light-Sheet Profile
 
@@ -92,9 +99,9 @@ expanded to produce multiple independent calls.
 
 ## Environment Setup
 
-The cluster profiles enable conda and mamba. For `DECON`, the config loads
-`mamba/2.3.0` and creates a small activation shim so Nextflow can activate the
-environment reliably on compute nodes.
+The Astrocyte profile disables conda for `DECON` and enables Singularity. The
+container is built from `environment.yml` through `workflow/images/decon_env.def`
+or supplied as a Git LFS-managed `workflow/images/decon_env.sif`.
 
 The process script then loads:
 

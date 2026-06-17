@@ -5,3 +5,4 @@ work/
 __pycache__/
 *.py[cod]
 workflow/images/*.sif
+!workflow/images/decon_env.sif

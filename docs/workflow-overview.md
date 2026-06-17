@@ -3,7 +3,8 @@
 The pipeline is a Nextflow DSL2 workflow with these named processes:
 
 1. `DESKEW`
-2. `DECON`
+2. `BUILD_DECON_CONTAINER`
+3. `DECON`
 
 The control path is defined in `workflow/main.nf`.
 
@@ -45,8 +46,11 @@ the backward-compatible directory parameters `image_path` and `decon_input_dir`.
 `DESKEW` is CPU/MATLAB work. It loads `matlab/2024a`, runs
 `deskew_wrapper.py`, and calls `deskew.m` through `matlab -batch`.
 
-`DECON` is GPU work. It builds and activates the Conda/Mamba environment,
-loads CUDA and MATLAB,
+`BUILD_DECON_CONTAINER` prepares the Singularity image used by `DECON`. It
+links a real Git LFS-managed `workflow/images/decon_env.sif` when present, or
+builds the image from `workflow/images/decon_env.def`.
+
+`DECON` is GPU work. It runs inside the Singularity image, loads CUDA and MATLAB,
 checks the GPU with `nvidia-smi`, estimates the PSF, and runs CUDA
 Richardson-Lucy deconvolution.
 

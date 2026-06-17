@@ -6,9 +6,9 @@ a blind point-spread function (PSF), and run GPU-accelerated
 Richardson-Lucy deconvolution with `pycudadecon`.
 
 The workflow is designed for BioHPC SLURM execution. Python and CUDA
-deconvolution dependencies are built from `environment.yml` by Nextflow's
-Conda/Mamba support, while cluster modules provide workflow/runtime tools such
-as Nextflow, Java, CUDA, and MATLAB.
+deconvolution dependencies are packaged in the workflow Singularity image,
+while cluster modules provide workflow/runtime tools such as Nextflow, Java,
+Singularity, CUDA, and MATLAB.
 
 ## Process Guides
 
