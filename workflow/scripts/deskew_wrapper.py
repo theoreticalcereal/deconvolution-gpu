@@ -8,6 +8,7 @@ def run_deskew(image_path, cell_name, cell_index, channels,
                timepoints, dx, dz, angle, flip, output_dir):
 
     script_dir = str(Path(__file__).parent.absolute())
+    cell_name = "" if cell_name is None else str(cell_name).strip()
 
     print(f"Running deskew with image: {image_path}, cell name: {cell_name}, "
           f"cell index: {cell_index!r}, channels: {channels}, timepoints: {timepoints}, "
@@ -57,7 +58,7 @@ def run_deskew(image_path, cell_name, cell_index, channels,
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--image_path')
-    parser.add_argument('--cell_name')
+    parser.add_argument('--cell_name', default='')
     parser.add_argument('--cell_index', default='')
     parser.add_argument('--channels', default='')
     parser.add_argument('--timepoints', default='')

@@ -1,0 +1,32 @@
+input:
+  - /endosome/archive/bioinformatics/Danuser_lab/Dean/dean/2026-06-15-cleaver-lab/332.01_NF2H/Cell_004/CH01_000000.tiff
+
+output_dir: ./output/CH01
+decon_only: true
+channels: '1'
+timepoints: '0'
+
+# Shared microscope/sample parameters. Units follow the Nextflow workflow:
+# distances and wavelengths are in microns.
+magnification: '38'
+camera_pixel_size: '6.5'
+dxy: 0.167
+dx: 0.167
+dz: 0.200
+ni: 1.56
+ns: '1.56'
+na: 0.7467
+detection_na: '0.7467'
+illumination_na: '0.7467'
+
+# Active emission wavelength for CH01.
+wavelength: 0.595
+
+# Channel-specific optical metadata supplied for this dataset:
+# CH00: excitation 0.488 um, emission 0.515 um
+# CH01: excitation 0.562 um, emission 0.595 um
+# CH02: excitation 0.642 um, emission 0.650 um
+#
+# To run another channel, select/input only that channel's TIFFs and change:
+# - output_dir/channels
+# - wavelength to the channel's emission wavelength

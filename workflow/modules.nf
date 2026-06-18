@@ -1,5 +1,5 @@
 process DESKEW {
-    tag "${cell_name}"
+    tag "${cell_name ?: 'deskew'}"
     module 'matlab/2024a'
 
     publishDir "${params.output_dir}", mode: 'copy'
@@ -95,7 +95,7 @@ process STAGE_DECON_INPUT {
 }
 
 process DECON {
-    tag "${cell_name}"
+    tag "decon"
     module 'singularity/3.9.9:matlab/2024a'
     container { decon_container.toString() }
 
@@ -109,7 +109,6 @@ process DECON {
 
     input:
     path deskewed_dir
-    val  cell_name
     val  background
     val  iter
     val  output_dir

@@ -13,8 +13,8 @@ The process receives these values from Nextflow:
 
 | Value | Meaning |
 |---|---|
-| `image_path` | Parent directory containing the dataset folder. |
-| `cell_name` | Dataset folder name under `image_path`. |
+| `image_path` | Directory containing TIFFs, or a parent directory containing the legacy `cell_name` folder. |
+| `cell_name` | Optional legacy dataset folder name under `image_path`. |
 | `cell_index` | Optional value injected into MATLAB as `CellIndex`. |
 | `channels` | Optional channel filter. Empty means all detected channels. |
 | `timepoints` | Optional timepoint filter. Empty means all detected timepoints. |
@@ -25,6 +25,13 @@ The process receives these values from Nextflow:
 | `output_dir` | Process-local output directory; Nextflow passes `.`. |
 
 The MATLAB code looks for input TIFFs in:
+
+```text
+<image_path>/
+```
+
+When `cell_name` is supplied for a legacy folder layout, the MATLAB code looks
+in:
 
 ```text
 <image_path>/<cell_name>/
@@ -120,7 +127,7 @@ size is larger than 4 GiB, it uses BigTIFF mode automatically.
 
 ## Common Failure Points
 
-`No TIFF files found` means `<image_path>/<cell_name>` exists but contains no
+`No TIFF files found` means the resolved input directory exists but contains no
 `.tif` or `.tiff` files.
 
 `No CH##_###### TIFF files found` means files exist, but they do not match the

@@ -42,7 +42,6 @@ workflow {
 
         DECON(
             decon_input_ch,
-            params.cell_name,
             params.background,
             params.iter,
             params.output_dir,
@@ -64,7 +63,6 @@ workflow {
 
         DECON(
             DESKEW.out.deskewed_path,
-            params.cell_name,
             params.background,
             params.iter,
             params.output_dir,

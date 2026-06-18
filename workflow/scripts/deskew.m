@@ -40,10 +40,13 @@ numFolders = 1;
 
 for c = 1:numFolders
 
-    % Use the folder name passed from Nextflow directly.
-    cellNameWithIndex = CellName;
-
-    inputDir = fullfile(imagePath, cellNameWithIndex);
+    % Backward-compatible layout: when CellName is provided, read
+    % <imagePath>/<CellName>. Otherwise, read imagePath directly.
+    if exist('CellName', 'var') && ~isempty(CellName)
+        inputDir = fullfile(imagePath, CellName);
+    else
+        inputDir = imagePath;
+    end
 
     % Discover input files in the cell folder.
     tifFiles = dir(fullfile(inputDir, '*.tif'));

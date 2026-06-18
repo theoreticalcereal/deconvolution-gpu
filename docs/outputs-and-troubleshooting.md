@@ -84,11 +84,12 @@ first selected TIFF and applies it to all selected TIFFs.
 The deskew process looks in:
 
 ```text
-<image_path>/<cell_name>/
+<image_path>/
 ```
 
-Make sure `image_path` is the parent directory and `cell_name` is the folder
-inside it.
+For legacy layouts, set `image_path` to the parent directory and `cell_name` to
+the folder inside it. Otherwise leave `cell_name` blank and set `image_path` to
+the TIFF directory.
 
 ### No Matching Deconvolution TIFFs
 

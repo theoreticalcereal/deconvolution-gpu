@@ -35,9 +35,9 @@ channels with different wavelengths can skew deconvolution results.
 
 | Mode | input files | cell_name | channels | timepoints | decon_only |
 |------|-------------|-----------|----------|------------|------------|
-| Light-sheet deskew + decon | Raw `CH##_######.tif[f]` files from one channel | `Cell001` | | | `false` |
-| Light-sheet decon only | Already deskewed 3-D TIFF stacks from one channel | `Cell001` | optional | optional | `true` |
-| Wide-frame decon only | Stacked 3-D TIFF files from one channel | `Sample001` | optional | optional | `true` |
+| Light-sheet deskew + decon | Raw `CH##_######.tif[f]` files from one channel | optional legacy folder | | | `false` |
+| Light-sheet decon only | Already deskewed 3-D TIFF stacks from one channel | unused | optional | optional | `true` |
+| Wide-frame decon only | Stacked 3-D TIFF files from one channel | unused | optional | optional | `true` |
 
 ## Main Run Modes
 
@@ -60,7 +60,7 @@ an existing directory.
 | Parameter | Description |
 |-----------|-------------|
 | `input` | TIFF files selected in Astrocyte. Select one channel at a time. |
-| `cell_name` | Dataset or cell prefix used to locate and label input files. |
+| `cell_name` | Optional legacy dataset folder under `image_path` for deskew runs. Unused by decon-only runs. |
 | `output_dir` | Directory where final outputs are published; defaults to `./workflow/output`. |
 | `decon_only` | Skip deskewing and run only deconvolution. |
 | `channels` | Optional channel filter, for example `0`. Empty means all selected TIFFs. |

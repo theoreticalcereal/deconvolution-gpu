@@ -123,7 +123,7 @@ All parameters can be passed on the command line as `--param_name value` or set 
 | Parameter | Description |
 |---|---|
 | `--image_path` | Path to the directory containing raw input TIFFs |
-| `--cell_name` | Name prefix used to locate and label files |
+| `--cell_name` | Optional legacy dataset folder under `image_path` for deskew runs |
 
 ### I/O
 

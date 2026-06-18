@@ -67,7 +67,9 @@ workflow_parameters:
     required: false
     default: ''
     description: |
-      Dataset or cell prefix used to locate and label input files.
+      Optional legacy dataset folder under image_path for deskew runs. Leave
+      blank when selecting TIFFs directly or when image_path already points at
+      the TIFF directory.
 
   - id: cell_index
     type: string
