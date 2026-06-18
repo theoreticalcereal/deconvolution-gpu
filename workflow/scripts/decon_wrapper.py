@@ -75,6 +75,8 @@ def _filter_tiffs(
     for tiff_path in tiff_list:
         match = CHANNEL_TIMEPOINT_RE.match(Path(tiff_path).stem)
         if not match:
+            if channels is None and timepoints is None:
+                filtered.append(tiff_path)
             continue
         channel = int(match.group("channel"))
         timepoint = int(match.group("timepoint"))
@@ -406,17 +408,20 @@ def main() -> None:
 
     image_dir = Path(args.image_path)
 
-    # Collect all deskewed TIFFs, sorted so index 0 is deterministic
+    # Collect all TIFFs, sorted so index 0 is deterministic. Channel/timepoint
+    # filters only apply to files that use the CH<channel>_<timepoint> naming
+    # pattern; arbitrary decon-only input names are accepted when no filters are
+    # requested.
     tiff_list = sorted(
-        glob(str(image_dir / "CH*.tif")) +
-        glob(str(image_dir / "CH*.tiff"))
+        glob(str(image_dir / "*.tif")) +
+        glob(str(image_dir / "*.tiff"))
     )
     channels = _parse_int_filter(args.channels)
     timepoints = _parse_int_filter(args.timepoints)
     tiff_list = _filter_tiffs(tiff_list, channels, timepoints)
     if not tiff_list:
         print(
-            f"Error: no CH*.tif files found in {image_dir} "
+            f"Error: no TIFF files found in {image_dir} "
             f"matching channels={args.channels!r}, timepoints={args.timepoints!r}"
         )
         raise SystemExit(1)
@@ -525,7 +530,7 @@ def main() -> None:
         )
 
         stem = tiff_path.name.replace(".tiff", "").replace(".tif", "")
-        out_name = f"DB2_{stem}.tif" if "CH" in stem else "DB2_deconvolved_output.tif"
+        out_name = f"DB2_{stem}.tif"
         imwrite(out_name, output)
         print(f"  Saved {out_name}", flush=True)
 

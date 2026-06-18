@@ -92,8 +92,8 @@ inside it.
 
 ### No Matching Deconvolution TIFFs
 
-The deconvolution wrapper accepts `CH*.tif` and `CH*.tiff`, but the stem must
-match:
+The deconvolution wrapper accepts `*.tif` and `*.tiff`. If `channels` or
+`timepoints` are supplied, the stem must match:
 
 ```text
 CH<channel>_<timepoint>

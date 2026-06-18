@@ -3,6 +3,7 @@ nextflow.enable.dsl=2
 
 include { DESKEW } from './modules'
 include { BUILD_DECON_CONTAINER } from './modules'
+include { STAGE_DECON_INPUT } from './modules'
 include { DECON }  from './modules'
 
 workflow {
@@ -14,8 +15,33 @@ workflow {
     }
 
     if (params.decon_only) {
+        if (params.input) {
+            input_patterns = params.input
+            if (!(input_patterns instanceof List)) {
+                input_text = input_patterns.toString().trim()
+                if (input_text.startsWith('[') && input_text.endsWith(']')) {
+                    input_text = input_text.substring(1, input_text.length() - 1).trim()
+                    input_patterns = input_text ? input_text.split(/\s*,\s*/) as List : []
+                } else {
+                    input_patterns = [input_text]
+                }
+            }
+            input_tiffs_ch = Channel
+                .fromList(input_patterns)
+                .map { input_pattern ->
+                    input_text = input_pattern.toString().trim()
+                    input_text = input_text.replaceAll(/^['"]|['"]$/, '')
+                    file(input_text, checkIfExists: true)
+                }
+                .collect()
+            STAGE_DECON_INPUT(input_tiffs_ch)
+            decon_input_ch = STAGE_DECON_INPUT.out.decon_input_dir
+        } else {
+            decon_input_ch = Channel.value(params.decon_input_dir ?: params.image_path)
+        }
+
         DECON(
-            params.decon_input_dir ?: params.image_path,
+            decon_input_ch,
             params.cell_name,
             params.background,
             params.iter,

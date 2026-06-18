@@ -36,8 +36,8 @@ channels with different wavelengths can skew deconvolution results.
 | Mode | input files | cell_name | channels | timepoints | decon_only |
 |------|-------------|-----------|----------|------------|------------|
 | Light-sheet deskew + decon | Raw `CH##_######.tif[f]` files from one channel | `Cell001` | | | `false` |
-| Light-sheet decon only | Already deskewed `CH<channel>_<timepoint>.tif[f]` files from one channel | `Cell001` | `0` | `0` | `true` |
-| Wide-frame decon only | Stacked `CH<channel>_<timepoint>.tif[f]` files from one channel | `Sample001` | `0` | `0` | `true` |
+| Light-sheet decon only | Already deskewed 3-D TIFF stacks from one channel | `Cell001` | optional | optional | `true` |
+| Wide-frame decon only | Stacked 3-D TIFF files from one channel | `Sample001` | optional | optional | `true` |
 
 ## Main Run Modes
 
@@ -50,6 +50,10 @@ is already stored as 3-D stacks.
 
 `light_sheet_decon` skips deskew and runs deconvolution with the light-sheet
 effective PSF seed mode.
+
+In decon-only Astrocyte runs, the selected `input` TIFFs are staged directly
+for `DECON`; `decon_input_dir` is only needed for manual CLI runs that point at
+an existing directory.
 
 ## Common Parameters
 

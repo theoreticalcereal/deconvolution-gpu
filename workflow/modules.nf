@@ -73,6 +73,27 @@ process BUILD_DECON_CONTAINER {
     """
 }
 
+process STAGE_DECON_INPUT {
+    tag "decon_input"
+
+    input:
+    path input_tiffs
+
+    output:
+    path "decon_input", emit: decon_input_dir
+
+    script:
+    def shell_quote = { value -> "'${value.toString().replace("'", "'\\''")}'" }
+    def link_commands = input_tiffs.collect { tiff ->
+        "ln -s \"\$PWD/${tiff}\" ${shell_quote("decon_input/${tiff.name}")}"
+    }.join('\n')
+
+    """
+    mkdir -p decon_input
+    ${link_commands}
+    """
+}
+
 process DECON {
     tag "${cell_name}"
     module 'singularity/3.9.9:matlab/2024a'
@@ -87,7 +108,7 @@ process DECON {
     clusterOptions '--gres=gpu:1'
 
     input:
-    val  deskewed_dir
+    path deskewed_dir
     val  cell_name
     val  background
     val  iter

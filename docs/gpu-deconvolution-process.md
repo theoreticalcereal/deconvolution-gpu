@@ -9,17 +9,19 @@ Astrocyte handles file ingestion for package runs. The wrapper scans the
 selected input directory for:
 
 ```text
-CH*.tif
-CH*.tiff
+*.tif
+*.tiff
 ```
 
-It then filters names with:
+When `channels` or `timepoints` are supplied, it filters names with:
 
 ```text
 ^CH(?P<channel>\d+)_(?P<timepoint>\d+)(?:_registered_consistent)?$
 ```
 
-This means decon-only inputs should be named like:
+This means decon-only inputs can use arbitrary TIFF names when no
+channel/timepoint filters are requested. If filters are requested, inputs
+should be named like:
 
 ```text
 CH0_0.tif
@@ -126,6 +128,7 @@ Examples:
 DB2_CH0_0.tif
 DB2_CH00_000000.tif
 DB2_CH0_0_registered_consistent.tif
+DB2_my_stack.tif
 ```
 
 Nextflow publishes these files to:

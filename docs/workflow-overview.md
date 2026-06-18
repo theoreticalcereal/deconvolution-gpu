@@ -29,6 +29,7 @@ TIFF, and deconvolves every selected TIFF.
 When `params.decon_only` is true, the workflow skips `DESKEW` and runs:
 
 ```text
+STAGE_DECON_INPUT(input files)
 DECON(decon_input, ...)
 ```
 
@@ -38,8 +39,10 @@ Use this mode for:
 - Wide-frame 3-D TIFF stacks.
 - Any data that already matches the deconvolution input naming pattern.
 
-The Astrocyte frontend handles file ingestion. Manual CLI runs still support
-the backward-compatible directory parameters `image_path` and `decon_input_dir`.
+When Astrocyte file-picker inputs are present, `STAGE_DECON_INPUT` links those
+TIFFs into a `decon_input/` directory and passes that directory to `DECON`.
+Manual CLI runs without `input` still support the backward-compatible directory
+parameters `image_path` and `decon_input_dir`.
 
 ## Process Boundaries
 

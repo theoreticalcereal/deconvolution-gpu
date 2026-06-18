@@ -15,7 +15,8 @@ The implementation is split across:
 `decon_wrapper.py` sorts and filters deconvolution input TIFFs first. The first
 selected TIFF is used for blind PSF estimation.
 
-Supported deconvolution input stems are:
+Deconvolution input can be any TIFF stack when no channel/timepoint filters are
+requested. Supported filterable stems are:
 
 ```text
 CH0_0
@@ -29,8 +30,8 @@ The filter regex is:
 ^CH(?P<channel>\d+)_(?P<timepoint>\d+)(?:_registered_consistent)?$
 ```
 
-If `channels` or `timepoints` are supplied, only matching files contribute to
-both PSF estimation and deconvolution.
+If `channels` or `timepoints` are supplied, only files matching this pattern
+contribute to both PSF estimation and deconvolution.
 
 ## Lateral Pixel Size Resolution
 

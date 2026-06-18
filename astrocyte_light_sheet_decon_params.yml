@@ -1,0 +1,21 @@
+decon_only: true
+input:
+  - /archive/bioinformatics/Danuser_lab/Dean/dean/2026-06-15-cleaver-lab/332.01_NF2H/Cell_004/CH01_000000.tiff
+channels: '1'
+timepoints: '0'
+output_dir: /work/bioinformatics/s249154/deconvolution-gpu/output/CH01
+psf_mode: 'light_sheet'
+camera_pixel_size: '6.5'
+magnification: '38'
+dxy: 0.167
+dz: 0.2
+ni: 1.56
+ns: '1.56'
+detection_na: '0.7467'
+illumination_na: '0.7467'
+# Emission wavelength in microns. Use one channel per run:
+# CH00: 0.515
+# CH01: 0.595
+# CH02: 0.650
+wavelength: 0.595
+iter: 10
