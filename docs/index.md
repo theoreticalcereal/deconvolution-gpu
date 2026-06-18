@@ -33,11 +33,11 @@ channels with different wavelengths can skew deconvolution results.
 
 ## Example Modes
 
-| Mode | input files | cell_name | channels | timepoints | decon_only |
-|------|-------------|-----------|----------|------------|------------|
-| Light-sheet deskew + decon | Raw `CH##_######.tif[f]` files from one channel | optional legacy folder | | | `false` |
-| Light-sheet decon only | Already deskewed 3-D TIFF stacks from one channel | unused | optional | optional | `true` |
-| Wide-frame decon only | Stacked 3-D TIFF files from one channel | unused | optional | optional | `true` |
+| Mode | input files | cell_name | decon_only |
+|------|-------------|-----------|------------|
+| Light-sheet deskew + decon | Raw `CH##_######.tif[f]` files from one channel | optional legacy folder | `false` |
+| Light-sheet decon only | Already deskewed 3-D TIFF stacks from one channel | unused | `true` |
+| Wide-frame decon only | Stacked 3-D TIFF files from one channel | unused | `true` |
 
 ## Main Run Modes
 
@@ -63,8 +63,6 @@ an existing directory.
 | `cell_name` | Optional legacy dataset folder under `image_path` for deskew runs. Unused by decon-only runs. |
 | `output_dir` | Directory where final outputs are published; defaults to `./workflow/output`. |
 | `decon_only` | Skip deskewing and run only deconvolution. |
-| `channels` | Optional channel filter, for example `0`. Empty means all selected TIFFs. |
-| `timepoints` | Optional timepoint filter, for example `0` or `0,1`. Empty means all discovered timepoints. |
 | `dx` | Deskew lateral pixel size in microns. |
 | `dz` | Deskew/deconvolution axial spacing in microns. |
 | `angle` | Light-sheet acquisition angle in degrees. |

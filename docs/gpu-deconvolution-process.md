@@ -13,15 +13,12 @@ selected input directory for:
 *.tiff
 ```
 
-When `channels` or `timepoints` are supplied, it filters names with:
+Decon-only inputs can use arbitrary TIFF names. Channel/timepoint filtering is
+not performed by the wrapper; choose the exact files to process with the
+Astrocyte file picker or by pointing `decon_input_dir` at a directory that
+contains only the intended TIFFs.
 
-```text
-^CH(?P<channel>\d+)_(?P<timepoint>\d+)(?:_registered_consistent)?$
-```
-
-This means decon-only inputs can use arbitrary TIFF names when no
-channel/timepoint filters are requested. If filters are requested, inputs
-should be named like:
+Examples:
 
 ```text
 CH0_0.tif
@@ -29,9 +26,7 @@ CH1_0.tif
 CH0_0_registered_consistent.tif
 ```
 
-The deskew process currently writes raw-style names such as
-`CH00_000000.tif`. Those still match the deconvolution regex because the
-channel and timepoint captures accept any number of digits.
+The deskew process writes raw-style names such as `CH00_000000.tif`.
 
 Select files from one channel at a time. The PSF is estimated from the first
 selected TIFF and reused for every selected TIFF, so mixing wavelengths/channels
@@ -47,7 +42,7 @@ The OTF is built with:
 - `dzpsf = dz`
 - `dxpsf = dxy`
 - `wavelength = round(wavelength * 1000)` in nanometers
-- `na = detection_na` or fallback `na`
+- `na = detection_na` or backward-compatible `na`
 - `nimm = ni`
 
 The temporary PSF file is removed after processing.

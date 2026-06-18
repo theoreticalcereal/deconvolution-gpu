@@ -16,8 +16,6 @@ The process receives these values from Nextflow:
 | `image_path` | Directory containing TIFFs, or a parent directory containing the legacy `cell_name` folder. |
 | `cell_name` | Optional legacy dataset folder name under `image_path`. |
 | `cell_index` | Optional value injected into MATLAB as `CellIndex`. |
-| `channels` | Optional channel filter. Empty means all detected channels. |
-| `timepoints` | Optional timepoint filter. Empty means all detected timepoints. |
 | `dx` | Lateral pixel size in microns. |
 | `dz` | Axial step size in microns. |
 | `angle` | Light-sheet acquisition angle in degrees. |
@@ -55,13 +53,11 @@ CH<two-or-more digits>_<six digits>[optional _registered_consistent].tif[f]
 ## Wrapper Behavior
 
 `deskew_wrapper.py` builds one MATLAB `-batch` command. It injects only the
-optional variables that were actually supplied:
+optional legacy variables that were actually supplied:
 
 - `CellIndex` is omitted when `cell_index` is blank.
-- `ChannelsToProcess` is omitted when `channels` is blank.
-- `timepoints` is omitted when `timepoints` is blank.
 
-This allows `deskew.m` to discover channels and timepoints from the TIFF names.
+`deskew.m` discovers all channels and timepoints from the TIFF names.
 
 ## TIFF Reading
 
@@ -80,7 +76,7 @@ rows x columns x z-slices
 
 ## Shear Correction
 
-For each selected channel/timepoint, `deskew.m` computes:
+For each discovered channel/timepoint, `deskew.m` computes:
 
 ```text
 newdz = dz * cosd(angle)

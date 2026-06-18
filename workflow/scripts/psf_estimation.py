@@ -240,11 +240,11 @@ def resolve_blind_worker_count(
 
 
 def generate_theoretical_psf(
-    na: float = 1.0,
+    na: float | None = None,
     detection_na: float | None = None,
     illumination_na: float | None = None,
-    wavelength: float = 0.525,      # µm
-    ni: float = 1.33,
+    wavelength: float | None = None,      # µm
+    ni: float | None = None,
     ns: float | None = None,
     ni0: float | None = None,
     tg: float | None = None,
@@ -254,8 +254,8 @@ def generate_theoretical_psf(
     ti0: float | None = None,
     oversample_factor: int = 3,
     psf_model: str = "vectorial",
-    dxy: float = 0.1,               # µm, lateral pixel size
-    dz: float = 0.3,                # µm, axial step
+    dxy: float | None = None,       # µm, lateral pixel size
+    dz: float | None = None,        # µm, axial step
     psf_size_z: int = 61,
     psf_size_xy: int = 128,
     background: float = 0.0,
@@ -270,6 +270,19 @@ def generate_theoretical_psf(
     background-subtracted and normalised to sum = 1.
     """
     detection_na = detection_na if detection_na is not None else na
+    required_values = {
+        "detection_na": detection_na,
+        "wavelength": wavelength,
+        "ni": ni,
+        "ns": ns,
+        "dxy": dxy,
+        "dz": dz,
+    }
+    missing = [name for name, value in required_values.items() if value is None or value <= 0]
+    if missing:
+        raise ValueError(
+            "Missing required optical/acquisition parameter(s): " + ", ".join(missing)
+        )
     requested_kwargs = {
         "z": psf_size_z,
         "nx": psf_size_xy,
@@ -308,11 +321,11 @@ def generate_theoretical_psf(
 
 
 def resolve_dxy(
-    dxy: float,
+    dxy: float | None,
     camera_pixel_size: float | None = None,
     magnification: float | None = None,
 ) -> float:
-    if dxy > 0:
+    if dxy is not None and dxy > 0:
         return dxy
     if camera_pixel_size and magnification and camera_pixel_size > 0 and magnification > 0:
         return camera_pixel_size / magnification
@@ -982,12 +995,12 @@ def main() -> None:
                         help="Disable reuse of cached blind PSF estimates.")
     parser.add_argument("--script_dir", default=str(Path(__file__).parent))
 
-    # Optional optical parameters for the PSF seed
-    parser.add_argument("--na",         type=float, default=1.0)
+    # Optical/acquisition parameters for the PSF seed
+    parser.add_argument("--na",         type=float, default=None)
     parser.add_argument("--detection_na", type=float, default=None)
     parser.add_argument("--illumination_na", type=float, default=None)
-    parser.add_argument("--wavelength", type=float, default=0.525)
-    parser.add_argument("--ni",         type=float, default=1.33)
+    parser.add_argument("--wavelength", type=float, default=None)
+    parser.add_argument("--ni",         type=float, default=None)
     parser.add_argument("--ns",         type=float, default=None)
     parser.add_argument("--ni0",        type=float, default=None)
     parser.add_argument("--tg",         type=float, default=None)
@@ -999,8 +1012,8 @@ def main() -> None:
     parser.add_argument("--psf_model", choices=("vectorial", "scalar", "gaussian"), default="vectorial")
     parser.add_argument("--camera_pixel_size", type=float, default=None)
     parser.add_argument("--magnification", type=float, default=None)
-    parser.add_argument("--dxy",        type=float, default=0.1)
-    parser.add_argument("--dz",         type=float, default=0.3)
+    parser.add_argument("--dxy",        type=float, default=None)
+    parser.add_argument("--dz",         type=float, default=None)
     parser.add_argument("--psf_size_z", type=int,   default=61)
     parser.add_argument("--psf_size_xy",type=int,   default=128)
     parser.add_argument("--background", type=float, default=0.0)

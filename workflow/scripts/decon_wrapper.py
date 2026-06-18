@@ -56,38 +56,6 @@ def _write_tiff_near_input_or_cwd(path: Path, data: np.ndarray) -> Path:
         return fallback
 
 
-def _parse_int_filter(value: str | None) -> set[int] | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    if not text:
-        return None
-    tokens = [token for token in re.split(r"[\s,]+", text) if token]
-    return {int(token) for token in tokens}
-
-
-def _filter_tiffs(
-    tiff_list: list[str],
-    channels: set[int] | None,
-    timepoints: set[int] | None,
-) -> list[str]:
-    filtered = []
-    for tiff_path in tiff_list:
-        match = CHANNEL_TIMEPOINT_RE.match(Path(tiff_path).stem)
-        if not match:
-            if channels is None and timepoints is None:
-                filtered.append(tiff_path)
-            continue
-        channel = int(match.group("channel"))
-        timepoint = int(match.group("timepoint"))
-        if channels is not None and channel not in channels:
-            continue
-        if timepoints is not None and timepoint not in timepoints:
-            continue
-        filtered.append(tiff_path)
-    return filtered
-
-
 def _detected_channels(tiff_list: list[str]) -> list[int]:
     detected = set()
     for tiff_path in tiff_list:
@@ -98,6 +66,28 @@ def _detected_channels(tiff_list: list[str]) -> list[int]:
 
 def _format_seconds(seconds: float) -> str:
     return f"{seconds:.2f}s"
+
+
+def _require_positive(name: str, value: float | None) -> float:
+    if value is None or value <= 0:
+        raise ValueError(f"{name} must be provided and > 0")
+    return value
+
+
+def _resolve_required_dxy(
+    dxy: float | None,
+    camera_pixel_size: float | None,
+    magnification: float | None,
+) -> float:
+    if dxy is not None:
+        return _require_positive("dxy", dxy)
+    if camera_pixel_size is not None or magnification is not None:
+        _require_positive("camera_pixel_size", camera_pixel_size)
+        _require_positive("magnification", magnification)
+        return resolve_dxy(0, camera_pixel_size, magnification)
+    raise ValueError(
+        "dxy must be provided and > 0, or camera_pixel_size and magnification must both be provided"
+    )
 
 
 def _chunk_progress(block_info: dict | None, total_chunks: int) -> tuple[int, str]:
@@ -305,10 +295,6 @@ def main() -> None:
     # Required options
     parser.add_argument("--image_path", required=True,
                         help="Directory containing deskewed CH*.tif files.")
-    parser.add_argument("--channels", default="",
-                        help="Optional channel filter, e.g. '0', '0 1 2', or '0,1,2'.")
-    parser.add_argument("--timepoints", default="",
-                        help="Optional timepoint filter, e.g. '0', '0 1', or '0,1'.")
 
     # Blind estimation options
     parser.add_argument("--blind_iters", type=int, default=10,
@@ -354,16 +340,16 @@ def main() -> None:
     parser.add_argument("--background", type=float, default=0.0,
                         help="Background value to subtract before decon.")
 
-    # Optional optical parameters used to generate the blind-estimation PSF seed.
-    parser.add_argument("--na",          type=float, default=1.0,
+    # Optical/acquisition parameters used to generate the blind-estimation PSF seed.
+    parser.add_argument("--na",          type=float, default=None,
                         help="Backward-compatible detection numerical aperture.")
     parser.add_argument("--detection_na", type=float, default=None,
                         help="Detection objective numerical aperture. Overrides --na when provided.")
     parser.add_argument("--illumination_na", type=float, default=None,
                         help="Illumination numerical aperture metadata; not used by psfmodels.")
-    parser.add_argument("--wavelength",  type=float, default=0.525,
+    parser.add_argument("--wavelength",  type=float, default=None,
                         help="Emission wavelength in µm.")
-    parser.add_argument("--ni",          type=float, default=1.33,
+    parser.add_argument("--ni",          type=float, default=None,
                         help="Refractive index of immersion medium.")
     parser.add_argument("--ns",          type=float, default=None,
                         help="Sample refractive index.")
@@ -391,9 +377,9 @@ def main() -> None:
                         help="Camera pixel size in µm; used to derive dxy when --dxy <= 0.")
     parser.add_argument("--magnification", type=float, default=None,
                         help="Total magnification; used to derive dxy when --dxy <= 0.")
-    parser.add_argument("--dxy",         type=float, default=0.1,
+    parser.add_argument("--dxy",         type=float, default=None,
                         help="Lateral pixel size in µm.")
-    parser.add_argument("--dz",          type=float, default=0.3,
+    parser.add_argument("--dz",          type=float, default=None,
                         help="Axial step size in µm.")
     parser.add_argument("--psf_size_z",  type=int,   default=61,
                         help="Z size of PSF volume.")
@@ -408,29 +394,17 @@ def main() -> None:
 
     image_dir = Path(args.image_path)
 
-    # Collect all TIFFs, sorted so index 0 is deterministic. Channel/timepoint
-    # filters only apply to files that use the CH<channel>_<timepoint> naming
-    # pattern; arbitrary decon-only input names are accepted when no filters are
-    # requested.
+    # Collect all TIFFs, sorted so index 0 is deterministic. File selection is
+    # handled by the workflow before this wrapper runs.
     tiff_list = sorted(
         glob(str(image_dir / "*.tif")) +
         glob(str(image_dir / "*.tiff"))
     )
-    channels = _parse_int_filter(args.channels)
-    timepoints = _parse_int_filter(args.timepoints)
-    tiff_list = _filter_tiffs(tiff_list, channels, timepoints)
     if not tiff_list:
-        print(
-            f"Error: no TIFF files found in {image_dir} "
-            f"matching channels={args.channels!r}, timepoints={args.timepoints!r}"
-        )
+        print(f"Error: no TIFF files found in {image_dir}")
         raise SystemExit(1)
 
-    print(
-        f"Found {len(tiff_list)} TIFF(s) to process "
-        f"for channels={args.channels or 'all'}, timepoints={args.timepoints or 'all'}.",
-        flush=True,
-    )
+    print(f"Found {len(tiff_list)} selected TIFF(s) to process.", flush=True)
     selected_channels = _detected_channels(tiff_list)
     if len(selected_channels) > 1:
         print(
@@ -445,8 +419,15 @@ def main() -> None:
     # PSF resolution
     # ------------------------------------------------------------------
 
-    dxy = resolve_dxy(args.dxy, args.camera_pixel_size, args.magnification)
+    dxy = _resolve_required_dxy(args.dxy, args.camera_pixel_size, args.magnification)
+    dz = _require_positive("dz", args.dz)
+    wavelength = _require_positive("wavelength", args.wavelength)
+    ni = _require_positive("ni", args.ni)
+    ns = _require_positive("ns", args.ns)
     detection_na = args.detection_na if args.detection_na is not None else args.na
+    detection_na = _require_positive("detection_na", detection_na)
+    if args.psf_mode == "light_sheet":
+        _require_positive("illumination_na", args.illumination_na)
 
     # Build the optical-model PSF seed. This is intentionally not accepted as
     # the final deconvolution PSF because the measured blind estimates are much
@@ -456,9 +437,9 @@ def main() -> None:
         na=args.na,
         detection_na=args.detection_na,
         illumination_na=args.illumination_na,
-        wavelength=args.wavelength,
-        ni=args.ni,
-        ns=args.ns,
+        wavelength=wavelength,
+        ni=ni,
+        ns=ns,
         ni0=args.ni0,
         tg=args.tg,
         tg0=args.tg0,
@@ -468,7 +449,7 @@ def main() -> None:
         oversample_factor=args.oversample_factor,
         psf_model=args.psf_model,
         dxy=dxy,
-        dz=args.dz,
+        dz=dz,
         psf_size_z=args.psf_size_z,
         psf_size_xy=args.psf_size_xy,
         background=args.background,
@@ -518,11 +499,11 @@ def main() -> None:
             image_path=tiff_path,
             psf=psf,
             n_iters=args.iter,
-            dz=args.dz,
+            dz=dz,
             dxy=dxy,
-            wavelength=args.wavelength,
+            wavelength=wavelength,
             na=detection_na,
-            ni=args.ni,
+            ni=ni,
             chunk_xy=args.decon_chunk_xy,
             vram_gb=args.vram_gb,
             decon_workers=args.decon_workers,

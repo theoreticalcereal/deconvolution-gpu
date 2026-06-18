@@ -52,8 +52,6 @@ workflow {
             params.image_path,
             params.cell_name,
             params.cell_index,
-            params.channels,
-            params.timepoints,
             params.dx,
             params.dz,
             params.angle,

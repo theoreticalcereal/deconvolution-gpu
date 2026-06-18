@@ -66,8 +66,6 @@ For already-stacked wide-frame 3-D TIFFs that should not be deskewed, add
 nextflow run main.nf -profile wide_frame \
     --decon_only true \
     --decon_input_dir /path/to/stack_tiffs \
-    --channels 0 \
-    --timepoints 0 \
     --camera_pixel_size 6.5 \
     --magnification 36 \
     --dxy 0.167 \
@@ -93,8 +91,6 @@ For already-stacked light-sheet data that should not be deskewed:
 ```bash
 nextflow run main.nf -profile light_sheet_decon \
     --decon_input_dir /path/to/renamed_stack_tiffs \
-    --channels 0 \
-    --timepoints 0 \
     --camera_pixel_size 6.5 \
     --magnification 36 \
     --dxy 0.167 \
@@ -138,10 +134,8 @@ All parameters can be passed on the command line as `--param_name value` or set 
 | Parameter | Default | Description |
 |---|---|---|
 | `--cell_index` | `''` | Integer index to select a specific cell in the dataset |
-| `--channels` | `''` | Channels to process, e.g. `0` or `0,1,2`. Empty = all channels |
-| `--timepoints` | `''` | Timepoints to process, e.g. `0` or `0,1`. Empty = all timepoints |
-| `--dx` | `0.118` | Lateral pixel size in µm |
-| `--dz` | `0.118` | Axial step size in µm |
+| `--dx` | required for deskew | Lateral pixel size in µm |
+| `--dz` | required | Axial step size in µm |
 | `--angle` | `40` | Acquisition angle in degrees |
 | `--flip` | `1` | Flip direction flag (1 or -1) |
 
@@ -181,23 +175,23 @@ All parameters can be passed on the command line as `--param_name value` or set 
 
 ### Optical / PSF Parameters
 
-These are used to generate the theoretical PSF seed for blind estimation. The theoretical PSF is not used directly for final deconvolution. All are optional with defaults.
+These are used to generate the theoretical PSF seed for blind estimation. The theoretical PSF is not used directly for final deconvolution. Dataset-specific optical/acquisition values must be supplied explicitly.
 
 | Parameter | Default | Description |
 |---|---|---|
-| `--na` | `1.0` | Detection numerical aperture (backward-compatible) |
-| `--detection_na` | `''` | Detection NA; overrides `--na` when provided |
-| `--illumination_na` | `''` | Illumination NA (metadata only; not used by `psfmodels`) |
-| `--wavelength` | `0.520` | Emission wavelength in µm |
-| `--ni` | `1.515` | Immersion medium refractive index |
-| `--ns` | `''` | Sample refractive index |
+| `--na` | none | Detection numerical aperture (backward-compatible) |
+| `--detection_na` | required | Detection NA; overrides `--na` when provided |
+| `--illumination_na` | none | Illumination NA; required for `psf_mode=light_sheet` |
+| `--wavelength` | required | Emission wavelength in µm |
+| `--ni` | required | Immersion medium refractive index |
+| `--ns` | required | Sample refractive index |
 | `--ni0` | `''` | Design immersion refractive index |
 | `--tg` | `''` | Experimental coverslip thickness (µm) |
 | `--tg0` | `''` | Design coverslip thickness (µm) |
 | `--ng` | `''` | Experimental coverslip refractive index |
 | `--ng0` | `''` | Design coverslip refractive index |
 | `--ti0` | `''` | Objective working distance (µm) |
-| `--dxy` | `0.118` | Lateral pixel size used for PSF model (µm) |
+| `--dxy` | required unless derived | Lateral pixel size used for PSF model (µm) |
 | `--psf_size_z` | `101` | Z dimension of PSF volume (voxels) |
 | `--psf_size_xy` | `61` | XY dimension of PSF volume (voxels) |
 | `--psf_model` | `vectorial` | PSF model type: `vectorial`, `scalar`, or `gaussian` |

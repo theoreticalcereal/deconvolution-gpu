@@ -8,8 +8,6 @@ process DESKEW {
     val image_path
     val cell_name
     val cell_index
-    val channels
-    val timepoints
     val dx
     val dz
     val angle
@@ -26,8 +24,6 @@ process DESKEW {
         --image_path "${image_path}" \\
         --cell_name "${cell_name}" \\
         --cell_index "${cell_index}" \\
-        --channels "${channels}" \\
-        --timepoints "${timepoints}" \\
         --dx ${dx} \\
         --dz ${dz} \\
         --angle ${angle} \\
@@ -119,8 +115,8 @@ process DECON {
     path "estimated_psf.tif", emit: psf_output
 
     script:
-    // Build optional optical-parameter flags only if the user supplied them.
-    // All have defaults in decon_wrapper.py so omitting is safe but not recommended
+    // Build parameter flags only when supplied. decon_wrapper.py validates
+    // required optical/acquisition parameters and fails fast if any are missing.
     def na_flag          = params.na          ? "--na ${params.na}"                   : ""
     def detection_na_flag = params.detection_na ? "--detection_na ${params.detection_na}" : ""
     def illumination_na_flag = params.illumination_na ? "--illumination_na ${params.illumination_na}" : ""
@@ -139,8 +135,8 @@ process DECON {
     def light_sheet_angle_flag = params.light_sheet_angle != null ? "--light_sheet_angle ${params.light_sheet_angle}" : ""
     def camera_pixel_size_flag = params.camera_pixel_size ? "--camera_pixel_size ${params.camera_pixel_size}" : ""
     def magnification_flag = params.magnification ? "--magnification ${params.magnification}" : ""
-    def dxy_flag         = params.dxy != null ? "--dxy ${params.dxy}"                 : ""
-    def dz_flag          = params.dz != null  ? "--dz ${params.dz}"                   : ""
+    def dxy_flag         = params.dxy         ? "--dxy ${params.dxy}"                 : ""
+    def dz_flag          = params.dz          ? "--dz ${params.dz}"                   : ""
     def psf_size_z_flag  = params.psf_size_z  ? "--psf_size_z ${params.psf_size_z}"   : ""
     def psf_size_xy_flag = params.psf_size_xy ? "--psf_size_xy ${params.psf_size_xy}" : ""
     def blind_iters_flag = params.blind_iters ? "--blind_iters ${params.blind_iters}" : ""
@@ -175,8 +171,6 @@ process DECON {
 
     python3 ${projectDir}/scripts/decon_wrapper.py \\
         --image_path "${deskewed_dir}" \\
-        --channels "${params.channels}" \\
-        --timepoints "${params.timepoints}" \\
         --background ${background} \\
         --iter ${iter} \\
         --script_dir "${projectDir}/scripts" \\

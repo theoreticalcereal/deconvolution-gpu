@@ -3,8 +3,6 @@ input:
 
 output_dir: ./output/CH01
 decon_only: true
-channels: '1'
-timepoints: '0'
 
 # Shared microscope/sample parameters. Units follow the Nextflow workflow:
 # distances and wavelengths are in microns.
@@ -28,5 +26,5 @@ wavelength: 0.595
 # CH02: excitation 0.642 um, emission 0.650 um
 #
 # To run another channel, select/input only that channel's TIFFs and change:
-# - output_dir/channels
+# - input/output_dir
 # - wavelength to the channel's emission wavelength

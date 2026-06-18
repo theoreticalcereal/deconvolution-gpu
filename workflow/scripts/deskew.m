@@ -24,10 +24,6 @@
 % DO NOT hardcode them here or it will break the pipeline
 % =========================================================================
 
-if ~exist('timepoints', 'var')
-    timepoints = [];
-end
-
 if ~exist('output_dir', 'var') || isempty(output_dir)
     error('output_dir was not provided by the wrapper.');
 end
@@ -75,12 +71,8 @@ for c = 1:numFolders
         error('No CH##_###### TIFF files found in %s', inputDir);
     end
 
-    if ~exist('ChannelsToProcess', 'var') || isempty(ChannelsToProcess)
-        ChannelsToProcess = unique(detectedChannels);
-    end
-    if isempty(timepoints)
-        timepoints = unique(detectedTimepoints);
-    end
+    ChannelsToProcess = unique(detectedChannels);
+    timepoints = unique(detectedTimepoints);
 
     disp(sprintf('Detected channels: %s', mat2str(unique(detectedChannels))));
     disp(sprintf('Detected timepoints: %s', mat2str(unique(detectedTimepoints))));

@@ -12,11 +12,12 @@ The implementation is split across:
 
 ## Input Selection
 
-`decon_wrapper.py` sorts and filters deconvolution input TIFFs first. The first
-selected TIFF is used for blind PSF estimation.
+`decon_wrapper.py` sorts the selected deconvolution input TIFFs first. The
+first selected TIFF is used for blind PSF estimation.
 
-Deconvolution input can be any TIFF stack when no channel/timepoint filters are
-requested. Supported filterable stems are:
+Deconvolution input can be any TIFF stack. Channel/timepoint filtering is not
+performed by the wrapper; select only the files intended for one optical
+configuration.
 
 ```text
 CH0_0
@@ -24,21 +25,13 @@ CH1_0
 CH0_0_registered_consistent
 ```
 
-The filter regex is:
-
-```text
-^CH(?P<channel>\d+)_(?P<timepoint>\d+)(?:_registered_consistent)?$
-```
-
-If `channels` or `timepoints` are supplied, only files matching this pattern
-contribute to both PSF estimation and deconvolution.
-
 ## Lateral Pixel Size Resolution
 
 The PSF code needs `dxy`.
 
-If `--dxy` is greater than zero, that value is used. If `--dxy <= 0`, both
-`--camera_pixel_size` and `--magnification` must be supplied, and:
+If `--dxy` is supplied and greater than zero, that value is used. If `--dxy`
+is omitted, both `--camera_pixel_size` and `--magnification` must be supplied,
+and:
 
 ```text
 dxy = camera_pixel_size / magnification
@@ -51,10 +44,11 @@ as:
 
 - `dxy`
 - `dz`
-- `detection_na` or fallback `na`
+- `detection_na` or backward-compatible `na`
 - `wavelength`
 - `ni`
-- optional refractive-index and coverslip settings
+- `ns`
+- optional coverslip settings
 - `psf_model`
 - `oversample_factor`
 - `psf_size_z`

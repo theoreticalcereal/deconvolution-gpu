@@ -36,9 +36,6 @@ the Python/CUDA deconvolution environment.
 
 ```text
 decon_only = false
-dx = 0.118
-dxy = 0.118
-dz = 0.118
 angle = 40
 flip = 1
 psf_mode = light_sheet
@@ -126,17 +123,9 @@ before launching Python.
 | `decon_only` | Skip `DESKEW` and run `DECON` directly. |
 | `decon_input_dir` | Backward-compatible directory of already deskewed or stacked TIFFs. |
 
-### Selection
-
-| Parameter | Purpose |
-|---|---|
-| `cell_index` | Optional MATLAB `CellIndex` injection. |
-| `channels` | Channel filter such as `0`; empty means all selected/discovered channels. |
-| `timepoints` | Timepoint filter such as `0` or `0,1`; empty means all discovered timepoints. |
-
-Selected TIFFs should come from the same channel. The workflow estimates one
-PSF and applies it to the selected files, so mixed wavelengths can skew
-deconvolution results.
+Selected TIFFs should come from the same channel and optical configuration. The
+workflow estimates one PSF and applies it to the selected files, so mixed
+wavelengths can skew deconvolution results.
 
 ### Deskew Geometry
 
@@ -185,7 +174,8 @@ deconvolution results.
 | `illumination_na` | Illumination NA for light-sheet seed generation. |
 | `wavelength` | Emission wavelength in microns. |
 | `ni` | Immersion refractive index. |
-| `ns`, `ni0`, `tg`, `tg0`, `ng`, `ng0`, `ti0` | Optional `psfmodels` optical-path settings. |
+| `ns` | Sample refractive index. |
+| `ni0`, `tg`, `tg0`, `ng`, `ng0`, `ti0` | Optional `psfmodels` coverslip/design settings. |
 | `dxy` | Lateral sample pixel size in microns. |
 | `camera_pixel_size`, `magnification` | Used to derive `dxy` when `dxy <= 0`. |
 | `psf_size_z`, `psf_size_xy` | Seed PSF dimensions. |

@@ -106,35 +106,16 @@ workflow_parameters:
       Directory containing already deskewed or already stacked TIFFs for
       decon-only runs. Used by the light_sheet_decon profile.
 
-  - id: channels
-    type: string
-    required: false
-    default: ''
-    description: |
-      Optional channel filter such as 0. Leave empty to process all selected
-      TIFFs. Select files from only one channel unless you intentionally want to
-      process multiple wavelengths with the same estimated PSF.
-
-  - id: timepoints
-    type: string
-    required: false
-    default: ''
-    description: |
-      Optional timepoint filter such as 0 or 0,1. Leave empty to process all
-      discovered timepoints.
-
   - id: dx
     type: real
     required: false
-    default: 0.118
     min: 0
     description: |
       Deskew voxel size in X/Y, in microns.
 
   - id: dz
     type: real
-    required: false
-    default: 0.118
+    required: true
     min: 0
     description: |
       Deskew/deconvolution voxel size in Z, in microns.
@@ -193,7 +174,6 @@ workflow_parameters:
   - id: dxy
     type: real
     required: false
-    default: 0.118
     min: 0
     description: |
       Final sample pixel size in X/Y, in microns, unless derived from camera
@@ -215,8 +195,7 @@ workflow_parameters:
 
   - id: wavelength
     type: real
-    required: false
-    default: 0.520
+    required: true
     min: 0
     description: |
       Emission wavelength in microns for PSF generation and CUDA deconvolution.
@@ -224,39 +203,34 @@ workflow_parameters:
   - id: na
     type: real
     required: false
-    default: 1.0
     min: 0
     description: |
-      Fallback numerical aperture used when detection_na is unset.
+      Backward-compatible detection numerical aperture. Prefer detection_na.
 
   - id: detection_na
     type: string
-    required: false
-    default: ''
+    required: true
     description: |
-      Detection objective numerical aperture. Leave empty to use na.
+      Detection objective numerical aperture.
 
   - id: illumination_na
     type: string
     required: false
-    default: ''
     description: |
       Illumination objective numerical aperture for light-sheet PSF metadata.
 
   - id: ni
     type: real
-    required: false
-    default: 1.515
+    required: true
     min: 0
     description: |
       Immersion refractive index for PSF generation.
 
   - id: ns
     type: string
-    required: false
-    default: ''
+    required: true
     description: |
-      Specimen/sample refractive index. Leave empty to use the PSF code default.
+      Specimen/sample refractive index.
 
   - id: blind_iters
     type: integer

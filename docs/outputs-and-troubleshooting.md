@@ -93,15 +93,7 @@ the TIFF directory.
 
 ### No Matching Deconvolution TIFFs
 
-The deconvolution wrapper accepts `*.tif` and `*.tiff`. If `channels` or
-`timepoints` are supplied, the stem must match:
-
-```text
-CH<channel>_<timepoint>
-CH<channel>_<timepoint>_registered_consistent
-```
-
-Examples that match:
+The deconvolution wrapper accepts `*.tif` and `*.tiff`. Example names:
 
 ```text
 CH0_0.tif
@@ -109,13 +101,14 @@ CH00_000000.tif
 CH1_12_registered_consistent.tiff
 ```
 
-If filters are supplied, confirm that `channels` and `timepoints` match the
-numbers parsed from the filename.
+Channel/timepoint filtering has been removed. Select only the files you intend
+to process, or point `decon_input_dir` at a directory containing only those
+TIFFs.
 
 ### `dxy` Resolution Fails
 
-If `dxy <= 0`, both `camera_pixel_size` and `magnification` must be provided.
-Otherwise, set `dxy` directly.
+If `dxy` is omitted, both `camera_pixel_size` and `magnification` must be
+provided. Otherwise, set `dxy` directly.
 
 ### MATLAB `deconvblind` Chunks Timeout
 
