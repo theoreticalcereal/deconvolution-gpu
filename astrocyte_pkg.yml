@@ -259,7 +259,7 @@ workflow_parameters:
   - id: blind_iters
     type: integer
     required: false
-    default: 10
+    default: 20
     min: 1
     description: |
       MATLAB deconvblind iteration count per blind PSF chunk.
