@@ -33,11 +33,11 @@ channels with different wavelengths can skew deconvolution results.
 
 ## Example Modes
 
-| Mode | input files | cell_name | decon_only |
-|------|-------------|-----------|------------|
-| Light-sheet deskew + decon | Raw `CH##_######.tif[f]` files from one channel | optional legacy folder | `false` |
-| Light-sheet decon only | Already deskewed 3-D TIFF stacks from one channel | unused | `true` |
-| Wide-frame decon only | Stacked 3-D TIFF files from one channel | unused | `true` |
+| Mode | input files |
+|------|-------------|
+| Light-sheet deskew + decon | Raw `CH##_######.tif[f]` files from one channel |
+| Light-sheet decon only | Already deskewed 3-D TIFF stacks from one channel |
+| Wide-frame decon only | Stacked 3-D TIFF files from one channel |
 
 ## Main Run Modes
 

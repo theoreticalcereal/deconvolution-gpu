@@ -53,39 +53,14 @@ workflow_parameters:
 
   - id: input
     type: files
-    required: false
+    required: true
     description: |
-      --input. Select the TIFF files to process. Choose files from only one
+      --input (required). Select the TIFF files to process. Choose files from only one
       channel at a time. This workflow estimates one PSF from the first selected
       TIFF and applies it to all selected TIFFs; mixing channels with different
       wavelengths can skew deconvolution results.
     min: 1
     regex: ".*(\\.tif|\\.tiff|\\.TIF|\\.TIFF)$"
-
-  - id: cell_name
-    type: string
-    required: false
-    default: ''
-    description: |
-      Optional legacy dataset folder under image_path for deskew runs. Leave
-      blank when selecting TIFFs directly or when image_path already points at
-      the TIFF directory.
-
-  - id: cell_index
-    type: string
-    required: false
-    default: ''
-    description: |
-      Optional cell index suffix for raw MATLAB-style input folder naming.
-
-  - id: output_dir
-    type: string
-    required: true
-    default: './workflow/output'
-    description: |
-      Directory where all final workflow outputs are published. Defaults to
-      ./workflow/output so results remain available after Astrocyte cleans
-      Nextflow work directories.
 
   - id: decon_only
     type: select
@@ -118,12 +93,12 @@ workflow_parameters:
     required: true
     min: 0
     description: |
-      Deskew/deconvolution voxel size in Z, in microns.
+      (required) Deskew/deconvolution voxel size in Z, in microns.
 
   - id: angle
     type: real
     required: false
-    default: 40
+    default: 0
     description: |
       Deskew shear angle in degrees.
 
@@ -158,7 +133,7 @@ workflow_parameters:
       Seed PSF mode used before blind PSF estimation.
     choices:
       - [ 'single', 'Single detection PSF' ]
-      - [ 'light_sheet', 'Detection PSF times rotated illumination PSF' ]
+      - [ 'light_sheet', 'Detection PSF times rotated illumination PSF (light sheet calculation)' ]
 
   - id: psf_model
     type: select
@@ -202,14 +177,14 @@ workflow_parameters:
 
   - id: na
     type: real
-    required: false
+    required: true
     min: 0
     description: |
-      Backward-compatible detection numerical aperture. Prefer detection_na.
+      (required) Backward-compatible detection numerical aperture. Prefer detection_na and illumination_na.
 
   - id: detection_na
     type: string
-    required: true
+    required: false
     description: |
       Detection objective numerical aperture.
 
@@ -221,14 +196,14 @@ workflow_parameters:
 
   - id: ni
     type: real
-    required: true
+    required: false
     min: 0
     description: |
       Immersion refractive index for PSF generation.
 
   - id: ns
     type: string
-    required: true
+    required: false
     description: |
       Specimen/sample refractive index.
 
