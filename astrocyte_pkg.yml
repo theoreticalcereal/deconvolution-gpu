@@ -73,6 +73,13 @@ workflow_parameters:
       - [ 'false', 'Run deskew, then deconvolution' ]
       - [ 'true', 'Skip deskew and run deconvolution only' ]
 
+  - id: output_dir
+    type: string
+    required: true
+    default: './output'
+    description: |
+      Directory where all final workflow outputs are published.
+
   - id: dx
     type: real
     required: false

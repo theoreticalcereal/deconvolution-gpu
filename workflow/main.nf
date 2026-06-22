@@ -6,30 +6,52 @@ include { BUILD_DECON_CONTAINER } from './modules'
 include { STAGE_DECON_INPUT } from './modules'
 include { DECON }  from './modules'
 
-def normalizeInputPatterns(input) {
+def inputTextFromCommandLine(commandLine) {
+    if (!commandLine) {
+        return null
+    }
+
+    def matcher = (commandLine =~ /(?:^|\s)--input\s+(.+?)(?=\s+--[A-Za-z0-9_][A-Za-z0-9_-]*\b|$)/)
+    return matcher.find() ? matcher.group(1).trim() : null
+}
+
+def normalizeInputPatterns(input, commandLine = null) {
     if (!input) {
         return []
     }
 
-    def input_patterns = input
-    if (!(input_patterns instanceof List)) {
-        def input_text = input_patterns.toString().trim()
-        if (input_text.startsWith('[') && input_text.endsWith(']')) {
-            input_text = input_text.substring(1, input_text.length() - 1).trim()
-            input_patterns = input_text ? input_text.split(/\s*,\s*/) as List : []
-        } else {
-            input_patterns = input_text ? [input_text] : []
-        }
+    def input_text = (input instanceof List)
+        ? input.collect { it.toString() }.join(',')
+        : input.toString()
+
+    input_text = input_text.trim()
+    def command_input_text = inputTextFromCommandLine(commandLine)
+    if (command_input_text && (
+            input_text.count('[') != input_text.count(']') ||
+            command_input_text.startsWith('[') ||
+            command_input_text.contains(input_text))) {
+        input_text = command_input_text
     }
 
-    return input_patterns.collect { input_pattern ->
-        input_pattern.toString().trim().replaceAll(/^['"]|['"]$/, '')
-    }.findAll { it }
+    if (input_text.startsWith('[') && input_text.endsWith(']')) {
+        input_text = input_text.substring(1, input_text.length() - 1).trim()
+    }
+
+    return input_text
+        .split(/\s*,\s*/)
+        .collect { input_pattern ->
+            input_pattern
+                .trim()
+                .replaceAll(/^[\['"\s]+/, '')
+                .replaceAll(/[\]'"\s]+$/, '')
+        }
+        .findAll { it }
 }
 
 workflow {
-    input_patterns = normalizeInputPatterns(params.input)
+    input_patterns = normalizeInputPatterns(params.input, workflow.commandLine)
     if (input_patterns) {
+        log.info "Selected ${input_patterns.size()} input TIFF(s): ${input_patterns.join(', ')}"
         input_tiffs_ch = Channel
             .fromList(input_patterns)
             .map { input_pattern -> file(input_pattern, checkIfExists: true) }
