@@ -2,9 +2,10 @@
 
 The pipeline is a Nextflow DSL2 workflow with these named processes:
 
-1. `DESKEW`
-2. `BUILD_DECON_CONTAINER`
-3. `DECON`
+1. `STAGE_DECON_INPUT`
+2. `DESKEW`
+3. `BUILD_DECON_CONTAINER`
+4. `DECON`
 
 The control path is defined in `workflow/main.nf`.
 
@@ -14,6 +15,10 @@ When `params.decon_only` is false, the workflow runs:
 
 1. `DESKEW(...)`
 2. `DECON(DESKEW.out.deskewed_path, ...)`
+
+When Astrocyte file-picker inputs are present, `STAGE_DECON_INPUT` first links
+the selected TIFFs into a `decon_input/` directory. `DESKEW` reads that staged
+directory directly, with `cell_name` ignored for the staged-file path.
 
 The deskew process publishes two directories:
 
@@ -60,9 +65,12 @@ Richardson-Lucy deconvolution.
 ## Data Flow
 
 ```text
-raw TIFF folder
+selected or raw TIFF folder
     |
     | full light-sheet mode
+    v
+STAGE_DECON_INPUT (Astrocyte file-picker runs only)
+    |
     v
 DESKEW
     |-- shear/
@@ -73,9 +81,12 @@ DESKEW
             |-- estimated_psf.tif
             `-- DB2_*.tif
 
-already stacked TIFF folder
+selected or already stacked TIFF folder
     |
     | decon-only mode
+    v
+STAGE_DECON_INPUT (Astrocyte file-picker runs only)
+    |
     v
 DECON
     |-- estimated_psf.tif

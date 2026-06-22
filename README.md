@@ -78,9 +78,10 @@ nextflow run main.nf -profile wide_frame \
     --output_dir /path/to/output
 ```
 
-In Astrocyte, selecting TIFFs with the file picker and setting
-`decon_only=true` stages those selected files directly for deconvolution.
-`decon_input_dir` is only needed for manual command-line runs.
+In Astrocyte, selected TIFFs from the file picker are staged into the input
+directory used by the selected mode. Full light-sheet runs pass the staged
+files to `DESKEW`; decon-only runs pass the same staged files directly to
+`DECON`. `decon_input_dir` is only needed for manual command-line runs.
 
 The `wide_frame` profile only selects `--psf_mode single`; pass voxel size,
 refractive index, NA, wavelength, and camera calibration values for each run.

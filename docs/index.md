@@ -51,9 +51,11 @@ is already stored as 3-D stacks.
 `light_sheet_decon` skips deskew and runs deconvolution with the light-sheet
 effective PSF seed mode.
 
-In decon-only Astrocyte runs, the selected `input` TIFFs are staged directly
-for `DECON`; `decon_input_dir` is only needed for manual CLI runs that point at
-an existing directory.
+In Astrocyte runs, the selected `input` TIFFs are staged into the input
+directory used by the selected mode. Full light-sheet runs pass those staged
+files to `DESKEW`; decon-only runs pass them directly to `DECON`.
+`decon_input_dir` is only needed for manual CLI runs that point at an existing
+directory.
 
 ## Common Parameters
 

@@ -117,8 +117,8 @@ before launching Python.
 | Parameter | Purpose |
 |---|---|
 | `input` | TIFF files selected in Astrocyte. Select one channel at a time. |
-| `image_path` | Backward-compatible raw input parent directory for manual CLI runs. |
-| `cell_name` | Optional legacy dataset folder under `image_path` for deskew runs. |
+| `image_path` | Backward-compatible raw input parent directory for manual CLI runs without `input`. |
+| `cell_name` | Optional legacy dataset folder under `image_path` for manual deskew runs. Ignored when `input` files are selected. |
 | `output_dir` | Published output root. |
 | `decon_only` | Skip `DESKEW` and run `DECON` directly. |
 | `decon_input_dir` | Backward-compatible directory of already deskewed or stacked TIFFs. |
