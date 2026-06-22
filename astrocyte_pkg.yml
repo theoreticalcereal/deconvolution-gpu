@@ -73,14 +73,6 @@ workflow_parameters:
       - [ 'false', 'Run deskew, then deconvolution' ]
       - [ 'true', 'Skip deskew and run deconvolution only' ]
 
-  - id: decon_input_dir
-    type: string
-    required: false
-    default: ''
-    description: |
-      Directory containing already deskewed or already stacked TIFFs for
-      decon-only runs. Used by the light_sheet_decon profile.
-
   - id: dx
     type: real
     required: false
