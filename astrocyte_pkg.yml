@@ -112,9 +112,9 @@ workflow_parameters:
 
   - id: iter
     type: integer
-    required: false
-    default: -1
-    min: -1
+    required: true
+    default: 20
+    min: 0
     description: |
       Richardson-Lucy iteration count for CUDA deconvolution.
 
@@ -174,7 +174,7 @@ workflow_parameters:
   - id: wavelength
     type: real
     required: true
-    default: 0.515
+    default: 0
     min: 0
     description: |
       Emission wavelength in microns for PSF generation and CUDA deconvolution.
@@ -207,7 +207,7 @@ workflow_parameters:
   - id: ni
     type: real
     required: true
-    default: 1.56
+    default: 0
     min: 0
     description: |
       Immersion refractive index for PSF generation.
@@ -215,7 +215,7 @@ workflow_parameters:
   - id: ns
     type: string
     required: true
-    default: '1.56'
+    default: '0'
     description: |
       Specimen/sample refractive index.
 
@@ -231,7 +231,7 @@ workflow_parameters:
   - id: chunk_xy
     type: integer
     required: false
-    default: -1
+    default: 256
     min: -1
     description: |
       XY tile size for blind PSF estimation. Set to -1 to omit this option and
@@ -240,17 +240,16 @@ workflow_parameters:
   - id: decon_chunk_xy
     type: integer
     required: false
-    default: -1
-    min: -1
+    default: 0
+    min: 0
     description: |
-      Core XY tile size for CUDA deconvolution. Values <= 0 auto-size from
-      available VRAM. Set to -1 to omit this option and use the wrapper
-      default.
+      Core XY tile size for CUDA deconvolution. Values = 0 auto-size from
+      available VRAM. 
 
   - id: decon_workers
     type: integer
     required: false
-    default: -1
+    default: 1
     min: -1
     description: |
       Parallel CUDA deconvolution workers per process. Set to -1 to omit this
@@ -259,8 +258,7 @@ workflow_parameters:
   - id: vram_gb
     type: real
     required: false
-    default: -1
-    min: -1
+    default: 0
+    min: 0
     description: |
       Optional manual GPU memory budget in GB. Use 0 to query available VRAM.
-      Set to -1 to omit this option and use the wrapper default.
