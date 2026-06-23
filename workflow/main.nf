@@ -6,10 +6,50 @@ include { BUILD_DECON_CONTAINER } from './modules'
 include { STAGE_DECON_INPUT } from './modules'
 include { DECON }  from './modules'
 
+def commandLineParam(commandLine, paramName) {
+    if (!commandLine) {
+        return null
+    }
+
+    def matcher = (commandLine =~ /(?:^|\s)--${paramName}\s+(.+?)(?=\s+--[A-Za-z0-9_][A-Za-z0-9_-]*\b|$)/)
+    return matcher.find() ? matcher.group(1).trim() : null
+}
+
+def normalizePathParam(value, commandLine, paramName) {
+    if (!value) {
+        return []
+    }
+
+    def text = (value instanceof List)
+        ? value.collect { it.toString() }.join(',')
+        : value.toString()
+
+    def commandLineText = commandLineParam(commandLine, paramName)
+    if (commandLineText && (commandLineText.startsWith('[') || commandLineText.contains(','))) {
+        text = commandLineText
+    }
+
+    text = text.trim()
+    if (text.startsWith('[') && text.endsWith(']')) {
+        text = text.substring(1, text.length() - 1)
+    }
+
+    return text
+        .split(/\s*,\s*/)
+        .collect { pathText ->
+            pathText
+                .trim()
+                .replaceAll(/^[\s\['"]+/, '')
+                .replaceAll(/[\s\]'"]+$/, '')
+        }
+        .findAll { it }
+}
+
 workflow {
-    if (params.input) {
-        log.info "Selected input TIFF(s): ${params.input}"
-        input_tiffs_ch = Channel.fromPath(params.input, checkIfExists: true).collect()
+    input_paths = normalizePathParam(params.input, workflow.commandLine, 'input')
+    if (input_paths) {
+        log.info "Selected input TIFF(s): ${input_paths.join(', ')}"
+        input_tiffs_ch = Channel.fromPath(input_paths, checkIfExists: true).collect()
         STAGE_DECON_INPUT(input_tiffs_ch)
         selected_input_dir_ch = STAGE_DECON_INPUT.out.decon_input_dir
     } else {
@@ -24,7 +64,7 @@ workflow {
     }
 
     if (params.decon_only) {
-        if (params.input) {
+        if (input_paths) {
             decon_input_ch = selected_input_dir_ch
         } else {
             decon_input_ch = Channel.value(params.decon_input_dir ?: params.image_path)
@@ -38,8 +78,8 @@ workflow {
             decon_container_ch
         )
     } else {
-        deskew_image_path_ch = params.input ? selected_input_dir_ch : Channel.value(params.image_path)
-        deskew_cell_name = params.input ? '' : params.cell_name
+        deskew_image_path_ch = input_paths ? selected_input_dir_ch : Channel.value(params.image_path)
+        deskew_cell_name = input_paths ? '' : params.cell_name
 
         DESKEW(
             deskew_image_path_ch,
