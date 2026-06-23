@@ -69,3 +69,8 @@ class SentinelParameterWiringTests(unittest.TestCase):
     def test_astrocyte_config_prepares_decon_container(self):
         text = (ROOT / "workflow/configs/astrocyte.config").read_text()
         self.assertRegex(text, r"(?m)^\s*params\.build_decon_container\s*=\s*true\b")
+
+    def test_container_prep_can_build_with_fakeroot(self):
+        text = (ROOT / "workflow/modules.nf").read_text()
+        self.assertIn('singularity build --fakeroot decon_env.sif "${projectDir}/images/decon_env.def"', text)
+        self.assertNotIn('workflow jobs cannot build containers as a normal user', text)

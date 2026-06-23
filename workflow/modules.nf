@@ -71,14 +71,19 @@ process BUILD_DECON_CONTAINER {
             tail -c "+\$start_byte" "\$packaged_sif" > decon_env.sif
             if ! is_usable_sif decon_env.sif; then
                 echo "ERROR: ${projectDir}/images/decon_env.sif is not usable by the loaded Singularity runtime." >&2
-                echo "Provide a SingularityCE-compatible SIF; workflow jobs cannot build containers as a normal user." >&2
-                exit 1
+                echo "Building ${projectDir}/images/decon_env.def with Singularity fakeroot." >&2
+                rm -f decon_env.sif
+                singularity build --fakeroot decon_env.sif "${projectDir}/images/decon_env.def"
             fi
         else
-            echo "ERROR: ${projectDir}/images/decon_env.sif is missing or is not a SIF image." >&2
-            echo "Provide a SingularityCE-compatible SIF; workflow jobs cannot build containers as a normal user." >&2
-            exit 1
+            echo "No usable ${projectDir}/images/decon_env.sif found; building ${projectDir}/images/decon_env.def with Singularity fakeroot." >&2
+            singularity build --fakeroot decon_env.sif "${projectDir}/images/decon_env.def"
         fi
+    fi
+
+    if ! is_usable_sif decon_env.sif; then
+        echo "ERROR: failed to prepare a usable decon_env.sif." >&2
+        exit 1
     fi
     """
 }
