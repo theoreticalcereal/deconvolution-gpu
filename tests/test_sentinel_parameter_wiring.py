@@ -65,3 +65,7 @@ class SentinelParameterWiringTests(unittest.TestCase):
         self.assertIn("def requireSupplied(name, value, context)", text)
         self.assertIn("deskew_cell_index = optionalValue(params.cell_index)", text)
         self.assertIn("deskew_dx = requireSupplied('dx', params.dx, 'deskew runs')", text)
+
+    def test_astrocyte_config_prepares_decon_container(self):
+        text = (ROOT / "workflow/configs/astrocyte.config").read_text()
+        self.assertRegex(text, r"(?m)^\s*params\.build_decon_container\s*=\s*true\b")
