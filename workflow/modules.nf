@@ -117,45 +117,56 @@ process DECON {
     script:
     // Build parameter flags only when supplied. decon_wrapper.py validates
     // required optical/acquisition parameters and fails fast if any are missing.
-    def na_flag          = params.na          ? "--na ${params.na}"                   : ""
-    def detection_na_flag = params.detection_na ? "--detection_na ${params.detection_na}" : ""
-    def illumination_na_flag = params.illumination_na ? "--illumination_na ${params.illumination_na}" : ""
-    def wavelength_flag  = params.wavelength  ? "--wavelength ${params.wavelength}"   : ""
-    def ni_flag          = params.ni          ? "--ni ${params.ni}"                   : ""
-    def ns_flag          = params.ns          ? "--ns ${params.ns}"                   : ""
-    def ni0_flag         = params.ni0         ? "--ni0 ${params.ni0}"                 : ""
-    def tg_flag          = params.tg          ? "--tg ${params.tg}"                   : ""
-    def tg0_flag         = params.tg0         ? "--tg0 ${params.tg0}"                 : ""
-    def ng_flag          = params.ng          ? "--ng ${params.ng}"                   : ""
-    def ng0_flag         = params.ng0         ? "--ng0 ${params.ng0}"                 : ""
-    def ti0_flag         = params.ti0         ? "--ti0 ${params.ti0}"                 : ""
-    def oversample_factor_flag = params.oversample_factor ? "--oversample_factor ${params.oversample_factor}" : ""
-    def psf_model_flag   = params.psf_model   ? "--psf_model ${params.psf_model}"     : ""
-    def psf_mode_flag    = params.psf_mode    ? "--psf_mode ${params.psf_mode}"       : ""
-    def light_sheet_angle_flag = params.light_sheet_angle != null ? "--light_sheet_angle ${params.light_sheet_angle}" : ""
-    def camera_pixel_size_flag = params.camera_pixel_size ? "--camera_pixel_size ${params.camera_pixel_size}" : ""
-    def magnification_flag = params.magnification ? "--magnification ${params.magnification}" : ""
-    def dxy_flag         = params.dxy         ? "--dxy ${params.dxy}"                 : ""
-    def dz_flag          = params.dz          ? "--dz ${params.dz}"                   : ""
-    def psf_size_z_flag  = params.psf_size_z  ? "--psf_size_z ${params.psf_size_z}"   : ""
-    def psf_size_xy_flag = params.psf_size_xy ? "--psf_size_xy ${params.psf_size_xy}" : ""
-    def blind_iters_flag = params.blind_iters ? "--blind_iters ${params.blind_iters}" : ""
-    def chunk_xy_flag    = params.chunk_xy    ? "--chunk_xy ${params.chunk_xy}"       : ""
-    def decon_chunk_xy_flag = params.decon_chunk_xy ? "--decon_chunk_xy ${params.decon_chunk_xy}" : ""
-    def pad_xy_flag      = params.pad_xy      ? "--pad_xy ${params.pad_xy}"           : ""
-    def pad_z_flag       = params.pad_z != null ? "--pad_z ${params.pad_z}"           : ""
-    def blind_workers_flag = params.blind_workers ? "--blind_workers ${params.blind_workers}" : ""
-    def matlab_workers_flag = params.matlab_workers ? "--matlab_workers ${params.matlab_workers}" : ""
-    def matlab_threads_flag = params.matlab_threads ? "--matlab_threads ${params.matlab_threads}" : ""
-    def matlab_bin_flag = params.matlab_bin ? "--matlab_bin ${params.matlab_bin}" : ""
-    def matlab_timeout_flag = params.matlab_timeout ? "--matlab_timeout ${params.matlab_timeout}" : ""
-    def blind_z_slices_flag = params.blind_z_slices ? "--blind_z_slices ${params.blind_z_slices}" : ""
-    def snr_weight_cap_flag = params.snr_weight_cap != null ? "--snr_weight_cap ${params.snr_weight_cap}" : ""
-    def prefetch_chunks_flag = params.prefetch_chunks ? "--prefetch_chunks ${params.prefetch_chunks}" : ""
-    def decon_workers_flag = params.decon_workers ? "--decon_workers ${params.decon_workers}" : ""
-    def overlap_xy_flag  = params.overlap_xy  ? "--overlap_xy ${params.overlap_xy}"   : ""
-    def vram_gb_flag     = params.vram_gb     ? "--vram_gb ${params.vram_gb}"         : ""
-    def cache_dir_flag   = params.psf_cache_dir ? "--cache_dir ${params.psf_cache_dir}" : ""
+    def is_supplied = { value ->
+        if (value == null) {
+            return false
+        }
+        def text = value.toString().trim()
+        return text && text != '-1' && text != '-1.0'
+    }
+    def flag = { name, value -> is_supplied(value) ? "--${name} ${value}" : "" }
+
+    def background_flag  = flag('background', background)
+    def iter_flag        = flag('iter', iter)
+    def na_flag          = flag('na', params.na)
+    def detection_na_flag = flag('detection_na', params.detection_na)
+    def illumination_na_flag = flag('illumination_na', params.illumination_na)
+    def wavelength_flag  = flag('wavelength', params.wavelength)
+    def ni_flag          = flag('ni', params.ni)
+    def ns_flag          = flag('ns', params.ns)
+    def ni0_flag         = flag('ni0', params.ni0)
+    def tg_flag          = flag('tg', params.tg)
+    def tg0_flag         = flag('tg0', params.tg0)
+    def ng_flag          = flag('ng', params.ng)
+    def ng0_flag         = flag('ng0', params.ng0)
+    def ti0_flag         = flag('ti0', params.ti0)
+    def oversample_factor_flag = flag('oversample_factor', params.oversample_factor)
+    def psf_model_flag   = flag('psf_model', params.psf_model)
+    def psf_mode_flag    = flag('psf_mode', params.psf_mode)
+    def light_sheet_angle_flag = flag('light_sheet_angle', params.light_sheet_angle)
+    def camera_pixel_size_flag = flag('camera_pixel_size', params.camera_pixel_size)
+    def magnification_flag = flag('magnification', params.magnification)
+    def dxy_flag         = flag('dxy', params.dxy)
+    def dz_flag          = flag('dz', params.dz)
+    def psf_size_z_flag  = flag('psf_size_z', params.psf_size_z)
+    def psf_size_xy_flag = flag('psf_size_xy', params.psf_size_xy)
+    def blind_iters_flag = flag('blind_iters', params.blind_iters)
+    def chunk_xy_flag    = flag('chunk_xy', params.chunk_xy)
+    def decon_chunk_xy_flag = flag('decon_chunk_xy', params.decon_chunk_xy)
+    def pad_xy_flag      = flag('pad_xy', params.pad_xy)
+    def pad_z_flag       = flag('pad_z', params.pad_z)
+    def blind_workers_flag = flag('blind_workers', params.blind_workers)
+    def matlab_workers_flag = flag('matlab_workers', params.matlab_workers)
+    def matlab_threads_flag = flag('matlab_threads', params.matlab_threads)
+    def matlab_bin_flag = flag('matlab_bin', params.matlab_bin)
+    def matlab_timeout_flag = flag('matlab_timeout', params.matlab_timeout)
+    def blind_z_slices_flag = flag('blind_z_slices', params.blind_z_slices)
+    def snr_weight_cap_flag = flag('snr_weight_cap', params.snr_weight_cap)
+    def prefetch_chunks_flag = flag('prefetch_chunks', params.prefetch_chunks)
+    def decon_workers_flag = flag('decon_workers', params.decon_workers)
+    def overlap_xy_flag  = flag('overlap_xy', params.overlap_xy)
+    def vram_gb_flag     = flag('vram_gb', params.vram_gb)
+    def cache_dir_flag   = flag('cache_dir', params.psf_cache_dir)
     def no_psf_cache_flag = params.no_psf_cache ? "--no_psf_cache"                    : ""
 
     """
@@ -171,9 +182,9 @@ process DECON {
 
     python3 ${projectDir}/scripts/decon_wrapper.py \\
         --image_path "${deskewed_dir}" \\
-        --background ${background} \\
-        --iter ${iter} \\
         --script_dir "${projectDir}/scripts" \\
+        ${background_flag} \\
+        ${iter_flag} \\
         ${na_flag} \\
         ${detection_na_flag} \\
         ${illumination_na_flag} \\

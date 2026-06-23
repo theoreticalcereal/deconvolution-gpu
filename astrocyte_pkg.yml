@@ -82,9 +82,9 @@ workflow_parameters:
 
   - id: dx
     type: real
-    required: false
+    required: true
     default: 0.167
-    min: 0
+    min: -1
     description: |
       Deskew voxel size in X/Y, in microns.
 
@@ -92,7 +92,7 @@ workflow_parameters:
     type: real
     required: true
     default: 0.2
-    min: 0
+    min: -1
     description: |
       Deskew/deconvolution voxel size in Z, in microns.
 
@@ -114,7 +114,7 @@ workflow_parameters:
     type: integer
     required: false
     default: 10
-    min: 1
+    min: -1
     description: |
       Richardson-Lucy iteration count for CUDA deconvolution.
 
@@ -124,7 +124,8 @@ workflow_parameters:
     default: 0
     description: |
       Constant background subtraction value applied during PSF generation and
-      deconvolution handling.
+      deconvolution handling. Set to -1 to omit this option and use the
+      wrapper default.
 
   - id: psf_mode
     type: select
@@ -149,79 +150,88 @@ workflow_parameters:
 
   - id: dxy
     type: real
-    required: false
+    required: true
     default: 0.167
-    min: 0
+    min: -1
     description: |
-      Final sample pixel size in X/Y, in microns, unless derived from camera
-      settings.
+      Final sample pixel size in X/Y, in microns. Set to -1 only when deriving
+      dxy from camera_pixel_size and magnification.
 
   - id: camera_pixel_size
     type: string
-    required: false
-    default: ''
+    required: true
+    default: '-1'
     description: |
-      Camera pixel size in microns. With magnification, this can derive dxy.
+      Camera pixel size in microns. Set to -1 when dxy is provided directly.
 
   - id: magnification
     type: string
-    required: false
-    default: ''
+    required: true
+    default: '-1'
     description: |
-      Objective/tube magnification. With camera_pixel_size, this can derive dxy.
+      Objective/tube magnification. Set to -1 when dxy is provided directly.
 
   - id: wavelength
     type: real
     required: true
     default: 0.515
-    min: 0
+    min: -1
     description: |
       Emission wavelength in microns for PSF generation and CUDA deconvolution.
+      Set to -1 only when intentionally omitting this option; PSF generation
+      requires a positive resolved value.
 
   - id: na
     type: real
     required: true
     default: 0.7467
-    min: 0
+    min: -1
     description: |
-      Backward-compatible detection numerical aperture. Prefer detection_na and illumination_na.
+      Backward-compatible detection numerical aperture. Prefer detection_na and
+      illumination_na. Set to -1 to omit when detection_na is provided.
 
   - id: detection_na
     type: string
-    required: false
+    required: true
     default: '0.7467'
     description: |
-      Detection objective numerical aperture.
+      Detection objective numerical aperture. Set to -1 to omit and fall back
+      to na.
 
   - id: illumination_na
     type: string
-    required: false
+    required: true
     default: '0.7467'
     description: |
       Illumination objective numerical aperture for light-sheet PSF metadata.
+      Set to -1 only for single-PSF mode.
 
   - id: ni
     type: real
-    required: false
+    required: true
     default: 1.56
-    min: 0
+    min: -1
     description: |
-      Immersion refractive index for PSF generation.
+      Immersion refractive index for PSF generation. Set to -1 only when
+      intentionally omitting this option; PSF generation requires a positive
+      resolved value.
 
   - id: ns
     type: string
-    required: false
+    required: true
     default: '1.56'
     description: |
-      Specimen/sample refractive index.
+      Specimen/sample refractive index. Set to -1 only when intentionally
+      omitting this option; PSF generation requires a positive resolved value.
 
   - id: blind_iters
     type: integer
     required: false
     default: 20
-    min: 1
+    min: -1
     description: |
-      MATLAB deconvblind iteration count per blind PSF chunk.
+      MATLAB deconvblind iteration count per blind PSF chunk. Set to -1 to omit
+      this option and use the wrapper default.
 
   - id: chunk_xy
     type: integer
@@ -243,14 +253,16 @@ workflow_parameters:
     type: integer
     required: false
     default: 1
-    min: 1
+    min: -1
     description: |
-      Parallel CUDA deconvolution workers per process.
+      Parallel CUDA deconvolution workers per process. Set to -1 to omit this
+      option and use the wrapper default.
 
   - id: vram_gb
     type: real
     required: false
     default: 0
-    min: 0
+    min: -1
     description: |
       Optional manual GPU memory budget in GB. Use 0 to query available VRAM.
+      Set to -1 to omit this option and use the wrapper default.
