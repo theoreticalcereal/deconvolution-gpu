@@ -83,16 +83,16 @@ workflow_parameters:
   - id: dx
     type: real
     required: true
-    default: -1
-    min: -1
+    default: 0.167
+    min: 0
     description: |
       Deskew voxel size in X/Y, in microns.
 
   - id: dz
     type: real
     required: true
-    default: -1
-    min: -1
+    default: 0.2
+    min: 0
     description: |
       Deskew/deconvolution voxel size in Z, in microns.
 
@@ -174,12 +174,10 @@ workflow_parameters:
   - id: wavelength
     type: real
     required: true
-    default: -1
-    min: -1
+    default: 0.515
+    min: 0
     description: |
       Emission wavelength in microns for PSF generation and CUDA deconvolution.
-      Set to -1 only when intentionally omitting this option; PSF generation
-      requires a positive resolved value.
 
   - id: na
     type: real
@@ -209,20 +207,17 @@ workflow_parameters:
   - id: ni
     type: real
     required: true
-    default: -1
-    min: -1
+    default: 1.56
+    min: 0
     description: |
-      Immersion refractive index for PSF generation. Set to -1 only when
-      intentionally omitting this option; PSF generation requires a positive
-      resolved value.
+      Immersion refractive index for PSF generation.
 
   - id: ns
     type: string
     required: true
-    default: '-1'
+    default: '1.56'
     description: |
-      Specimen/sample refractive index. Set to -1 only when intentionally
-      omitting this option; PSF generation requires a positive resolved value.
+      Specimen/sample refractive index.
 
   - id: blind_iters
     type: integer

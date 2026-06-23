@@ -75,7 +75,7 @@ process BUILD_DECON_CONTAINER {
     else
         magic_offset="\$(LC_ALL=C grep -abo -m 1 'SIF_MAGIC' "\$packaged_sif" | cut -d: -f1 || true)"
         if [ -n "\$magic_offset" ] && [ "\$magic_offset" -gt 1 ]; then
-            start_byte="\$magic_offset"
+            start_byte="\$((magic_offset + 1))"
             tail -c "+\$start_byte" "\$packaged_sif" > decon_env.sif
             if ! is_usable_sif decon_env.sif; then
                 rm -f decon_env.sif
