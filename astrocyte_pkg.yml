@@ -55,7 +55,7 @@ workflow_parameters:
     type: files
     required: true
     description: |
-      --input (required). Select the TIFF files to process. Choose files from only one
+      Select the TIFF files to process. Choose files from only one
       channel at a time. This workflow estimates one PSF from the first selected
       TIFF and applies it to all selected TIFFs; mixing channels with different
       wavelengths can skew deconvolution results.
@@ -92,7 +92,7 @@ workflow_parameters:
     required: true
     min: 0
     description: |
-      (required) Deskew/deconvolution voxel size in Z, in microns.
+      Deskew/deconvolution voxel size in Z, in microns.
 
   - id: angle
     type: real
@@ -179,7 +179,7 @@ workflow_parameters:
     required: true
     min: 0
     description: |
-      (required) Backward-compatible detection numerical aperture. Prefer detection_na and illumination_na.
+      Backward-compatible detection numerical aperture. Prefer detection_na and illumination_na.
 
   - id: detection_na
     type: string
