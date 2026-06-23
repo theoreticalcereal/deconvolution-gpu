@@ -51,7 +51,7 @@ workflow_modules:
 
 workflow_parameters:
 
-  - id: input
+  - id: image_files
     type: files
     required: true
     description: |

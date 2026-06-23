@@ -15,18 +15,22 @@ def commandLineParam(commandLine, paramName) {
     return matcher.find() ? matcher.group(1).trim() : null
 }
 
-def normalizePathParam(value, commandLine, paramName) {
+def normalizePathParam(value, commandLine, paramNames) {
     if (!value) {
         return []
     }
 
+    def names = (paramNames instanceof List) ? paramNames : [paramNames]
     def text = (value instanceof List)
         ? value.collect { it.toString() }.join(',')
         : value.toString()
 
-    def commandLineText = commandLineParam(commandLine, paramName)
-    if (commandLineText && (commandLineText.startsWith('[') || commandLineText.contains(','))) {
-        text = commandLineText
+    for (paramName in names) {
+        def commandLineText = commandLineParam(commandLine, paramName)
+        if (commandLineText && (commandLineText.startsWith('[') || commandLineText.contains(','))) {
+            text = commandLineText
+            break
+        }
     }
 
     text = text.trim()
@@ -46,7 +50,7 @@ def normalizePathParam(value, commandLine, paramName) {
 }
 
 workflow {
-    input_paths = normalizePathParam(params.input, workflow.commandLine, 'input')
+    input_paths = normalizePathParam(params.image_files ?: params.input, workflow.commandLine, ['image_files', 'input'])
     if (input_paths) {
         log.info "Selected input TIFF(s): ${input_paths.join(', ')}"
         input_tiffs_ch = Channel.fromPath(input_paths, checkIfExists: true).collect()
