@@ -1,7 +1,7 @@
-input:
+image_files:
   - /endosome/work/bioinformatics/s249154/deconvolution-gpu/astrocyte_test_inputs/CH00_000000.tiff
-  - /endosome/work/bioinformatics/s249154/deconvolution-gpu/astrocyte_test_inputs/CH00_000001.tiff
-  - /endosome/work/bioinformatics/s249154/deconvolution-gpu/astrocyte_test_inputs/CH00_000002.tiff
+  - /endosome/work/bioinformatics/s249154/deconvolution-gpu/astrocyte_test_inputs/CH01_000000.tiff
+  - /endosome/work/bioinformatics/s249154/deconvolution-gpu/astrocyte_test_inputs/CH02_000000.tiff
 
 output_dir: ./output
 decon_only: true
