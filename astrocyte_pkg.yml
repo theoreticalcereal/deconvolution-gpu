@@ -23,12 +23,10 @@ citation: |
   Bioinformatics, UT Southwestern Medical Center.
 
 minimum_astrocyte_version: '2.1.0'
-nextflow_version: '24.10.0 --silent'
+nextflow_version: '24.10.0'
 nextflow_config: 'astrocyte.config'
 container: 'singularity'
 singularity_version: '3.9.9'
-workflow_containers:
-  - 'docker://git.biohpc.swmed.edu:5050/dean-lab/ctaslm2-deconvolution/decon_env:latest'
 
 # -----------------------------------------------------------------------------
 # DOCUMENTATION
@@ -53,11 +51,11 @@ workflow_modules:
 
 workflow_parameters:
 
-  - id: image_files
+  - id: input
     type: files
     required: true
     description: |
-      Select the TIFF files to process. Choose files from only one
+      --input (required). Select the TIFF files to process. Choose files from only one
       channel at a time. This workflow estimates one PSF from the first selected
       TIFF and applies it to all selected TIFFs; mixing channels with different
       wavelengths can skew deconvolution results.
@@ -84,8 +82,7 @@ workflow_parameters:
 
   - id: dx
     type: real
-    required: true
-    default: 0.167
+    required: false
     min: 0
     description: |
       Deskew voxel size in X/Y, in microns.
@@ -93,10 +90,9 @@ workflow_parameters:
   - id: dz
     type: real
     required: true
-    default: 0.2
     min: 0
     description: |
-      Deskew/deconvolution voxel size in Z, in microns.
+      (required) Deskew/deconvolution voxel size in Z, in microns.
 
   - id: angle
     type: real
@@ -115,20 +111,18 @@ workflow_parameters:
   - id: iter
     type: integer
     required: false
-    default: -1
-    min: -1
+    default: 10
+    min: 1
     description: |
-      Richardson-Lucy iteration count for CUDA deconvolution. Set to -1 to omit
-      this option and use the wrapper default.
+      Richardson-Lucy iteration count for CUDA deconvolution.
 
   - id: background
     type: real
     required: false
-    default: -1
+    default: 0
     description: |
       Constant background subtraction value applied during PSF generation and
-      deconvolution handling. Set to -1 to omit this option and use the
-      wrapper default.
+      deconvolution handling.
 
   - id: psf_mode
     type: select
@@ -154,30 +148,28 @@ workflow_parameters:
   - id: dxy
     type: real
     required: false
-    default: -1
-    min: -1
+    min: 0
     description: |
-      Final sample pixel size in X/Y, in microns. Set to -1 only when deriving
-      dxy from camera_pixel_size and magnification.
+      Final sample pixel size in X/Y, in microns, unless derived from camera
+      settings.
 
   - id: camera_pixel_size
     type: string
     required: false
-    default: '-1'
+    default: ''
     description: |
-      Camera pixel size in microns. Set to -1 when dxy is provided directly.
+      Camera pixel size in microns. With magnification, this can derive dxy.
 
   - id: magnification
     type: string
     required: false
-    default: '-1'
+    default: ''
     description: |
-      Objective/tube magnification. Set to -1 when dxy is provided directly.
+      Objective/tube magnification. With camera_pixel_size, this can derive dxy.
 
   - id: wavelength
     type: real
     required: true
-    default: 0
     min: 0
     description: |
       Emission wavelength in microns for PSF generation and CUDA deconvolution.
@@ -185,85 +177,71 @@ workflow_parameters:
   - id: na
     type: real
     required: true
-    default: -1
-    min: -1
+    min: 0
     description: |
-      Backward-compatible detection numerical aperture. Prefer detection_na and
-      illumination_na. Set to -1 to omit when detection_na is provided.
+      (required) Backward-compatible detection numerical aperture. Prefer detection_na and illumination_na.
 
   - id: detection_na
     type: string
     required: false
-    default: '-1'
     description: |
-      Detection objective numerical aperture. Set to -1 to omit and fall back
-      to na.
+      Detection objective numerical aperture.
 
   - id: illumination_na
     type: string
     required: false
-    default: '-1'
     description: |
       Illumination objective numerical aperture for light-sheet PSF metadata.
-      Set to -1 only for single-PSF mode.
 
   - id: ni
     type: real
-    required: true
-    default: 0
+    required: false
     min: 0
     description: |
       Immersion refractive index for PSF generation.
 
   - id: ns
     type: string
-    required: true
-    default: '0'
+    required: false
     description: |
       Specimen/sample refractive index.
 
   - id: blind_iters
     type: integer
     required: false
-    default: -1
-    min: -1
+    default: 20
+    min: 1
     description: |
-      MATLAB deconvblind iteration count per blind PSF chunk. Set to -1 to omit
-      this option and use the wrapper default.
+      MATLAB deconvblind iteration count per blind PSF chunk.
 
   - id: chunk_xy
     type: integer
     required: false
-    default: -1
-    min: -1
+    default: 256
     description: |
-      XY tile size for blind PSF estimation. Set to -1 to omit this option and
-      use the wrapper default.
+      XY tile size for blind PSF estimation. Values <= 0 auto-size
+      conservatively.
 
   - id: decon_chunk_xy
     type: integer
     required: false
-    default: -1
-    min: -1
+    default: 0
     description: |
       Core XY tile size for CUDA deconvolution. Values <= 0 auto-size from
-      available VRAM. Set to -1 to omit this option and use the wrapper
-      default.
+      available VRAM.
 
   - id: decon_workers
     type: integer
     required: false
-    default: -1
-    min: -1
+    default: 1
+    min: 1
     description: |
-      Parallel CUDA deconvolution workers per process. Set to -1 to omit this
-      option and use the wrapper default.
+      Parallel CUDA deconvolution workers per process.
 
   - id: vram_gb
     type: real
     required: false
-    default: -1
-    min: -1
+    default: 0
+    min: 0
     description: |
       Optional manual GPU memory budget in GB. Use 0 to query available VRAM.
-      Set to -1 to omit this option and use the wrapper default.
