@@ -57,14 +57,33 @@ process BUILD_DECON_CONTAINER {
     fi
 
     packaged_sif="${projectDir}/images/decon_env.sif"
-    if [ -s "\$packaged_sif" ] && ! head -n 1 "\$packaged_sif" | grep -q 'git-lfs.github.com/spec'; then
-        ln -s "\$packaged_sif" decon_env.sif
-    else
+    is_usable_sif() {
+        [ -s "\$1" ] || return 1
+        ! head -n 1 "\$1" | grep -q 'git-lfs.github.com/spec' || return 1
+        singularity sif list "\$1" >/dev/null 2>&1
+    }
+    build_from_def() {
         out="\$PWD/decon_env.sif"
         tmp="\$PWD/decon_env.sif.tmp"
         cd "${projectDir}/images"
         singularity build "\$tmp" decon_env.def
         mv "\$tmp" "\$out"
+    }
+
+    if is_usable_sif "\$packaged_sif"; then
+        ln -s "\$packaged_sif" decon_env.sif
+    else
+        magic_offset="\$(LC_ALL=C grep -abo -m 1 'SIF_MAGIC' "\$packaged_sif" | cut -d: -f1 || true)"
+        if [ -n "\$magic_offset" ] && [ "\$magic_offset" -gt 1 ]; then
+            start_byte="\$magic_offset"
+            tail -c "+\$start_byte" "\$packaged_sif" > decon_env.sif
+            if ! is_usable_sif decon_env.sif; then
+                rm -f decon_env.sif
+                build_from_def
+            fi
+        else
+            build_from_def
+        fi
     fi
     """
 }

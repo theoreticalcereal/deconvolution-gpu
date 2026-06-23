@@ -83,7 +83,7 @@ workflow_parameters:
   - id: dx
     type: real
     required: true
-    default: 0.167
+    default: -1
     min: -1
     description: |
       Deskew voxel size in X/Y, in microns.
@@ -91,7 +91,7 @@ workflow_parameters:
   - id: dz
     type: real
     required: true
-    default: 0.2
+    default: -1
     min: -1
     description: |
       Deskew/deconvolution voxel size in Z, in microns.
@@ -113,7 +113,7 @@ workflow_parameters:
   - id: iter
     type: integer
     required: false
-    default: 10
+    default: -1
     min: -1
     description: |
       Richardson-Lucy iteration count for CUDA deconvolution.
@@ -121,7 +121,7 @@ workflow_parameters:
   - id: background
     type: real
     required: false
-    default: 0
+    default: -1
     description: |
       Constant background subtraction value applied during PSF generation and
       deconvolution handling. Set to -1 to omit this option and use the
@@ -151,7 +151,7 @@ workflow_parameters:
   - id: dxy
     type: real
     required: true
-    default: 0.167
+    default: -1
     min: -1
     description: |
       Final sample pixel size in X/Y, in microns. Set to -1 only when deriving
@@ -174,7 +174,7 @@ workflow_parameters:
   - id: wavelength
     type: real
     required: true
-    default: 0.515
+    default: -1
     min: -1
     description: |
       Emission wavelength in microns for PSF generation and CUDA deconvolution.
@@ -184,7 +184,7 @@ workflow_parameters:
   - id: na
     type: real
     required: true
-    default: 0.7467
+    default: -1
     min: -1
     description: |
       Backward-compatible detection numerical aperture. Prefer detection_na and
@@ -193,7 +193,7 @@ workflow_parameters:
   - id: detection_na
     type: string
     required: true
-    default: '0.7467'
+    default: '-1'
     description: |
       Detection objective numerical aperture. Set to -1 to omit and fall back
       to na.
@@ -201,7 +201,7 @@ workflow_parameters:
   - id: illumination_na
     type: string
     required: true
-    default: '0.7467'
+    default: '-1'
     description: |
       Illumination objective numerical aperture for light-sheet PSF metadata.
       Set to -1 only for single-PSF mode.
@@ -209,7 +209,7 @@ workflow_parameters:
   - id: ni
     type: real
     required: true
-    default: 1.56
+    default: -1
     min: -1
     description: |
       Immersion refractive index for PSF generation. Set to -1 only when
@@ -219,7 +219,7 @@ workflow_parameters:
   - id: ns
     type: string
     required: true
-    default: '1.56'
+    default: '-1'
     description: |
       Specimen/sample refractive index. Set to -1 only when intentionally
       omitting this option; PSF generation requires a positive resolved value.
@@ -227,7 +227,7 @@ workflow_parameters:
   - id: blind_iters
     type: integer
     required: false
-    default: 20
+    default: -1
     min: -1
     description: |
       MATLAB deconvblind iteration count per blind PSF chunk. Set to -1 to omit
@@ -236,23 +236,26 @@ workflow_parameters:
   - id: chunk_xy
     type: integer
     required: false
-    default: 256
+    default: -1
+    min: -1
     description: |
-      XY tile size for blind PSF estimation. Values <= 0 auto-size
-      conservatively.
+      XY tile size for blind PSF estimation. Set to -1 to omit this option and
+      use the wrapper default.
 
   - id: decon_chunk_xy
     type: integer
     required: false
-    default: 0
+    default: -1
+    min: -1
     description: |
       Core XY tile size for CUDA deconvolution. Values <= 0 auto-size from
-      available VRAM.
+      available VRAM. Set to -1 to omit this option and use the wrapper
+      default.
 
   - id: decon_workers
     type: integer
     required: false
-    default: 1
+    default: -1
     min: -1
     description: |
       Parallel CUDA deconvolution workers per process. Set to -1 to omit this
@@ -261,7 +264,7 @@ workflow_parameters:
   - id: vram_gb
     type: real
     required: false
-    default: 0
+    default: -1
     min: -1
     description: |
       Optional manual GPU memory budget in GB. Use 0 to query available VRAM.
