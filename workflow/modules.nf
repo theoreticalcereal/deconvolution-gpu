@@ -40,6 +40,9 @@ process BUILD_DECON_CONTAINER {
     memory '8 GB'
     queue 'super'
 
+    input:
+    val container_image
+
     output:
     path "decon_env.sif", emit: image
 
@@ -62,7 +65,10 @@ process BUILD_DECON_CONTAINER {
         ! head -n 1 "\$1" | grep -q 'git-lfs.github.com/spec' || return 1
         singularity sif list "\$1" >/dev/null 2>&1
     }
-    if is_usable_sif "\$packaged_sif"; then
+    container_image="${container_image}"
+    if is_usable_sif "\$container_image"; then
+        ln -s "\$container_image" decon_env.sif
+    elif is_usable_sif "\$packaged_sif"; then
         ln -s "\$packaged_sif" decon_env.sif
     else
         magic_offset="\$(LC_ALL=C grep -abo -m 1 'SIF_MAGIC' "\$packaged_sif" | cut -d: -f1 || true)"
