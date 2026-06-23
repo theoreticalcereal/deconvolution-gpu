@@ -34,7 +34,7 @@ process DESKEW {
 
 process BUILD_DECON_CONTAINER {
     tag "decon_env"
-    module 'singularity/3.9.9'
+    module 'singularityce/4.1.0'
 
     cpus 2
     memory '8 GB'
@@ -62,14 +62,6 @@ process BUILD_DECON_CONTAINER {
         ! head -n 1 "\$1" | grep -q 'git-lfs.github.com/spec' || return 1
         singularity sif list "\$1" >/dev/null 2>&1
     }
-    build_from_def() {
-        out="\$PWD/decon_env.sif"
-        tmp="\$PWD/decon_env.sif.tmp"
-        cd "${projectDir}/images"
-        singularity build "\$tmp" decon_env.def
-        mv "\$tmp" "\$out"
-    }
-
     if is_usable_sif "\$packaged_sif"; then
         ln -s "\$packaged_sif" decon_env.sif
     else
@@ -78,11 +70,14 @@ process BUILD_DECON_CONTAINER {
             start_byte="\$((magic_offset + 1))"
             tail -c "+\$start_byte" "\$packaged_sif" > decon_env.sif
             if ! is_usable_sif decon_env.sif; then
-                rm -f decon_env.sif
-                build_from_def
+                echo "ERROR: ${projectDir}/images/decon_env.sif is not usable by the loaded Singularity runtime." >&2
+                echo "Provide a SingularityCE-compatible SIF; workflow jobs cannot build containers as a normal user." >&2
+                exit 1
             fi
         else
-            build_from_def
+            echo "ERROR: ${projectDir}/images/decon_env.sif is missing or is not a SIF image." >&2
+            echo "Provide a SingularityCE-compatible SIF; workflow jobs cannot build containers as a normal user." >&2
+            exit 1
         fi
     fi
     """
@@ -111,7 +106,7 @@ process STAGE_DECON_INPUT {
 
 process DECON {
     tag "decon"
-    module 'singularity/3.9.9:matlab/2024a'
+    module 'singularityce/4.1.0:matlab/2024a'
     container { decon_container.toString() }
 
     publishDir "${params.output_dir}/deconvolved", mode: 'copy', pattern: 'DB2_*'
