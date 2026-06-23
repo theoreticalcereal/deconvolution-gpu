@@ -83,6 +83,7 @@ workflow_parameters:
   - id: dx
     type: real
     required: false
+    default: 0.167
     min: 0
     description: |
       Deskew voxel size in X/Y, in microns.
@@ -90,6 +91,7 @@ workflow_parameters:
   - id: dz
     type: real
     required: true
+    default: 0.2
     min: 0
     description: |
       Deskew/deconvolution voxel size in Z, in microns.
@@ -148,6 +150,7 @@ workflow_parameters:
   - id: dxy
     type: real
     required: false
+    default: 0.167
     min: 0
     description: |
       Final sample pixel size in X/Y, in microns, unless derived from camera
@@ -170,6 +173,7 @@ workflow_parameters:
   - id: wavelength
     type: real
     required: true
+    default: 0.515
     min: 0
     description: |
       Emission wavelength in microns for PSF generation and CUDA deconvolution.
@@ -177,6 +181,7 @@ workflow_parameters:
   - id: na
     type: real
     required: true
+    default: 0.7467
     min: 0
     description: |
       Backward-compatible detection numerical aperture. Prefer detection_na and illumination_na.
@@ -184,18 +189,21 @@ workflow_parameters:
   - id: detection_na
     type: string
     required: false
+    default: '0.7467'
     description: |
       Detection objective numerical aperture.
 
   - id: illumination_na
     type: string
     required: false
+    default: '0.7467'
     description: |
       Illumination objective numerical aperture for light-sheet PSF metadata.
 
   - id: ni
     type: real
     required: false
+    default: 1.56
     min: 0
     description: |
       Immersion refractive index for PSF generation.
@@ -203,6 +211,7 @@ workflow_parameters:
   - id: ns
     type: string
     required: false
+    default: '1.56'
     description: |
       Specimen/sample refractive index.
 
