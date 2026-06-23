@@ -107,6 +107,7 @@ process STAGE_DECON_INPUT {
 process DECON {
     tag "decon"
     module 'singularity/3.9.9:matlab/2024a'
+    container { decon_container.toString() }
 
     publishDir "${params.output_dir}/deconvolved", mode: 'copy', pattern: 'DB2_*'
     publishDir "${params.output_dir}", mode: 'copy', pattern: 'estimated_psf.tif'
@@ -182,19 +183,8 @@ process DECON {
     def cache_dir_flag   = flag('cache_dir', params.psf_cache_dir)
     def no_psf_cache_flag = params.no_psf_cache ? "--no_psf_cache"                    : ""
 
-    def matlab_bind = params.matlab_root ? "${params.matlab_root}:${params.matlab_root}" : ""
-
     """
-    decon_image="${decon_container}"
-    if [ ! -x "\$decon_image" ]; then
-        chmod +x "\$decon_image" 2>/dev/null || true
-    fi
-
-    export SINGULARITY_NV=true
-    export SINGULARITYENV_LD_LIBRARY_PATH="/opt/conda/envs/decon_env/lib:\${LD_LIBRARY_PATH:-}"
-    if [ -n "${matlab_bind}" ]; then
-        export SINGULARITY_BINDPATH="${matlab_bind}\${SINGULARITY_BINDPATH:+,\$SINGULARITY_BINDPATH}"
-    fi
+    export LD_LIBRARY_PATH=\${CONDA_PREFIX:-/opt/conda/envs/decon_env}/lib:\${LD_LIBRARY_PATH:-}
     
     echo "=== GPU Check ==="
     if command -v nvidia-smi >/dev/null 2>&1; then
@@ -204,7 +194,7 @@ process DECON {
     fi
     echo "================="
 
-    "\$decon_image" python3 ${projectDir}/scripts/decon_wrapper.py \\
+    python3 ${projectDir}/scripts/decon_wrapper.py \\
         --image_path "${deskewed_dir}" \\
         --script_dir "${projectDir}/scripts" \\
         ${background_flag} \\
