@@ -83,9 +83,12 @@ workflow_parameters:
   - id: dx
     type: real
     required: false
-    min: 0
+    default: -1
+    min: -1
     description: |
-      Deskew voxel size in X/Y, in microns.
+      Deskew voxel size in X/Y, in microns. Use -1 to leave unset; Nextflow
+      ignores -1 when this parameter is not needed. Full deskew runs require a
+      positive value.
 
   - id: dz
     type: real
@@ -148,24 +151,30 @@ workflow_parameters:
   - id: dxy
     type: real
     required: false
-    min: 0
+    default: -1
+    min: -1
     description: |
       Final sample pixel size in X/Y, in microns, unless derived from camera
-      settings.
+      settings. Use -1 to leave unset; Nextflow ignores -1 and the deconvolution
+      wrapper derives or validates the required value.
 
   - id: camera_pixel_size
-    type: string
+    type: real
     required: false
-    default: ''
+    default: -1
+    min: -1
     description: |
       Camera pixel size in microns. With magnification, this can derive dxy.
+      Use -1 to leave unset; Nextflow ignores -1.
 
   - id: magnification
-    type: string
+    type: real
     required: false
-    default: ''
+    default: -1
+    min: -1
     description: |
       Objective/tube magnification. With camera_pixel_size, this can derive dxy.
+      Use -1 to leave unset; Nextflow ignores -1.
 
   - id: wavelength
     type: real
@@ -182,29 +191,41 @@ workflow_parameters:
       (required) Backward-compatible detection numerical aperture. Prefer detection_na and illumination_na.
 
   - id: detection_na
-    type: string
+    type: real
     required: false
+    default: -1
+    min: -1
     description: |
-      Detection objective numerical aperture.
+      Detection objective numerical aperture. Use -1 to leave unset; Nextflow
+      ignores -1 and falls back to na where supported.
 
   - id: illumination_na
-    type: string
+    type: real
     required: false
+    default: -1
+    min: -1
     description: |
       Illumination objective numerical aperture for light-sheet PSF metadata.
+      Use -1 to leave unset; Nextflow ignores -1.
 
   - id: ni
     type: real
     required: false
-    min: 0
+    default: -1
+    min: -1
     description: |
-      Immersion refractive index for PSF generation.
+      Immersion refractive index for PSF generation. Use -1 to leave unset;
+      Nextflow ignores -1 and the deconvolution wrapper validates the required
+      optical inputs.
 
   - id: ns
-    type: string
+    type: real
     required: false
+    default: -1
+    min: -1
     description: |
-      Specimen/sample refractive index.
+      Specimen/sample refractive index. Use -1 to leave unset; Nextflow ignores
+      -1 and the deconvolution wrapper validates the required optical inputs.
 
   - id: blind_iters
     type: integer
@@ -241,7 +262,8 @@ workflow_parameters:
   - id: vram_gb
     type: real
     required: false
-    default: 0
-    min: 0
+    default: -1
+    min: -1
     description: |
-      Optional manual GPU memory budget in GB. Use 0 to query available VRAM.
+      Optional manual GPU memory budget in GB. Use -1 to leave unset; Nextflow
+      ignores -1 and the deconvolution code queries available VRAM.

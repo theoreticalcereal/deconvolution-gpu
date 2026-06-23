@@ -48,6 +48,25 @@ def normalizeInputPatterns(input, commandLine = null) {
         .findAll { it }
 }
 
+def isSupplied(value) {
+    if (value == null) {
+        return false
+    }
+    def text = value.toString().trim()
+    return text && text != '-1' && text != '-1.0'
+}
+
+def optionalValue(value) {
+    return isSupplied(value) ? value : ''
+}
+
+def requireSupplied(name, value, context) {
+    if (!isSupplied(value)) {
+        throw new IllegalArgumentException("${name} must be provided for ${context}; -1 means unset and is ignored only when that parameter is optional.")
+    }
+    return value
+}
+
 workflow {
     input_patterns = normalizeInputPatterns(params.input, workflow.commandLine)
     if (input_patterns) {
@@ -86,13 +105,16 @@ workflow {
     } else {
         deskew_image_path_ch = input_patterns ? selected_input_dir_ch : Channel.value(params.image_path)
         deskew_cell_name = input_patterns ? '' : params.cell_name
+        deskew_cell_index = optionalValue(params.cell_index)
+        deskew_dx = requireSupplied('dx', params.dx, 'deskew runs')
+        deskew_dz = requireSupplied('dz', params.dz, 'deskew runs')
 
         DESKEW(
             deskew_image_path_ch,
             deskew_cell_name,
-            params.cell_index,
-            params.dx,
-            params.dz,
+            deskew_cell_index,
+            deskew_dx,
+            deskew_dz,
             params.angle,
             params.flip,
             params.output_dir
