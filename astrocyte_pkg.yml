@@ -114,11 +114,12 @@ workflow_parameters:
 
   - id: iter
     type: integer
-    required: true
-    default: 20
-    min: 0
+    required: false
+    default: -1
+    min: -1
     description: |
-      Richardson-Lucy iteration count for CUDA deconvolution.
+      Richardson-Lucy iteration count for CUDA deconvolution. Set to -1 to omit
+      this option and use the wrapper default.
 
   - id: background
     type: real
@@ -152,7 +153,7 @@ workflow_parameters:
 
   - id: dxy
     type: real
-    required: true
+    required: false
     default: -1
     min: -1
     description: |
@@ -161,14 +162,14 @@ workflow_parameters:
 
   - id: camera_pixel_size
     type: string
-    required: true
+    required: false
     default: '-1'
     description: |
       Camera pixel size in microns. Set to -1 when dxy is provided directly.
 
   - id: magnification
     type: string
-    required: true
+    required: false
     default: '-1'
     description: |
       Objective/tube magnification. Set to -1 when dxy is provided directly.
@@ -192,7 +193,7 @@ workflow_parameters:
 
   - id: detection_na
     type: string
-    required: true
+    required: false
     default: '-1'
     description: |
       Detection objective numerical aperture. Set to -1 to omit and fall back
@@ -200,7 +201,7 @@ workflow_parameters:
 
   - id: illumination_na
     type: string
-    required: true
+    required: false
     default: '-1'
     description: |
       Illumination objective numerical aperture for light-sheet PSF metadata.
@@ -233,7 +234,7 @@ workflow_parameters:
   - id: chunk_xy
     type: integer
     required: false
-    default: 256
+    default: -1
     min: -1
     description: |
       XY tile size for blind PSF estimation. Set to -1 to omit this option and
@@ -242,16 +243,17 @@ workflow_parameters:
   - id: decon_chunk_xy
     type: integer
     required: false
-    default: 0
-    min: 0
+    default: -1
+    min: -1
     description: |
-      Core XY tile size for CUDA deconvolution. Values = 0 auto-size from
-      available VRAM.
+      Core XY tile size for CUDA deconvolution. Values <= 0 auto-size from
+      available VRAM. Set to -1 to omit this option and use the wrapper
+      default.
 
   - id: decon_workers
     type: integer
     required: false
-    default: 1
+    default: -1
     min: -1
     description: |
       Parallel CUDA deconvolution workers per process. Set to -1 to omit this
@@ -260,7 +262,8 @@ workflow_parameters:
   - id: vram_gb
     type: real
     required: false
-    default: 0
-    min: 0
+    default: -1
+    min: -1
     description: |
       Optional manual GPU memory budget in GB. Use 0 to query available VRAM.
+      Set to -1 to omit this option and use the wrapper default.
