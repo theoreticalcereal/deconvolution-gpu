@@ -1,0 +1,6 @@
+dask
+distributed
+dask-jobqueue
+psfmodels
+psutil
+scipy

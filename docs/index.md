@@ -5,10 +5,11 @@ This Astrocyte workflow runs a Nextflow DSL2 pipeline for ctASLM and related
 a blind point-spread function (PSF), and run GPU-accelerated
 Richardson-Lucy deconvolution with `pycudadecon`.
 
-The workflow is designed for BioHPC SLURM execution. Python and CUDA
-deconvolution dependencies are built into a per-run mamba environment, while
-cluster modules provide workflow/runtime tools such as Nextflow, Java, CUDA,
-MATLAB, and mamba.
+The workflow is designed for BioHPC SLURM execution. CUDA/native deconvolution
+dependencies are built into a per-run conda environment using the libmamba
+solver, while Python-level dependencies are installed with pip. Astrocyte
+provides workflow/runtime modules such as Nextflow, Java, CUDA, MATLAB, and
+Anaconda.
 
 ## Process Guides
 
@@ -95,8 +96,8 @@ directories. See [workflow/output](workflow-output.md) for details.
 |---|---|
 | `workflow/main.nf` | Connects `DESKEW` and `DECON` based on `params.decon_only`. |
 | `workflow/modules.nf` | Defines process resources, scripts, published outputs, and command-line flags. |
-| `workflow/configs/nextflow.config` | Defines defaults, profiles, SLURM queues, conda/mamba setup, and GPU requests. |
-| `workflow/configs/astrocyte.config` | Astrocyte entry config that builds the mamba runtime for `DECON`. |
+| `workflow/configs/nextflow.config` | Defines defaults, profiles, SLURM queues, conda setup, and GPU requests. |
+| `workflow/configs/astrocyte.config` | Astrocyte entry config that builds the conda runtime for `DECON`. |
 | `workflow/scripts/deskew_wrapper.py` | Builds the MATLAB batch command for `deskew.m`. |
 | `workflow/scripts/deskew.m` | Reads raw TIFF stacks, applies shear correction, rotates top view, and writes TIFF outputs. |
 | `workflow/scripts/decon_wrapper.py` | Selects TIFF inputs, resolves PSF, runs GPU deconvolution, and writes `DB2_*` outputs. |

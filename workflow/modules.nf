@@ -1,6 +1,5 @@
 process DESKEW {
     tag "${cell_name ?: 'deskew'}"
-    module 'matlab/2024a'
 
     publishDir "${params.output_dir}", mode: 'copy'
 
@@ -34,7 +33,6 @@ process DESKEW {
 
 process BUILD_DECON_CONTAINER {
     tag "decon_env"
-    module 'mamba/2.3.0'
 
     cpus 2
     memory '8 GB'
@@ -48,19 +46,22 @@ process BUILD_DECON_CONTAINER {
     set -euo pipefail
     mkdir -p decon_runtime
 
-    if command -v module >/dev/null 2>&1; then
-        module load mamba/2.3.0
-    fi
-
-    if ! command -v mamba >/dev/null 2>&1; then
-        echo "ERROR: mamba is required to build the deconvolution environment." >&2
+    if ! command -v conda >/dev/null 2>&1; then
+        echo "ERROR: conda is required to build the deconvolution environment." >&2
         exit 127
     fi
 
-    mamba env create -y -p decon_runtime/decon_env -f "${projectDir}/../environment.yml"
+    export CONDA_PKGS_DIRS="\$PWD/.conda_pkgs"
+    conda create -y -p .conda_libmamba -c conda-forge "conda>=23.7" conda-libmamba-solver
+    .conda_libmamba/bin/python -m conda create -y --solver=libmamba \\
+        -p decon_runtime/decon_env \\
+        -c conda-forge \\
+        -c bioconda \\
+        --file "${projectDir}/envs/decon-conda.txt"
+    decon_runtime/decon_env/bin/python -m pip install -r "${projectDir}/envs/decon-pip-requirements.txt"
 
     if [ ! -x decon_runtime/decon_env/bin/python3 ] && [ ! -x decon_runtime/decon_env/bin/python ]; then
-        echo "ERROR: failed to build a usable decon mamba environment." >&2
+        echo "ERROR: failed to build a usable decon conda environment." >&2
         exit 1
     fi
     """
@@ -89,7 +90,6 @@ process STAGE_DECON_INPUT {
 
 process DECON {
     tag "decon"
-    module 'matlab/2024a'
 
     publishDir "${params.output_dir}/deconvolved", mode: 'copy', pattern: 'DB2_*'
     publishDir "${params.output_dir}", mode: 'copy', pattern: 'estimated_psf.tif'

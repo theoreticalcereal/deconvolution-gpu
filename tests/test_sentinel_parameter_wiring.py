@@ -70,16 +70,30 @@ class SentinelParameterWiringTests(unittest.TestCase):
         text = (ROOT / "workflow/configs/astrocyte.config").read_text()
         self.assertRegex(text, r"(?m)^\s*params\.build_decon_container\s*=\s*true\b")
 
-    def test_container_prep_builds_mamba_env_each_run(self):
+    def test_container_prep_builds_conda_libmamba_env_each_run(self):
         main_text = (ROOT / "workflow/main.nf").read_text()
         text = (ROOT / "workflow/modules.nf").read_text()
         self.assertIn("BUILD_DECON_CONTAINER()", main_text)
-        self.assertIn("module load mamba/2.3.0", text)
-        self.assertIn('mamba env create -y -p decon_runtime/decon_env -f "${projectDir}/../environment.yml"', text)
+        self.assertNotIn("module '", text)
+        self.assertNotIn("module load", text)
+        self.assertIn("conda-libmamba-solver", text)
+        self.assertIn('--file "${projectDir}/envs/decon-conda.txt"', text)
+        self.assertIn('decon_runtime/decon_env/bin/python -m pip install -r "${projectDir}/envs/decon-pip-requirements.txt"', text)
+        self.assertNotIn('env create -y --solver=libmamba -p decon_runtime/decon_env -f "${projectDir}/../environment.yml"', text)
+        self.assertNotIn("mamba env create", text)
         self.assertNotIn("decon_env.tar.gz", text)
         self.assertNotIn("decon_env.sif", text)
 
-    def test_decon_uses_mamba_runtime_without_container_or_sif(self):
+        conda_text = (ROOT / "workflow/envs/decon-conda.txt").read_text()
+        pip_text = (ROOT / "workflow/envs/decon-pip-requirements.txt").read_text()
+        self.assertIn("pycudadecon=0.5.1", conda_text)
+        self.assertIn("cudatoolkit=11.8", conda_text)
+        self.assertIn("dask", pip_text)
+        self.assertIn("psfmodels", pip_text)
+        self.assertNotIn("imagecodecs", pip_text)
+        self.assertNotIn("tifffile", pip_text)
+
+    def test_decon_uses_conda_runtime_without_container_or_sif(self):
         text = (ROOT / "workflow/modules.nf").read_text()
         self.assertNotIn("container { decon_container.toString() }", text)
         self.assertNotIn("singularity exec", text)
@@ -91,7 +105,9 @@ class SentinelParameterWiringTests(unittest.TestCase):
         config_text = (ROOT / "workflow/configs/nextflow.config").read_text()
 
         self.assertNotIn("container: 'singularity'", package_text)
-        self.assertIn("  - 'mamba/2.3.0'", package_text)
+        self.assertIn("  - 'matlab/2024a'", package_text)
+        self.assertIn("  - 'anaconda3/2023.09-0'", package_text)
+        self.assertNotIn("  - 'mamba/2.3.0'", package_text)
         self.assertNotIn("workflow_containers:", package_text)
         self.assertNotIn("docker://git.biohpc.swmed.edu:5050/dean-lab/ctaslm2-deconvolution/decon_env:latest", package_text)
         self.assertNotIn("decon_container_image", config_text)

@@ -51,14 +51,17 @@ parameters `image_path` and `decon_input_dir`.
 
 ## Process Boundaries
 
-`DESKEW` is CPU/MATLAB work. It loads `matlab/2024a`, runs
-`deskew_wrapper.py`, and calls `deskew.m` through `matlab -batch`.
+`DESKEW` is CPU/MATLAB work. It expects `matlab` on `PATH` from the
+Astrocyte-provided workflow environment, runs `deskew_wrapper.py`, and calls
+`deskew.m` through `matlab -batch`.
 
-`BUILD_DECON_CONTAINER` prepares the runtime used by `DECON`. It loads the
-`mamba` module and creates `decon_runtime/decon_env` from `environment.yml` for
-each workflow run.
+`BUILD_DECON_CONTAINER` prepares the runtime used by `DECON`. It expects conda
+to already be available from the Astrocyte-provided workflow environment,
+installs a local conda/libmamba bootstrap, creates `decon_runtime/decon_env`
+from `workflow/envs/decon-conda.txt`, then installs Python dependencies from
+`workflow/envs/decon-pip-requirements.txt`.
 
-`DECON` is GPU work. It activates the prepared mamba runtime, checks the GPU with
+`DECON` is GPU work. It activates the prepared conda runtime, checks the GPU with
 `nvidia-smi`, estimates the PSF, and runs CUDA Richardson-Lucy deconvolution.
 
 ## Data Flow

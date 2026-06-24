@@ -2,17 +2,17 @@
 
 Runtime defaults and profiles live in `workflow/configs/nextflow.config`.
 Astrocyte uses `workflow/configs/astrocyte.config`, which includes the standard
-config and builds the mamba runtime for `DECON`.
+config and builds the conda runtime for `DECON`.
 
 ## Profiles
 
 | Profile | Behavior |
 |---|---|
-| `my_cluster` | Enables conda and mamba for cluster execution. |
+| `my_cluster` | Enables cluster conda defaults. |
 | `light_sheet` | Runs deskew plus deconvolution with light-sheet PSF seed settings. |
 | `wide_frame` | Uses single-detection PSF seed settings. It does not skip deskew automatically. |
 | `light_sheet_decon` | Enables decon-only mode and light-sheet PSF seed settings. |
-| `mamba_runtime` | Builds the decon mamba environment before `DECON`. |
+| `conda_runtime` | Builds the decon conda environment before `DECON`. |
 
 ## Astrocyte Container Config
 
@@ -21,9 +21,12 @@ config and builds the mamba runtime for `DECON`.
 `build_decon_container = true`.
 
 When `build_decon_container` is true, the workflow runs `BUILD_DECON_CONTAINER`
-before `DECON`. That process loads the `mamba` module and creates
-`decon_runtime/decon_env` from `environment.yml` in the Nextflow work directory,
-then passes the prepared runtime path to `DECON`.
+before `DECON`. That process expects conda to already be available from the
+Astrocyte-provided workflow environment, installs a local conda/libmamba
+bootstrap, creates `decon_runtime/decon_env` from
+`workflow/envs/decon-conda.txt`, installs Python dependencies from
+`workflow/envs/decon-pip-requirements.txt`, then passes the prepared runtime
+path to `DECON`.
 
 `DESKEW` still runs on the host with the MATLAB module.
 
@@ -95,17 +98,19 @@ expanded to produce multiple independent calls.
 
 The Astrocyte profile disables Nextflow-managed conda for `DECON`. The workflow
 creates the deconvolution environment explicitly in `BUILD_DECON_CONTAINER` with
-`mamba env create -y -p decon_runtime/decon_env -f environment.yml`.
+`python -m conda create -y --solver=libmamba -p decon_runtime/decon_env --file workflow/envs/decon-conda.txt`
+from the local conda/libmamba bootstrap, then installs
+`workflow/envs/decon-pip-requirements.txt` with pip.
 
-The process script then loads:
+Astrocyte provides these workflow modules before Nextflow runs:
 
 ```text
-cuda/11.8
 matlab/2024a
+anaconda3/2023.09-0
 ```
 
-It also prepends CUDA library paths to `LD_LIBRARY_PATH` and runs `nvidia-smi`
-before launching Python.
+The `DECON` process prepends the prepared conda environment to `PATH` and
+`LD_LIBRARY_PATH`, then runs `nvidia-smi` before launching Python.
 
 ## Parameter Groups
 
