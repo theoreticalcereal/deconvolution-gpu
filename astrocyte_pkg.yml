@@ -45,7 +45,7 @@ documentation_files:
 # -----------------------------------------------------------------------------
 
 workflow_modules:
-  - 'modules'
+  - 'lmod/8.4'
   - 'matlab/2024a'
   - 'mamba/2.3.0'
 
