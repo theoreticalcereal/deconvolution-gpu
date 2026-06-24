@@ -34,7 +34,7 @@ process DESKEW {
 
 process BUILD_DECON_CONTAINER {
     tag "decon_env"
-    module 'mamba'
+    module 'mamba/2.3.0'
 
     cpus 2
     memory '8 GB'
@@ -49,7 +49,7 @@ process BUILD_DECON_CONTAINER {
     mkdir -p decon_runtime
 
     if command -v module >/dev/null 2>&1; then
-        module load mamba
+        module load mamba/2.3.0
     fi
 
     if ! command -v mamba >/dev/null 2>&1; then

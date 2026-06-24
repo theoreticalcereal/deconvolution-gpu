@@ -46,7 +46,7 @@ documentation_files:
 
 workflow_modules:
   - 'matlab/2024a'
-  - 'mamba'
+  - 'mamba/2.3.0'
 
 workflow_parameters:
 

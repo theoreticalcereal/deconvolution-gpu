@@ -74,7 +74,7 @@ class SentinelParameterWiringTests(unittest.TestCase):
         main_text = (ROOT / "workflow/main.nf").read_text()
         text = (ROOT / "workflow/modules.nf").read_text()
         self.assertIn("BUILD_DECON_CONTAINER()", main_text)
-        self.assertIn("module load mamba", text)
+        self.assertIn("module load mamba/2.3.0", text)
         self.assertIn('mamba env create -y -p decon_runtime/decon_env -f "${projectDir}/../environment.yml"', text)
         self.assertNotIn("decon_env.tar.gz", text)
         self.assertNotIn("decon_env.sif", text)
@@ -91,7 +91,7 @@ class SentinelParameterWiringTests(unittest.TestCase):
         config_text = (ROOT / "workflow/configs/nextflow.config").read_text()
 
         self.assertNotIn("container: 'singularity'", package_text)
-        self.assertIn("  - 'mamba'", package_text)
+        self.assertIn("  - 'mamba/2.3.0'", package_text)
         self.assertNotIn("workflow_containers:", package_text)
         self.assertNotIn("docker://git.biohpc.swmed.edu:5050/dean-lab/ctaslm2-deconvolution/decon_env:latest", package_text)
         self.assertNotIn("decon_container_image", config_text)
