@@ -176,7 +176,7 @@ process DECON {
 
     matlab_bin="${params.matlab_bin ?: 'matlab'}"
     resolved_matlab_bin=""
-    for candidate in "\${matlab_bin}" matlab /home1/apps/MATLAB/R2024a/bin/matlab; do
+    for candidate in "\${matlab_bin}" /project/apps/MATLAB/versions_bk/R2017a/bin/matlab matlab /home1/apps/MATLAB/R2024a/bin/matlab; do
         if [ -n "\$candidate" ] && command -v "\$candidate" >/dev/null 2>&1; then
             resolved_matlab_bin="\$(command -v "\$candidate")"
             break
@@ -186,7 +186,7 @@ process DECON {
         fi
     done
     if [ -z "\$resolved_matlab_bin" ]; then
-        echo "ERROR: MATLAB executable not found. Checked requested matlab_bin='\$matlab_bin', PATH, and /home1/apps/MATLAB/R2024a/bin/matlab." >&2
+        echo "ERROR: MATLAB executable not found. Checked requested matlab_bin='\$matlab_bin', /project/apps/MATLAB/versions_bk/R2017a/bin/matlab, PATH, and /home1/apps/MATLAB/R2024a/bin/matlab." >&2
         exit 127
     fi
     matlab_bin="\$resolved_matlab_bin"
