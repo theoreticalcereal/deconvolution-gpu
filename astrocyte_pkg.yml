@@ -1,15 +1,15 @@
 #
-# Metadata for the ctASLM2 deskew/deconvolution workflow package.
+# Metadata for the deskew/deconvolution workflow package.
 #
 
 # -----------------------------------------------------------------------------
 # BASIC INFORMATION
 # -----------------------------------------------------------------------------
 
-name: 'ctaslm2_deconvolution'
+name: '3d_deskewdeconvolution'
 author: 'Ricky Wang'
 email: 'ricky.wang@utsouthwestern.edu'
-title: 'ctASLM2 Deskew + Deconvolution Workflow'
+title: '3D Deskew + Deconvolution Workflow'
 description: |
   This workflow deskews light-sheet microscopy TIFF data, estimates a
   blind PSF, and runs GPU-accelerated Richardson-Lucy deconvolution. It supports
