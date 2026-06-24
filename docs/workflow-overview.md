@@ -54,12 +54,11 @@ parameters `image_path` and `decon_input_dir`.
 `DESKEW` is CPU/MATLAB work. It loads `matlab/2024a`, runs
 `deskew_wrapper.py`, and calls `deskew.m` through `matlab -batch`.
 
-`BUILD_DECON_CONTAINER` prepares the runtime used by `DECON`. It links a real
-Git LFS-managed `workflow/images/decon_env.sif` when present. If no usable SIF is
-available, it unpacks `workflow/images/decon_env.tar.gz`, a `conda-pack` archive
-of the deconvolution environment.
+`BUILD_DECON_CONTAINER` prepares the runtime used by `DECON`. It loads the
+`mamba` module and creates `decon_runtime/decon_env` from `environment.yml` for
+each workflow run.
 
-`DECON` is GPU work. It runs through the prepared runtime, checks the GPU with
+`DECON` is GPU work. It activates the prepared mamba runtime, checks the GPU with
 `nvidia-smi`, estimates the PSF, and runs CUDA Richardson-Lucy deconvolution.
 
 ## Data Flow

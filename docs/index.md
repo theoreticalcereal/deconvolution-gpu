@@ -6,9 +6,9 @@ a blind point-spread function (PSF), and run GPU-accelerated
 Richardson-Lucy deconvolution with `pycudadecon`.
 
 The workflow is designed for BioHPC SLURM execution. Python and CUDA
-deconvolution dependencies are packaged in the workflow Singularity image,
-while cluster modules provide workflow/runtime tools such as Nextflow, Java,
-Singularity, CUDA, and MATLAB.
+deconvolution dependencies are built into a per-run mamba environment, while
+cluster modules provide workflow/runtime tools such as Nextflow, Java, CUDA,
+MATLAB, and mamba.
 
 ## Process Guides
 
@@ -96,7 +96,7 @@ directories. See [workflow/output](workflow-output.md) for details.
 | `workflow/main.nf` | Connects `DESKEW` and `DECON` based on `params.decon_only`. |
 | `workflow/modules.nf` | Defines process resources, scripts, published outputs, and command-line flags. |
 | `workflow/configs/nextflow.config` | Defines defaults, profiles, SLURM queues, conda/mamba setup, and GPU requests. |
-| `workflow/configs/astrocyte.config` | Astrocyte entry config that builds and enables the Singularity image for `DECON`. |
+| `workflow/configs/astrocyte.config` | Astrocyte entry config that builds the mamba runtime for `DECON`. |
 | `workflow/scripts/deskew_wrapper.py` | Builds the MATLAB batch command for `deskew.m`. |
 | `workflow/scripts/deskew.m` | Reads raw TIFF stacks, applies shear correction, rotates top view, and writes TIFF outputs. |
 | `workflow/scripts/decon_wrapper.py` | Selects TIFF inputs, resolves PSF, runs GPU deconvolution, and writes `DB2_*` outputs. |

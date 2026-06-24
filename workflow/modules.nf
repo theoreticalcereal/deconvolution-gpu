@@ -34,15 +34,11 @@ process DESKEW {
 
 process BUILD_DECON_CONTAINER {
     tag "decon_env"
-    module 'singularityce/4.1.0'
+    module 'mamba'
 
     cpus 2
     memory '8 GB'
     queue 'super'
-
-    input:
-    val container_image
-    val conda_env_archive
 
     output:
     path "decon_runtime", emit: image
@@ -53,44 +49,18 @@ process BUILD_DECON_CONTAINER {
     mkdir -p decon_runtime
 
     if command -v module >/dev/null 2>&1; then
-        module load singularity/3.9.9 || module load singularity || true
+        module load mamba
     fi
 
-    packaged_sif="${projectDir}/images/decon_env.sif"
-    conda_env_archive="${conda_env_archive}"
-    is_usable_sif() {
-        command -v singularity >/dev/null 2>&1 || return 1
-        [ -s "\$1" ] || return 1
-        ! head -n 1 "\$1" | grep -q 'git-lfs.github.com/spec' || return 1
-        singularity sif list "\$1" >/dev/null 2>&1
-    }
-    container_image="${container_image}"
-    if is_usable_sif "\$container_image"; then
-        ln -s "\$container_image" decon_runtime/decon_env.sif
-    elif is_usable_sif "\$packaged_sif"; then
-        ln -s "\$packaged_sif" decon_runtime/decon_env.sif
-    else
-        magic_offset="\$(LC_ALL=C grep -abo -m 1 'SIF_MAGIC' "\$packaged_sif" | cut -d: -f1 || true)"
-        if [ -n "\$magic_offset" ] && [ "\$magic_offset" -gt 1 ]; then
-            start_byte="\$((magic_offset + 1))"
-            tail -c "+\$start_byte" "\$packaged_sif" > decon_runtime/decon_env.sif
-        fi
+    if ! command -v mamba >/dev/null 2>&1; then
+        echo "ERROR: mamba is required to build the deconvolution environment." >&2
+        exit 127
     fi
 
-    if ! is_usable_sif decon_runtime/decon_env.sif; then
-        rm -f decon_runtime/decon_env.sif
-        if [ -s "\$conda_env_archive" ] && ! head -n 1 "\$conda_env_archive" | grep -q 'git-lfs.github.com/spec'; then
-            mkdir -p decon_runtime/decon_env
-            tar -xzf "\$conda_env_archive" -C decon_runtime/decon_env
-            if [ -x decon_runtime/decon_env/bin/conda-unpack ]; then
-                decon_runtime/decon_env/bin/conda-unpack || true
-            fi
-        fi
-    fi
+    mamba env create -y -p decon_runtime/decon_env -f "${projectDir}/../environment.yml"
 
-    if ! is_usable_sif decon_runtime/decon_env.sif && [ ! -x decon_runtime/decon_env/bin/python3 ] && [ ! -x decon_runtime/decon_env/bin/python ]; then
-        echo "ERROR: failed to prepare a usable decon runtime." >&2
-        echo "Expected a valid SIF at \$container_image or \$packaged_sif, or a packed conda env at \$conda_env_archive." >&2
+    if [ ! -x decon_runtime/decon_env/bin/python3 ] && [ ! -x decon_runtime/decon_env/bin/python ]; then
+        echo "ERROR: failed to build a usable decon mamba environment." >&2
         exit 1
     fi
     """
@@ -119,7 +89,7 @@ process STAGE_DECON_INPUT {
 
 process DECON {
     tag "decon"
-    module 'singularity/3.9.9:matlab/2024a'
+    module 'matlab/2024a'
 
     publishDir "${params.output_dir}/deconvolved", mode: 'copy', pattern: 'DB2_*'
     publishDir "${params.output_dir}", mode: 'copy', pattern: 'estimated_psf.tif'
@@ -196,32 +166,24 @@ process DECON {
     def no_psf_cache_flag = params.no_psf_cache ? "--no_psf_cache"                    : ""
 
     """
-    runtime_prefix=()
-    if [ -f "${decon_runtime}/decon_env.sif" ]; then
-        runtime_prefix=(singularity exec --nv "${decon_runtime}/decon_env.sif")
-        export LD_LIBRARY_PATH=\${CONDA_PREFIX:-/opt/conda/envs/decon_env}/lib:\${LD_LIBRARY_PATH:-}
-    elif [ -f "${decon_runtime}" ]; then
-        runtime_prefix=(singularity exec --nv "${decon_runtime}")
-        export LD_LIBRARY_PATH=\${CONDA_PREFIX:-/opt/conda/envs/decon_env}/lib:\${LD_LIBRARY_PATH:-}
-    elif [ -x "${decon_runtime}/decon_env/bin/python3" ]; then
-        source "${decon_runtime}/decon_env/bin/activate"
-        export LD_LIBRARY_PATH=\${CONDA_PREFIX:-${decon_runtime}/decon_env}/lib:\${LD_LIBRARY_PATH:-}
-    else
+    if [ ! -x "${decon_runtime}/decon_env/bin/python3" ] && [ ! -x "${decon_runtime}/decon_env/bin/python" ]; then
         echo "ERROR: no supported decon runtime found at ${decon_runtime}" >&2
         exit 1
     fi
+    export CONDA_PREFIX="${decon_runtime}/decon_env"
+    export CONDA_DEFAULT_ENV=decon_env
+    export PATH="\${CONDA_PREFIX}/bin:\${PATH}"
+    export LD_LIBRARY_PATH=\${CONDA_PREFIX}/lib:\${LD_LIBRARY_PATH:-}
     
     echo "=== GPU Check ==="
-    if [ "\${#runtime_prefix[@]}" -gt 0 ]; then
-        "\${runtime_prefix[@]}" nvidia-smi || echo "nvidia-smi not found inside container; continuing."
-    elif command -v nvidia-smi >/dev/null 2>&1; then
+    if command -v nvidia-smi >/dev/null 2>&1; then
         nvidia-smi
     else
         echo "nvidia-smi not found; continuing."
     fi
     echo "================="
 
-    "\${runtime_prefix[@]}" python3 ${projectDir}/scripts/decon_wrapper.py \\
+    python3 ${projectDir}/scripts/decon_wrapper.py \\
         --image_path "${deskewed_dir}" \\
         --script_dir "${projectDir}/scripts" \\
         ${background_flag} \\

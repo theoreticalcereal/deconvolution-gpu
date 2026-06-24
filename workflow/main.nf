@@ -81,12 +81,8 @@ workflow {
         selected_input_dir_ch = Channel.empty()
     }
 
-    if (params.build_decon_container) {
-        BUILD_DECON_CONTAINER(params.decon_container_image, params.decon_conda_env_archive)
-        decon_container_ch = BUILD_DECON_CONTAINER.out.image
-    } else {
-        decon_container_ch = Channel.value(params.decon_container_image ?: "${projectDir}/images/decon_env.sif")
-    }
+    BUILD_DECON_CONTAINER()
+    decon_container_ch = BUILD_DECON_CONTAINER.out.image
 
     if (params.decon_only) {
         if (input_patterns) {

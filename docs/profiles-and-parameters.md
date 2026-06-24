@@ -2,7 +2,7 @@
 
 Runtime defaults and profiles live in `workflow/configs/nextflow.config`.
 Astrocyte uses `workflow/configs/astrocyte.config`, which includes the standard
-config and enables the Singularity image for `DECON`.
+config and builds the mamba runtime for `DECON`.
 
 ## Profiles
 
@@ -12,23 +12,20 @@ config and enables the Singularity image for `DECON`.
 | `light_sheet` | Runs deskew plus deconvolution with light-sheet PSF seed settings. |
 | `wide_frame` | Uses single-detection PSF seed settings. It does not skip deskew automatically. |
 | `light_sheet_decon` | Enables decon-only mode and light-sheet PSF seed settings. |
-| `docker` | Enables Docker. |
-| `singularity` | Enables Singularity and builds or uses `workflow/images/decon_env.sif` for `DECON`. |
+| `mamba_runtime` | Builds the decon mamba environment before `DECON`. |
 
 ## Astrocyte Container Config
 
 `astrocyte_pkg.yml` points Astrocyte at `astrocyte.config`. That config includes
-`nextflow.config`, disables conda for the containerized path, enables
-Singularity, and sets `build_decon_container = true`.
+`nextflow.config`, disables Nextflow-managed conda for the decon path, and sets
+`build_decon_container = true`.
 
 When `build_decon_container` is true, the workflow runs `BUILD_DECON_CONTAINER`
-before `DECON`. That process reuses `workflow/images/decon_env.sif` when a real
-Git LFS image is present. If no usable SIF is available, it unpacks the
-`conda-pack` archive at `workflow/images/decon_env.tar.gz`, then passes the
-prepared runtime path to `DECON`.
+before `DECON`. That process loads the `mamba` module and creates
+`decon_runtime/decon_env` from `environment.yml` in the Nextflow work directory,
+then passes the prepared runtime path to `DECON`.
 
-`DESKEW` still runs on the host with the MATLAB module because the container is
-the Python/CUDA deconvolution environment.
+`DESKEW` still runs on the host with the MATLAB module.
 
 ## Light-Sheet Profile
 
@@ -96,17 +93,9 @@ expanded to produce multiple independent calls.
 
 ## Environment Setup
 
-The Astrocyte profile disables conda for `DECON` and enables Singularity. The
-preferred runtime is the Git LFS-managed `workflow/images/decon_env.sif`. The
-fallback runtime is a packed conda environment at
-`workflow/images/decon_env.tar.gz`.
-
-Build the fallback archive on a compatible Linux host with:
-
-```bash
-mamba env create -p workflow/images/decon_env -f environment.yml
-conda-pack -p workflow/images/decon_env -o workflow/images/decon_env.tar.gz
-```
+The Astrocyte profile disables Nextflow-managed conda for `DECON`. The workflow
+creates the deconvolution environment explicitly in `BUILD_DECON_CONTAINER` with
+`mamba env create -y -p decon_runtime/decon_env -f environment.yml`.
 
 The process script then loads:
 

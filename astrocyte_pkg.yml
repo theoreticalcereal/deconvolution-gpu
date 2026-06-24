@@ -25,8 +25,6 @@ citation: |
 minimum_astrocyte_version: '2.1.0'
 nextflow_version: '24.10.0'
 nextflow_config: 'astrocyte.config'
-container: 'singularity'
-singularity_version: '3.9.9'
 
 # -----------------------------------------------------------------------------
 # DOCUMENTATION
@@ -48,6 +46,7 @@ documentation_files:
 
 workflow_modules:
   - 'matlab/2024a'
+  - 'mamba'
 
 workflow_parameters:
 
