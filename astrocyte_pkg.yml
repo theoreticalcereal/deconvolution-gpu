@@ -114,7 +114,7 @@ workflow_parameters:
   - id: iter
     type: integer
     required: false
-    default: 10
+    default: 20
     min: 1
     description: |
       Richardson-Lucy iteration count for CUDA deconvolution.
@@ -188,7 +188,7 @@ workflow_parameters:
     required: true
     min: 0
     description: |
-      (required) Backward-compatible detection numerical aperture. Prefer detection_na and illumination_na.
+      Backward-compatible detection numerical aperture. Prefer detection_na and illumination_na.
 
   - id: detection_na
     type: real
@@ -210,8 +210,7 @@ workflow_parameters:
 
   - id: ni
     type: real
-    required: false
-    default: -1
+    required: true
     min: -1
     description: |
       Immersion refractive index for PSF generation. Use -1 to leave unset;
@@ -220,8 +219,7 @@ workflow_parameters:
 
   - id: ns
     type: real
-    required: false
-    default: -1
+    required: true
     min: -1
     description: |
       Specimen/sample refractive index. Use -1 to leave unset; Nextflow ignores
