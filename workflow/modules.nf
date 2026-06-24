@@ -154,7 +154,6 @@ process DECON {
     def blind_workers_flag = flag('blind_workers', params.blind_workers)
     def matlab_workers_flag = flag('matlab_workers', params.matlab_workers)
     def matlab_threads_flag = flag('matlab_threads', params.matlab_threads)
-    def matlab_bin_flag = flag('matlab_bin', params.matlab_bin)
     def matlab_timeout_flag = flag('matlab_timeout', params.matlab_timeout)
     def blind_z_slices_flag = flag('blind_z_slices', params.blind_z_slices)
     def snr_weight_cap_flag = flag('snr_weight_cap', params.snr_weight_cap)
@@ -174,6 +173,23 @@ process DECON {
     export CONDA_DEFAULT_ENV=decon_env
     export PATH="\${CONDA_PREFIX}/bin:\${PATH}"
     export LD_LIBRARY_PATH=\${CONDA_PREFIX}/lib:\${LD_LIBRARY_PATH:-}
+
+    matlab_bin="${params.matlab_bin ?: 'matlab'}"
+    resolved_matlab_bin=""
+    for candidate in "\${matlab_bin}" matlab /home1/apps/MATLAB/R2024a/bin/matlab; do
+        if [ -n "\$candidate" ] && command -v "\$candidate" >/dev/null 2>&1; then
+            resolved_matlab_bin="\$(command -v "\$candidate")"
+            break
+        elif [ -n "\$candidate" ] && [ -x "\$candidate" ]; then
+            resolved_matlab_bin="\$candidate"
+            break
+        fi
+    done
+    if [ -z "\$resolved_matlab_bin" ]; then
+        echo "ERROR: MATLAB executable not found. Checked requested matlab_bin='\$matlab_bin', PATH, and /home1/apps/MATLAB/R2024a/bin/matlab." >&2
+        exit 127
+    fi
+    matlab_bin="\$resolved_matlab_bin"
     
     echo "=== GPU Check ==="
     if command -v nvidia-smi >/dev/null 2>&1; then
@@ -218,7 +234,7 @@ process DECON {
         ${blind_workers_flag} \\
         ${matlab_workers_flag} \\
         ${matlab_threads_flag} \\
-        ${matlab_bin_flag} \\
+        --matlab_bin "\$matlab_bin" \\
         ${matlab_timeout_flag} \\
         ${blind_z_slices_flag} \\
         ${snr_weight_cap_flag} \\
