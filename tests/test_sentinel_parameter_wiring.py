@@ -99,7 +99,7 @@ class SentinelParameterWiringTests(unittest.TestCase):
         self.assertNotIn("singularity exec", text)
         self.assertIn('export CONDA_PREFIX="${decon_runtime}/decon_env"', text)
         self.assertIn('export PATH="\\${CONDA_PREFIX}/bin:\\${PATH}"', text)
-        self.assertIn('for candidate in "\\${matlab_bin}" /project/apps/MATLAB/versions_bk/R2017a/bin/matlab matlab /home1/apps/MATLAB/R2024a/bin/matlab', text)
+        self.assertIn('for candidate in "\\${matlab_bin}" matlab /home1/apps/MATLAB/R2024a/bin/matlab', text)
         self.assertIn('--matlab_bin "\\$matlab_bin"', text)
 
     def test_astrocyte_package_does_not_declare_external_container(self):
