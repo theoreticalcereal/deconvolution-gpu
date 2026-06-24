@@ -74,3 +74,20 @@ class SentinelParameterWiringTests(unittest.TestCase):
         text = (ROOT / "workflow/modules.nf").read_text()
         self.assertIn('singularity build --fakeroot decon_env.sif "${projectDir}/images/decon_env.def"', text)
         self.assertNotIn('workflow jobs cannot build containers as a normal user', text)
+
+    def test_container_prep_prefers_astrocyte_pulled_image(self):
+        main_text = (ROOT / "workflow/main.nf").read_text()
+        module_text = (ROOT / "workflow/modules.nf").read_text()
+        self.assertIn("BUILD_DECON_CONTAINER(params.decon_container_image)", main_text)
+        self.assertIn("val container_image", module_text)
+        self.assertIn('if is_usable_sif "\\$container_image"; then', module_text)
+
+    def test_astrocyte_package_declares_decon_container_to_pull(self):
+        package_text = (ROOT / "astrocyte_pkg.yml").read_text()
+        config_text = (ROOT / "workflow/configs/nextflow.config").read_text()
+        image_uri = "docker://git.biohpc.swmed.edu:5050/dean-lab/ctaslm2-deconvolution/decon_env:latest"
+        staged_image = "git.biohpc.swmed.edu-5050-dean-lab-ctaslm2-deconvolution-decon_env-latest.img"
+
+        self.assertIn("workflow_containers:", package_text)
+        self.assertIn(f"  - {image_uri}", package_text)
+        self.assertIn(staged_image, config_text)
