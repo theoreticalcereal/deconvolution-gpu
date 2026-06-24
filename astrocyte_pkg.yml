@@ -49,9 +49,6 @@ documentation_files:
 workflow_modules:
   - 'matlab/2024a'
 
-workflow_containers:
-  - docker://git.biohpc.swmed.edu:5050/dean-lab/ctaslm2-deconvolution/decon_env:latest
-
 workflow_parameters:
 
   - id: input

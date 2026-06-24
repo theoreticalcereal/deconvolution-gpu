@@ -23,9 +23,9 @@ Singularity, and sets `build_decon_container = true`.
 
 When `build_decon_container` is true, the workflow runs `BUILD_DECON_CONTAINER`
 before `DECON`. That process reuses `workflow/images/decon_env.sif` when a real
-Git LFS image is present; otherwise it builds `decon_env.sif` from
-`workflow/images/decon_env.def` in the Nextflow work directory, then passes the
-image path to `DECON`.
+Git LFS image is present, repairs a packaged SIF with a shifted header when
+possible, then passes the image path to `DECON`. If no usable SIF is present, it
+fails fast instead of building a container at runtime.
 
 `DESKEW` still runs on the host with the MATLAB module because the container is
 the Python/CUDA deconvolution environment.
@@ -97,8 +97,9 @@ expanded to produce multiple independent calls.
 ## Environment Setup
 
 The Astrocyte profile disables conda for `DECON` and enables Singularity. The
-container is built from `environment.yml` through `workflow/images/decon_env.def`
-or supplied as a Git LFS-managed `workflow/images/decon_env.sif`.
+container is supplied as a Git LFS-managed `workflow/images/decon_env.sif`.
+`workflow/images/decon_env.def` documents how the SIF was built, but Astrocyte
+runs do not build it at runtime.
 
 The process script then loads:
 

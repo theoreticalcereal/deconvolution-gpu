@@ -55,7 +55,7 @@ process BUILD_DECON_CONTAINER {
     fi
 
     if ! command -v singularity >/dev/null 2>&1; then
-        echo "ERROR: singularity is required to build the deconvolution container." >&2
+        echo "ERROR: singularity is required to validate the deconvolution container." >&2
         exit 127
     fi
 
@@ -75,20 +75,13 @@ process BUILD_DECON_CONTAINER {
         if [ -n "\$magic_offset" ] && [ "\$magic_offset" -gt 1 ]; then
             start_byte="\$((magic_offset + 1))"
             tail -c "+\$start_byte" "\$packaged_sif" > decon_env.sif
-            if ! is_usable_sif decon_env.sif; then
-                echo "ERROR: ${projectDir}/images/decon_env.sif is not usable by the loaded Singularity runtime." >&2
-                echo "Building ${projectDir}/images/decon_env.def with Singularity fakeroot." >&2
-                rm -f decon_env.sif
-                singularity build --fakeroot decon_env.sif "${projectDir}/images/decon_env.def"
-            fi
-        else
-            echo "No usable ${projectDir}/images/decon_env.sif found; building ${projectDir}/images/decon_env.def with Singularity fakeroot." >&2
-            singularity build --fakeroot decon_env.sif "${projectDir}/images/decon_env.def"
         fi
     fi
 
     if ! is_usable_sif decon_env.sif; then
-        echo "ERROR: failed to prepare a usable decon_env.sif." >&2
+        echo "ERROR: no usable deconvolution Singularity image found." >&2
+        echo "Expected a valid SIF at \$container_image or \$packaged_sif." >&2
+        echo "Ensure workflow/images/decon_env.sif is packaged as the real SIF file, not a Git LFS pointer." >&2
         exit 1
     fi
     """

@@ -56,7 +56,8 @@ parameters `image_path` and `decon_input_dir`.
 
 `BUILD_DECON_CONTAINER` prepares the Singularity image used by `DECON`. It
 links a real Git LFS-managed `workflow/images/decon_env.sif` when present, or
-builds the image from `workflow/images/decon_env.def`.
+repairs a packaged SIF with a shifted header. If no usable SIF is present, it
+fails before `DECON` rather than building a container at runtime.
 
 `DECON` is GPU work. It runs inside the Singularity image, loads CUDA and MATLAB,
 checks the GPU with `nvidia-smi`, estimates the PSF, and runs CUDA
