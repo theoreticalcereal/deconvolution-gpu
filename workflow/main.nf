@@ -82,7 +82,7 @@ workflow {
     }
 
     if (params.build_decon_container) {
-        BUILD_DECON_CONTAINER(params.decon_container_image)
+        BUILD_DECON_CONTAINER(params.decon_container_image, params.decon_conda_env_archive)
         decon_container_ch = BUILD_DECON_CONTAINER.out.image
     } else {
         decon_container_ch = Channel.value(params.decon_container_image ?: "${projectDir}/images/decon_env.sif")
