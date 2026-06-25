@@ -222,6 +222,7 @@ def deconvolve_tiff(
         vram_gb=vram_gb,
         workers=decon_workers,
         min_xy=max(128, overlap_xy * 2),
+        max_xy=min(1024, volume.shape[1], volume.shape[2]),
     )
     if core_chunk_xy <= 0:
         raise ValueError(f"Resolved decon chunk size must be positive, got {core_chunk_xy}")

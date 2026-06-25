@@ -7,3 +7,4 @@ __pycache__/
 workflow/images/*.sif
 workflow/images/decon_env/
 workflow/images/*.tar.gz
+astrocyte_danuser_first_file.yml

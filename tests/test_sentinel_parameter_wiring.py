@@ -136,6 +136,10 @@ class SentinelParameterWiringTests(unittest.TestCase):
         self.assertIn("cpus 72", modules_text)
         self.assertIn("memory '256 GB'", modules_text)
 
+    def test_auto_decon_chunking_is_capped_for_wide_single_slice_inputs(self):
+        text = (ROOT / "workflow/scripts/decon_wrapper.py").read_text()
+        self.assertIn("max_xy=min(1024, volume.shape[1], volume.shape[2])", text)
+
     def test_astrocyte_config_prepares_decon_container(self):
         text = (ROOT / "workflow/configs/astrocyte.config").read_text()
         self.assertRegex(text, r"(?m)^\s*params\.build_decon_container\s*=\s*true\b")

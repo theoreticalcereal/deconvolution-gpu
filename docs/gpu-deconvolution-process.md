@@ -61,7 +61,9 @@ Z is never split. This avoids stitching artifacts along the axial dimension.
 
 If `decon_chunk_xy > 0`, it is used as the core tile size. If
 `decon_chunk_xy <= 0`, the code estimates a tile size from available VRAM, data
-type, stack depth, overlap, and worker count.
+type, stack depth, overlap, and worker count. Automatic deconvolution chunks
+are capped at 1024 pixels in XY so very wide single-slice images do not turn
+into one or two long-running GPU chunks.
 
 ## Overlap Handling
 

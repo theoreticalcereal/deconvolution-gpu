@@ -169,7 +169,7 @@ All parameters can be passed on the command line as `--param_name value` or set 
 
 | Parameter | Default | Description |
 |---|---|---|
-| `--decon_chunk_xy` | `0` | Core XY tile size for CUDA decon (px). `<=0` auto-sizes from VRAM |
+| `--decon_chunk_xy` | `0` | Core XY tile size for CUDA decon (px). `<=0` auto-sizes from VRAM, capped at 1024 |
 | `--overlap_xy` | `0` | XY overlap between tiles (px). `<=0` = PSF-size/4, capped at 48 |
 | `--decon_workers` | `1` | Dask workers for CUDA decon chunks |
 | `--vram_gb` | `0` | Override detected free VRAM (GiB) for auto-sizing |
