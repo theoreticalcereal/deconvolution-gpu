@@ -123,6 +123,7 @@ class SentinelParameterWiringTests(unittest.TestCase):
         self.assertIn("def adapt_psf_seed_to_volume", text)
         self.assertIn("Adapted PSF seed shape", text)
         self.assertIn("Single-slice blind volume detected; disabling Z padding", text)
+        self.assertIn("psf_chunk = ensure_3d_volume(imread(str(psf_out_path)))", text)
         self.assertIn("failure_details.append", text)
 
     def test_gpu_decon_uses_available_cpu_allocation(self):

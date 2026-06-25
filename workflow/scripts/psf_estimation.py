@@ -714,7 +714,7 @@ def _estimate_one_tile(
         return idx, None, weight, "MATLAB produced no PSF output"
 
     output_read_start = time.perf_counter()
-    psf_chunk = imread(str(psf_out_path)).astype(np.float32)
+    psf_chunk = ensure_3d_volume(imread(str(psf_out_path))).astype(np.float32)
     output_read_elapsed = time.perf_counter() - output_read_start
     if psf_chunk.shape != psf_seed.shape:
         return (
