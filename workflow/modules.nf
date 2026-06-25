@@ -27,7 +27,8 @@ process DESKEW {
         --dz ${dz} \\
         --angle ${angle} \\
         --flip ${flip} \\
-        --output_dir .
+        --output_dir . \\
+        --matlab_bin "${params.matlab_bin}"
     """
 }
 

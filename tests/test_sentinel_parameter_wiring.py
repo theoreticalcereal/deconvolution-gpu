@@ -1,9 +1,17 @@
 import re
 import unittest
+from importlib import util
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+DESKEW_WRAPPER_PATH = ROOT / "workflow/scripts/deskew_wrapper.py"
+DESKEW_WRAPPER_SPEC = util.spec_from_file_location("deskew_wrapper", DESKEW_WRAPPER_PATH)
+deskew_wrapper = util.module_from_spec(DESKEW_WRAPPER_SPEC)
+DESKEW_WRAPPER_SPEC.loader.exec_module(deskew_wrapper)
 
 
 def parameter_block(text, parameter_id):
@@ -65,6 +73,28 @@ class SentinelParameterWiringTests(unittest.TestCase):
         self.assertIn("def requireSupplied(name, value, context)", text)
         self.assertIn("deskew_cell_index = optionalValue(params.cell_index)", text)
         self.assertIn("deskew_dx = requireSupplied('dx', params.dx, 'deskew runs')", text)
+
+    def test_deskew_process_passes_configured_matlab_binary(self):
+        text = (ROOT / "workflow/modules.nf").read_text()
+        self.assertIn('--matlab_bin "${params.matlab_bin}"', text)
+
+    def test_deskew_wrapper_uses_configured_matlab_binary(self):
+        with mock.patch.object(deskew_wrapper.subprocess, "run") as run:
+            deskew_wrapper.run_deskew(
+                "/input",
+                "",
+                "",
+                "0.167",
+                "0.2",
+                "45",
+                "1",
+                ".",
+                matlab_bin="/home1/apps/MATLAB/R2024a/bin/matlab",
+            )
+
+        command = run.call_args.args[0]
+        self.assertEqual(command[0], "/home1/apps/MATLAB/R2024a/bin/matlab")
+        self.assertEqual(command[1], "-batch")
 
     def test_astrocyte_config_prepares_decon_container(self):
         text = (ROOT / "workflow/configs/astrocyte.config").read_text()
