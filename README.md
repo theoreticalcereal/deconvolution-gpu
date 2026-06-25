@@ -1,4 +1,4 @@
-# deconvolution-gpu
+# ctASLM2-deconvolution
 
 A Nextflow DSL2 pipeline for GPU-accelerated deskewing and deconvolution of light-sheet microscopy (ctASLM) TIFF volumes. The pipeline runs on SLURM and builds a per-run runtime with conda for CUDA/native deconvolution packages and pip for Python packages. It requires **Java 17+** and the BioHPC Anaconda module to be available through Astrocyte. Made for BioHPC @ UTSouthwestern.
 
