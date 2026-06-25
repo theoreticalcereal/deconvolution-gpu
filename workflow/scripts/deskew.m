@@ -44,11 +44,9 @@ for c = 1:numFolders
         inputDir = imagePath;
     end
 
-    % Discover input files in the cell folder.
-    tifFiles = dir(fullfile(inputDir, '*.tif'));
-    if isempty(tifFiles)
-        tifFiles = dir(fullfile(inputDir, '*.tiff'));
-    end
+    % Discover input files in the cell folder. File selection is handled by
+    % the workflow before this script runs, so do not require CH##_###### names.
+    tifFiles = [dir(fullfile(inputDir, '*.tif')); dir(fullfile(inputDir, '*.tiff'))];
     if isempty(tifFiles)
         error('No TIFF files found in %s', inputDir);
     end
@@ -58,62 +56,33 @@ for c = 1:numFolders
     tifFiles = tifFiles(idx);
 
     detectedChannels = [];
-    detectedTimepoints = [];
     for i = 1:numel(tifFiles)
         tokens = regexp(tifFiles(i).name, '^CH(\d+)_(\d+)(?:_registered_consistent)?\.tiff?$', 'tokens', 'once');
         if ~isempty(tokens)
             detectedChannels(end + 1) = str2double(tokens{1}); %#ok<SAGROW>
-            detectedTimepoints(end + 1) = str2double(tokens{2}); %#ok<SAGROW>
         end
     end
 
-    if isempty(detectedChannels)
-        error('No CH##_###### TIFF files found in %s', inputDir);
+    if ~isempty(detectedChannels)
+        disp(sprintf('Detected channels from filename metadata: %s', mat2str(unique(detectedChannels))));
+    else
+        disp('No CH##_###### filename metadata detected; processing selected TIFFs by filename.');
     end
-
-    ChannelsToProcess = unique(detectedChannels);
-    timepoints = unique(detectedTimepoints);
-
-    disp(sprintf('Detected channels: %s', mat2str(unique(detectedChannels))));
-    disp(sprintf('Detected timepoints: %s', mat2str(unique(detectedTimepoints))));
-    disp(sprintf('Processing channels: %s', mat2str(ChannelsToProcess)));
-    disp(sprintf('Processing timepoints: %s', mat2str(timepoints)));
-    if numel(unique(ChannelsToProcess)) > 1
+    disp(sprintf('Processing %d TIFF file(s).', numel(tifFiles)));
+    if numel(unique(detectedChannels)) > 1
         warning(['Multiple channels are selected for deskew. The downstream ', ...
                  'deconvolution step estimates one PSF from the first selected ', ...
                  'TIFF and applies it to all selected TIFFs. Process one channel ', ...
                  'at a time unless applying one PSF across wavelengths is intentional.']);
     end
 
-    % Process each detected/requested timepoint and channel
-    for ti = 1:numel(timepoints)
-        t = timepoints(ti);
-        for ch = 1:numel(ChannelsToProcess)
+    % Process each selected TIFF directly.
+    for fileIdx = 1:numel(tifFiles)
             tic;
 
-            % Build the expected filename for this channel/timepoint.
-            baseName = sprintf('CH%02d_%06d', ChannelsToProcess(ch), t);
-            registeredBaseName = sprintf('%s_registered_consistent', baseName);
-
-            % Try both supported extensions.
-            candidates = {
-                fullfile(inputDir, [baseName '.tif'])
-                fullfile(inputDir, [baseName '.tiff'])
-                fullfile(inputDir, [registeredBaseName '.tif'])
-                fullfile(inputDir, [registeredBaseName '.tiff'])
-            };
-
-            filepath = '';
-            for k = 1:numel(candidates)
-                if isfile(candidates{k})
-                    filepath = candidates{k};
-                    break;
-                end
-            end
-
-            if isempty(filepath)
-                error('Missing expected file: %s', baseName);
-            end
+            filepath = fullfile(inputDir, tifFiles(fileIdx).name);
+            [~, baseName, ~] = fileparts(tifFiles(fileIdx).name);
+            disp(sprintf('Processing TIFF: %s', tifFiles(fileIdx).name));
 
             Image = readtiffstack(filepath);
 
@@ -219,7 +188,6 @@ for c = 1:numFolders
             fclose(fileID);
             toc;
             toc;
-        end
     end
 end
 

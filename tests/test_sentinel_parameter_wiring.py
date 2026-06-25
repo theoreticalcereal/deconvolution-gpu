@@ -96,6 +96,18 @@ class SentinelParameterWiringTests(unittest.TestCase):
         self.assertEqual(command[0], "/home1/apps/MATLAB/R2024a/bin/matlab")
         self.assertEqual(command[1], "-batch")
 
+    def test_deskew_processes_discovered_tiffs_without_channel_timepoint_names(self):
+        text = (ROOT / "workflow/scripts/deskew.m").read_text()
+        self.assertIn("for fileIdx = 1:numel(tifFiles)", text)
+        self.assertNotIn("No CH##_###### TIFF files found", text)
+        self.assertNotIn("Missing expected file", text)
+
+    def test_decon_processes_discovered_tiffs_without_channel_timepoint_names(self):
+        text = (ROOT / "workflow/scripts/decon_wrapper.py").read_text()
+        self.assertIn('glob(str(image_dir / "*.tif"))', text)
+        self.assertIn('glob(str(image_dir / "*.tiff"))', text)
+        self.assertNotIn("No CH##_######", text)
+
     def test_astrocyte_config_prepares_decon_container(self):
         text = (ROOT / "workflow/configs/astrocyte.config").read_text()
         self.assertRegex(text, r"(?m)^\s*params\.build_decon_container\s*=\s*true\b")
