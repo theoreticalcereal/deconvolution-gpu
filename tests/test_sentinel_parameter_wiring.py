@@ -127,6 +127,7 @@ class SentinelParameterWiringTests(unittest.TestCase):
         config_text = (ROOT / "workflow/configs/nextflow.config").read_text()
         modules_text = (ROOT / "workflow/modules.nf").read_text()
         self.assertRegex(config_text, r"(?m)^\s*blind_workers\s*=\s*72\b")
+        self.assertRegex(config_text, r"(?m)^\s*matlab_workers\s*=\s*24\b")
         self.assertRegex(config_text, r"(?m)^\s*cpus\s*=\s*72\b")
         self.assertIn("memory         = '256 GB'", config_text)
         self.assertIn("cpus 72", modules_text)
