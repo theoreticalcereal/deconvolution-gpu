@@ -108,6 +108,13 @@ class SentinelParameterWiringTests(unittest.TestCase):
         self.assertIn('glob(str(image_dir / "*.tiff"))', text)
         self.assertNotIn("No CH##_######", text)
 
+    def test_deskew_handles_single_page_tiffs(self):
+        deskew_text = (ROOT / "workflow/scripts/deskew.m").read_text()
+        writer_text = (ROOT / "workflow/scripts/writetiffstack.m").read_text()
+        self.assertIn("if zsize == 1", deskew_text)
+        self.assertIn("Single-slice TIFF detected", deskew_text)
+        self.assertIn("if ismatrix(image)", writer_text)
+
     def test_astrocyte_config_prepares_decon_container(self):
         text = (ROOT / "workflow/configs/astrocyte.config").read_text()
         self.assertRegex(text, r"(?m)^\s*params\.build_decon_container\s*=\s*true\b")

@@ -6,9 +6,11 @@
 
 function [] = writetiffstack(image, path)
 
-    % This helper only writes 3D stacks: rows x cols x slices
-    if ndims(image) ~= 3
-        error('writetiffstack expects a 3D array.');
+    % Treat a 2D image as a valid single-page TIFF stack.
+    if ismatrix(image)
+        image = reshape(image, size(image,1), size(image,2), 1);
+    elseif ndims(image) ~= 3
+        error('writetiffstack expects a 2D image or 3D stack.');
     end
 
     [nx, ny, nz] = size(image);

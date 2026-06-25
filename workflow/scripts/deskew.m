@@ -130,36 +130,41 @@ for c = 1:numFolders
             %% Rotation to top view
             disp("Rotating to top view ... ");
             clear mipzy scaled_ShearImage scaled_mipzy rot_scaled_mipzy mask cropped_mipzy zy_view rotTop_ShearImage;
-            
-            % Compute MIP on the 3rd dimension (correct for 2D display)
-            mipzy = max(ShearImage, [], 3);
 
-            figure(1)
-            imagesc(mipzy); axis equal tight
+            if zsize == 1
+                warning('Single-slice TIFF detected; skipping 3D top-view rotation and writing the selected image as-is.');
+                rotTop_ShearImage = ShearImage;
+            else
+                % Compute MIP on the 3rd dimension (correct for 2D display)
+                mipzy = max(ShearImage, [], 3);
 
-            scale_x = dz * sind(angle) / dx;
+                figure(1)
+                imagesc(mipzy); axis equal tight
 
-            % Resize only in x-direction using single precision to save memory
-            scaled_ShearImage = imresize3(single(ShearImage), ...
-                [size(ShearImage,1), size(ShearImage,2), round(size(ShearImage,3) * scale_x)], ...
-                'Method', 'linear');
+                scale_x = dz * sind(angle) / dx;
 
-            scaled_mipzy = max(scaled_ShearImage, [], 3);
+                % Resize only in x-direction using single precision to save memory
+                scaled_ShearImage = imresize3(single(ShearImage), ...
+                    [size(ShearImage,1), size(ShearImage,2), round(size(ShearImage,3) * scale_x)], ...
+                    'Method', 'linear');
 
-            figure(2)
-            imagesc(scaled_mipzy); axis equal tight
+                scaled_mipzy = max(scaled_ShearImage, [], 3);
 
-            rot_scaled_mipzy = imrotate(scaled_mipzy, -1 * flip * angle, 'bilinear', 'crop');
-            figure(2)
-            imagesc(rot_scaled_mipzy); axis equal tight
+                figure(2)
+                imagesc(scaled_mipzy); axis equal tight
 
-            % Rotate entire 3D volume at once using imrotate3 (much faster than slice-by-slice)
-            tic
-            rotTop_ShearImage = imrotate3(scaled_ShearImage, -1 * flip * angle, [0 0 1], 'nearest', 'crop');
-            rotTop_ShearImage = uint16(rotTop_ShearImage);
-            toc
+                rot_scaled_mipzy = imrotate(scaled_mipzy, -1 * flip * angle, 'bilinear', 'crop');
+                figure(2)
+                imagesc(rot_scaled_mipzy); axis equal tight
 
-            rotTop_ShearImage = permute(rotTop_ShearImage, [1 3 2]);
+                % Rotate entire 3D volume at once using imrotate3 (much faster than slice-by-slice)
+                tic
+                rotTop_ShearImage = imrotate3(scaled_ShearImage, -1 * flip * angle, [0 0 1], 'nearest', 'crop');
+                rotTop_ShearImage = uint16(rotTop_ShearImage);
+                toc
+
+                rotTop_ShearImage = permute(rotTop_ShearImage, [1 3 2]);
+            end
 
             output_size_rotTop = size(rotTop_ShearImage,1) * size(rotTop_ShearImage,2) * size(rotTop_ShearImage,3) * 2 / (1024*1024*1024);
 
