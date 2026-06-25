@@ -345,6 +345,12 @@ def _normalise_psf(psf: np.ndarray) -> np.ndarray:
     return psf.astype(np.float32, copy=False)
 
 
+def ensure_3d_volume(volume: np.ndarray) -> np.ndarray:
+    if volume.ndim == 2:
+        return volume[np.newaxis, :, :]
+    return volume
+
+
 def open_tiff_memmap(path: str | Path) -> np.ndarray:
     """
     Return a read-only array-like TIFF volume without forcing a full RAM load.
@@ -356,10 +362,10 @@ def open_tiff_memmap(path: str | Path) -> np.ndarray:
     """
     path = Path(path)
     try:
-        return tiff_memmap(str(path), mode="r")
+        return ensure_3d_volume(tiff_memmap(str(path), mode="r"))
     except Exception:
         with TiffFile(str(path)) as tif:
-            return tif.asarray(out="memmap")
+            return ensure_3d_volume(tif.asarray(out="memmap"))
 
 
 def detect_vram_bytes() -> int | None:

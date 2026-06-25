@@ -115,6 +115,12 @@ class SentinelParameterWiringTests(unittest.TestCase):
         self.assertIn("Single-slice TIFF detected", deskew_text)
         self.assertIn("if ismatrix(image)", writer_text)
 
+    def test_decon_promotes_single_page_tiffs_to_one_slice_volumes(self):
+        text = (ROOT / "workflow/scripts/psf_estimation.py").read_text()
+        self.assertIn("def ensure_3d_volume", text)
+        self.assertIn("if volume.ndim == 2", text)
+        self.assertIn("return volume[np.newaxis, :, :]", text)
+
     def test_astrocyte_config_prepares_decon_container(self):
         text = (ROOT / "workflow/configs/astrocyte.config").read_text()
         self.assertRegex(text, r"(?m)^\s*params\.build_decon_container\s*=\s*true\b")
