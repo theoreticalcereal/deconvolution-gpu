@@ -1,15 +1,15 @@
 #
-# Metadata for the ctASLM2 deskew/deconvolution workflow package.
+# Metadata for the deskew/deconvolution workflow package.
 #
 
 # -----------------------------------------------------------------------------
 # BASIC INFORMATION
 # -----------------------------------------------------------------------------
 
-name: 'ctaslm2_deconvolution'
+name: '3d_deskewdeconvolution'
 author: 'Ricky Wang'
 email: 'ricky.wang@utsouthwestern.edu'
-title: 'ctASLM2 Deskew + Deconvolution Workflow'
+title: '3D Deskew + Deconvolution Workflow'
 description: |
   This workflow deskews light-sheet microscopy TIFF data, estimates a
   blind PSF, and runs GPU-accelerated Richardson-Lucy deconvolution. It supports
@@ -114,7 +114,7 @@ workflow_parameters:
   - id: iter
     type: integer
     required: false
-    default: 10
+    default: 20
     min: 1
     description: |
       Richardson-Lucy iteration count for CUDA deconvolution.
@@ -188,7 +188,7 @@ workflow_parameters:
     required: true
     min: 0
     description: |
-      (required) Backward-compatible detection numerical aperture. Prefer detection_na and illumination_na.
+      Backward-compatible detection numerical aperture. Prefer detection_na and illumination_na.
 
   - id: detection_na
     type: real
@@ -210,7 +210,7 @@ workflow_parameters:
 
   - id: ni
     type: real
-    required: false
+    required: true
     default: -1
     min: -1
     description: |
@@ -220,7 +220,7 @@ workflow_parameters:
 
   - id: ns
     type: real
-    required: false
+    required: true
     default: -1
     min: -1
     description: |
