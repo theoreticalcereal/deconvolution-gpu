@@ -120,6 +120,17 @@ class SentinelParameterWiringTests(unittest.TestCase):
         self.assertIn("def ensure_3d_volume", text)
         self.assertIn("if volume.ndim == 2", text)
         self.assertIn("return volume[np.newaxis, :, :]", text)
+        self.assertIn("def adapt_psf_seed_to_volume", text)
+        self.assertIn("Adapted PSF seed shape", text)
+
+    def test_gpu_decon_uses_available_cpu_allocation(self):
+        config_text = (ROOT / "workflow/configs/nextflow.config").read_text()
+        modules_text = (ROOT / "workflow/modules.nf").read_text()
+        self.assertRegex(config_text, r"(?m)^\s*blind_workers\s*=\s*72\b")
+        self.assertRegex(config_text, r"(?m)^\s*cpus\s*=\s*72\b")
+        self.assertIn("memory         = '256 GB'", config_text)
+        self.assertIn("cpus 72", modules_text)
+        self.assertIn("memory '256 GB'", modules_text)
 
     def test_astrocyte_config_prepares_decon_container(self):
         text = (ROOT / "workflow/configs/astrocyte.config").read_text()

@@ -85,8 +85,8 @@ memory = 32 GB
 `DECON` runs on queue `GPU` with:
 
 ```text
-cpus = 8
-memory = 32 GB
+cpus = 72
+memory = 256 GB
 clusterOptions = --gres=gpu:1
 ```
 

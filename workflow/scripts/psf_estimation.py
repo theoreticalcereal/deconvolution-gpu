@@ -351,6 +351,19 @@ def ensure_3d_volume(volume: np.ndarray) -> np.ndarray:
     return volume
 
 
+def adapt_psf_seed_to_volume(psf_seed: np.ndarray, volume_shape: tuple[int, int, int]) -> np.ndarray:
+    volume_z = int(volume_shape[0])
+    if volume_z <= 0:
+        raise ValueError(f"Volume Z size must be positive, got {volume_shape}")
+    if psf_seed.shape[0] <= volume_z:
+        return psf_seed
+
+    z_start = (psf_seed.shape[0] - volume_z) // 2
+    z_stop = z_start + volume_z
+    adapted = psf_seed[z_start:z_stop, :, :]
+    return _normalise_psf(adapted)
+
+
 def open_tiff_memmap(path: str | Path) -> np.ndarray:
     """
     Return a read-only array-like TIFF volume without forcing a full RAM load.
@@ -782,6 +795,14 @@ def estimate_psf_from_chunks(
     z_stop = z_window.stop
     volume = volume[z_window]
     nz, ny, nx = volume.shape
+    original_psf_seed_shape = psf_seed.shape
+    psf_seed = adapt_psf_seed_to_volume(psf_seed, volume.shape)
+    if psf_seed.shape != original_psf_seed_shape:
+        print(
+            f"  Adapted PSF seed shape from {original_psf_seed_shape} to "
+            f"{psf_seed.shape} to fit blind volume Z={nz}.",
+            flush=True,
+        )
     requested_workers = max_workers
     cpu_workers = resolve_worker_count(requested_workers)
     matlab_threads = min(2, max(1, matlab_threads))

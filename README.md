@@ -156,7 +156,7 @@ All parameters can be passed on the command line as `--param_name value` or set 
 | `--pad_xy` | `32` | XY halo added per edge before each blind chunk (px) |
 | `--pad_z` | `20` | Z halo added per edge before each blind chunk (slices) |
 | `--blind_z_slices` | `128` | Z planes used per blind PSF tile. `<=0` uses full Z |
-| `--blind_workers` | `8` | Concurrent blind PSF chunk workers |
+| `--blind_workers` | `72` | Concurrent blind PSF chunk workers |
 | `--matlab_workers` | `8` | Concurrent MATLAB `deconvblind` processes (keep `1` on SLURM) |
 | `--matlab_threads` | `1` | Threads per MATLAB process (clamped to 1–2) |
 | `--matlab_timeout` | `1800` | Seconds before a blind chunk is killed. `<=0` disables |

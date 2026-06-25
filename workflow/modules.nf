@@ -96,8 +96,8 @@ process DECON {
     publishDir "${params.output_dir}", mode: 'copy', pattern: 'estimated_psf.tif'
 
     maxForks 8
-    cpus 8
-    memory '32 GB'
+    cpus 72
+    memory '256 GB'
     clusterOptions '--gres=gpu:1'
 
     input:
