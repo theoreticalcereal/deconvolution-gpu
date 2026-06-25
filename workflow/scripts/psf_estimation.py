@@ -809,6 +809,13 @@ def estimate_psf_from_chunks(
     matlab_workers = max(1, matlab_workers)
     matlab_timeout = max(0, matlab_timeout)
     pad_z = max(0, pad_z)
+    if nz == 1 and pad_z > 0:
+        print(
+            f"  Single-slice blind volume detected; disabling Z padding "
+            f"(requested pad_z={pad_z}).",
+            flush=True,
+        )
+        pad_z = 0
     snr_weight_cap = max(0.0, snr_weight_cap)
     chunk_xy = resolve_chunk_xy(
         chunk_xy,
@@ -873,6 +880,7 @@ def estimate_psf_from_chunks(
 
     psf_estimates: list[np.ndarray] = []
     psf_weights: list[float] = []
+    failure_details: list[str] = []
     failed_chunks = 0
     completed_chunks = 0
     prefetch_chunks = prefetch_chunks if prefetch_chunks > 0 else max_workers
@@ -940,6 +948,7 @@ def estimate_psf_from_chunks(
                     completed_chunks += 1
                     if error:
                         failed_chunks += 1
+                        failure_details.append(f"chunk {idx}: {error}")
                         if "initial PSF must have at least one non-zero element" in error:
                             raise RuntimeError(
                                 "MATLAB read the PSF seed as all zeros. "
@@ -948,9 +957,11 @@ def estimate_psf_from_chunks(
                         if failed_chunks >= 3 and not psf_estimates:
                             for pending_future in pending:
                                 pending_future.cancel()
+                            detail = "\n\n".join(failure_details[:3])
                             raise RuntimeError(
                                 "First three chunks failed during PSF estimation; "
-                                "aborting instead of submitting every tile to MATLAB."
+                                "aborting instead of submitting every tile to MATLAB.\n\n"
+                                f"{detail}"
                             )
                         print(f"  WARNING: chunk {idx} failed, skipping. {error}", flush=True)
                         continue
