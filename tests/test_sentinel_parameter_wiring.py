@@ -115,6 +115,15 @@ class SentinelParameterWiringTests(unittest.TestCase):
         self.assertIn("Single-slice TIFF detected", deskew_text)
         self.assertIn("if ismatrix(image)", writer_text)
 
+    def test_deskew_reader_handles_imagej_single_ifd_stacks(self):
+        text = (ROOT / "workflow/scripts/readtiffstack.m").read_text()
+        self.assertIn("parseImageJStackDepth", text)
+        self.assertIn("readImageJSingleIFDStack", text)
+        self.assertIn("images=", text)
+        self.assertIn("firstStripOffset", text)
+        self.assertIn("fread(fid, expectedPixels", text)
+        self.assertIn("NumberImages = imageJDepth", text)
+
     def test_decon_promotes_single_page_tiffs_to_one_slice_volumes(self):
         text = (ROOT / "workflow/scripts/psf_estimation.py").read_text()
         self.assertIn("def ensure_3d_volume", text)

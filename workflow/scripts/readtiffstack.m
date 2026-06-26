@@ -60,6 +60,14 @@ function [FinalImage, mImage, nImage, NumberImages] = readtiffstack(path)
         end
     end
 
+    imageJDepth = parseImageJStackDepth(InfoImage(1));
+    if NumberImages == 1 && imageJDepth > 1
+        disp(sprintf('Detected ImageJ single-IFD stack with %d slices: %s', imageJDepth, path));
+        FinalImage = readImageJSingleIFDStack(path, InfoImage(1), imageJDepth, dataType);
+        NumberImages = imageJDepth;
+        return;
+    end
+
     % Preallocate output stack using the TIFFs native numeric type
     FinalImage = zeros(mImage, nImage, NumberImages, dataType);
 
@@ -80,5 +88,91 @@ function [FinalImage, mImage, nImage, NumberImages] = readtiffstack(path)
         end
 
         FinalImage(:,:,i) = page;
+    end
+end
+
+function depth = parseImageJStackDepth(info)
+    depth = 1;
+    if ~isfield(info, 'ImageDescription') || isempty(info.ImageDescription)
+        return;
+    end
+
+    description = info.ImageDescription;
+    imagesMatch = regexp(description, '(?m)^images=(\d+)\s*$', 'tokens', 'once');
+    slicesMatch = regexp(description, '(?m)^slices=(\d+)\s*$', 'tokens', 'once');
+
+    if ~isempty(imagesMatch)
+        depth = str2double(imagesMatch{1});
+    elseif ~isempty(slicesMatch)
+        depth = str2double(slicesMatch{1});
+    end
+
+    if ~isfinite(depth) || depth < 1
+        depth = 1;
+    else
+        depth = floor(depth);
+    end
+end
+
+function stack = readImageJSingleIFDStack(path, info, depth, dataType)
+    if isfield(info, 'Compression') && ~strcmpi(char(info.Compression), 'Uncompressed')
+        error('Single-IFD ImageJ stack reading requires uncompressed TIFF data: %s', path);
+    end
+    if isfield(info, 'SamplesPerPixel') && info.SamplesPerPixel ~= 1
+        error('Single-IFD ImageJ stack reading supports one sample per pixel: %s', path);
+    end
+
+    bytesPerSample = info.BitsPerSample / 8;
+    expectedPixels = double(info.Height) * double(info.Width) * double(depth);
+    expectedBytes = expectedPixels * bytesPerSample;
+    stripOffset = firstStripOffset(path);
+
+    fileInfo = dir(path);
+    availableBytes = double(fileInfo.bytes) - double(stripOffset);
+    if availableBytes < expectedBytes
+        error('ImageJ stack metadata expects %.0f bytes but only %.0f bytes are available after pixel offset in %s', ...
+              expectedBytes, availableBytes, path);
+    end
+
+    machineFormat = tiffMachineFormat(path);
+    fid = fopen(path, 'r', machineFormat);
+    if fid < 0
+        error('Could not open TIFF file: %s', path);
+    end
+    cleanup = onCleanup(@() fclose(fid));
+
+    status = fseek(fid, double(stripOffset), 'bof');
+    if status ~= 0
+        error('Could not seek to TIFF pixel offset %.0f in %s', double(stripOffset), path);
+    end
+
+    raw = fread(fid, expectedPixels, ['*' dataType]);
+    if numel(raw) ~= expectedPixels
+        error('Expected %.0f pixels but read %.0f pixels from %s', expectedPixels, numel(raw), path);
+    end
+
+    stack = permute(reshape(raw, [info.Width, info.Height, depth]), [2 1 3]);
+end
+
+function offset = firstStripOffset(path)
+    t = Tiff(path, 'r');
+    cleanup = onCleanup(@() t.close());
+    offsets = t.getTag('StripOffsets');
+    offset = offsets(1);
+end
+
+function machineFormat = tiffMachineFormat(path)
+    fid = fopen(path, 'r');
+    if fid < 0
+        error('Could not open TIFF file: %s', path);
+    end
+    cleanup = onCleanup(@() fclose(fid));
+    byteOrder = fread(fid, 2, '*char')';
+    if strcmp(byteOrder, 'II')
+        machineFormat = 'ieee-le';
+    elseif strcmp(byteOrder, 'MM')
+        machineFormat = 'ieee-be';
+    else
+        error('Unrecognized TIFF byte order in %s', path);
     end
 end
