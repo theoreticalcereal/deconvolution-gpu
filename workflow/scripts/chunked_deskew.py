@@ -9,8 +9,10 @@ a time.
 from __future__ import annotations
 
 import argparse
+from concurrent import futures
 import math
 from pathlib import Path
+import time
 
 import numpy as np
 import tifffile
@@ -114,6 +116,8 @@ def _write_top_shear(
     angle: float,
     flip: int,
     z_chunk: int,
+    deskew_workers: int,
+    deskew_prefetch: int,
 ) -> tuple[int, int, int]:
     z_size, y_size, x_size = (int(v) for v in volume_zyx.shape)
     new_dz = float(dz) * math.cos(math.radians(float(angle)))
@@ -141,42 +145,110 @@ def _write_top_shear(
     z1_all = np.clip(z0_all + 1, 0, z_size - 1)
     wz_all = (source_z - z0_all).astype(np.float32)
 
+    def compute_page(x_out: int) -> tuple[int, np.ndarray]:
+        page_start = time.perf_counter()
+        src_y, src_x, valid_yx = _build_rotation_lookup(
+            shear_y=shear_y,
+            x_size=x_size,
+            x_out=x_out,
+            angle_deg=float(flip) * float(angle),
+        )
+        page = np.zeros((shear_y, scaled_z), dtype=np.uint16)
+        for z_start in range(0, scaled_z, int(z_chunk)):
+            z_stop = min(z_start + int(z_chunk), scaled_z)
+            z0 = z0_all[z_start:z_stop]
+            z1 = z1_all[z_start:z_stop]
+            wz = wz_all[z_start:z_stop]
+            unique_z = sorted(set(z0.tolist()) | set(z1.tolist()))
+            columns = {
+                z: _shear_column(
+                    volume_zyx,
+                    source_y=src_y,
+                    source_x=src_x,
+                    valid_yx=valid_yx,
+                    z_index=z,
+                    offsets=offsets,
+                    max_yoffset=max_yoffset,
+                )
+                for z in unique_z
+            }
+            tile = np.empty((shear_y, z_stop - z_start), dtype=np.float32)
+            for local_i, (a, b, w) in enumerate(zip(z0, z1, wz, strict=False)):
+                tile[:, local_i] = ((1.0 - float(w)) * columns[int(a)]) + (
+                    float(w) * columns[int(b)]
+                )
+            page[:, z_start:z_stop] = np.clip(np.rint(tile), 0, 65535).astype(np.uint16)
+        elapsed = time.perf_counter() - page_start
+        print(f"  Computed top-view page {x_out + 1}/{x_size}: compute={elapsed:.2f}s", flush=True)
+        return x_out, page
+
+    deskew_workers = max(1, int(deskew_workers))
+    deskew_prefetch = max(1, int(deskew_prefetch))
+    deskew_prefetch = max(deskew_workers, deskew_prefetch)
+    print(
+        f"  Chunked deskew scheduler: workers={deskew_workers}, "
+        f"prefetch={deskew_prefetch}, pages={x_size}",
+        flush=True,
+    )
+
     with tifffile.TiffWriter(str(output_path), bigtiff=True) as writer:
-        for x_out in range(x_size):
-            src_y, src_x, valid_yx = _build_rotation_lookup(
-                shear_y=shear_y,
-                x_size=x_size,
-                x_out=x_out,
-                angle_deg=float(flip) * float(angle),
-            )
-            page = np.zeros((shear_y, scaled_z), dtype=np.uint16)
-            for z_start in range(0, scaled_z, int(z_chunk)):
-                z_stop = min(z_start + int(z_chunk), scaled_z)
-                z0 = z0_all[z_start:z_stop]
-                z1 = z1_all[z_start:z_stop]
-                wz = wz_all[z_start:z_stop]
-                unique_z = sorted(set(z0.tolist()) | set(z1.tolist()))
-                columns = {
-                    z: _shear_column(
-                        volume_zyx,
-                        source_y=src_y,
-                        source_x=src_x,
-                        valid_yx=valid_yx,
-                        z_index=z,
-                        offsets=offsets,
-                        max_yoffset=max_yoffset,
+        pending_pages: set[futures.Future[tuple[int, np.ndarray]]] = set()
+        write_buffer: dict[int, np.ndarray] = {}
+        next_submit = 0
+        next_write = 0
+        completed = 0
+        last_heartbeat = time.perf_counter()
+        heartbeat_seconds = 60.0
+
+        with futures.ThreadPoolExecutor(max_workers=deskew_workers) as executor:
+            while next_write < x_size:
+                submitted_before = next_submit
+                while next_submit < x_size and len(pending_pages) < deskew_prefetch:
+                    pending_pages.add(executor.submit(compute_page, next_submit))
+                    next_submit += 1
+                if next_submit > submitted_before:
+                    print(
+                        f"  Submitted deskew pages {submitted_before + 1}-{next_submit}/"
+                        f"{x_size}; pending={len(pending_pages)}, completed={completed}",
+                        flush=True,
                     )
-                    for z in unique_z
-                }
-                tile = np.empty((shear_y, z_stop - z_start), dtype=np.float32)
-                for local_i, (a, b, w) in enumerate(zip(z0, z1, wz, strict=False)):
-                    tile[:, local_i] = ((1.0 - float(w)) * columns[int(a)]) + (
-                        float(w) * columns[int(b)]
+
+                while next_write in write_buffer:
+                    writer.write(
+                        write_buffer.pop(next_write),
+                        photometric="minisblack",
+                        compression=None,
+                        contiguous=True,
                     )
-                page[:, z_start:z_stop] = np.clip(np.rint(tile), 0, 65535).astype(np.uint16)
-            writer.write(page, photometric="minisblack", compression=None, contiguous=True)
-            if (x_out + 1) % 50 == 0 or (x_out + 1) == x_size:
-                print(f"  Wrote top-view page {x_out + 1}/{x_size}", flush=True)
+                    next_write += 1
+                    if next_write % 50 == 0 or next_write == x_size:
+                        print(f"  Wrote top-view page {next_write}/{x_size}", flush=True)
+
+                if next_write >= x_size:
+                    break
+
+                done, pending_pages = futures.wait(
+                    pending_pages,
+                    timeout=heartbeat_seconds,
+                    return_when=futures.FIRST_COMPLETED,
+                )
+                if not done:
+                    now = time.perf_counter()
+                    if now - last_heartbeat >= heartbeat_seconds:
+                        print(
+                            f"  Chunked deskew heartbeat: submitted={next_submit}/"
+                            f"{x_size}, completed={completed}, "
+                            f"written={next_write}, pending={len(pending_pages)}, "
+                            f"buffered={len(write_buffer)}",
+                            flush=True,
+                        )
+                        last_heartbeat = now
+                    continue
+
+                for future in done:
+                    x_out, page = future.result()
+                    write_buffer[int(x_out)] = page
+                    completed += 1
     return output_shape
 
 
@@ -190,6 +262,8 @@ def run_chunked_deskew(
     flip: int,
     output_dir: str,
     z_chunk: int,
+    deskew_workers: int,
+    deskew_prefetch: int,
 ) -> None:
     input_dir = _selected_input_dir(image_path, cell_name)
     output_root = Path(output_dir)
@@ -207,6 +281,8 @@ def run_chunked_deskew(
             angle=float(angle),
             flip=int(flip),
             z_chunk=int(z_chunk),
+            deskew_workers=int(deskew_workers),
+            deskew_prefetch=int(deskew_prefetch),
         )
         (top_shear_dir / "note.txt").write_text(
             "Chunked top-view deskew output. "
@@ -225,6 +301,8 @@ def main() -> None:
     parser.add_argument("--flip", type=int, required=True)
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--z_chunk", type=int, default=256)
+    parser.add_argument("--deskew_workers", type=int, default=32)
+    parser.add_argument("--deskew_prefetch", type=int, default=64)
     args = parser.parse_args()
     if args.cell_index:
         print("cell_index is accepted for compatibility but ignored by chunked deskew.", flush=True)
@@ -237,6 +315,8 @@ def main() -> None:
         flip=args.flip,
         output_dir=args.output_dir,
         z_chunk=max(1, args.z_chunk),
+        deskew_workers=max(1, args.deskew_workers),
+        deskew_prefetch=max(1, args.deskew_prefetch),
     )
 
 

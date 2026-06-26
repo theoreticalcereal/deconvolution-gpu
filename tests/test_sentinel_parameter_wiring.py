@@ -85,8 +85,20 @@ class SentinelParameterWiringTests(unittest.TestCase):
         self.assertIn("path decon_runtime", modules_text)
         self.assertIn("chunked_deskew.py", modules_text)
         self.assertIn("export CONDA_PREFIX=\"${decon_runtime}/decon_env\"", modules_text)
+        self.assertIn("deskew_workers", modules_text)
+        self.assertIn("deskew_prefetch", modules_text)
         self.assertIn("decon_container_ch", main_text)
         self.assertIn("DESKEW(", main_text)
+
+    def test_chunked_deskew_parallelizes_page_computation(self):
+        config_text = (ROOT / "workflow/configs/nextflow.config").read_text()
+        script_text = (ROOT / "workflow/scripts/chunked_deskew.py").read_text()
+        self.assertRegex(config_text, r"(?m)^\s*deskew_workers\s*=\s*32\b")
+        self.assertRegex(config_text, r"(?m)^\s*deskew_prefetch\s*=\s*64\b")
+        self.assertIn("ThreadPoolExecutor", script_text)
+        self.assertIn("FIRST_COMPLETED", script_text)
+        self.assertIn("pending_pages", script_text)
+        self.assertIn("write_buffer", script_text)
 
     def test_deskew_wrapper_uses_configured_matlab_binary(self):
         with mock.patch.object(deskew_wrapper.subprocess, "run") as run:

@@ -37,7 +37,9 @@ process DESKEW {
         --dz ${dz} \\
         --angle ${angle} \\
         --flip ${flip} \\
-        --output_dir .
+        --output_dir . \\
+        --deskew_workers ${params.deskew_workers} \\
+        --deskew_prefetch ${params.deskew_prefetch}
     """
 }
 
