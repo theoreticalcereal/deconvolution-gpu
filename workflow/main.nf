@@ -113,7 +113,8 @@ workflow {
             deskew_dz,
             params.angle,
             params.flip,
-            params.output_dir
+            params.output_dir,
+            decon_container_ch
         )
 
         DECON(

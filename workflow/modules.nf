@@ -12,6 +12,7 @@ process DESKEW {
     val angle
     val flip
     val output_dir
+    path decon_runtime
 
     output:
     path "Top_shear", emit: deskewed_path
@@ -19,7 +20,16 @@ process DESKEW {
 
     script:
     """
-    python3 ${projectDir}/scripts/deskew_wrapper.py \\
+    if [ ! -x "${decon_runtime}/decon_env/bin/python3" ] && [ ! -x "${decon_runtime}/decon_env/bin/python" ]; then
+        echo "ERROR: no supported decon runtime found at ${decon_runtime}" >&2
+        exit 1
+    fi
+    export CONDA_PREFIX="${decon_runtime}/decon_env"
+    export CONDA_DEFAULT_ENV=decon_env
+    export PATH="\${CONDA_PREFIX}/bin:\${PATH}"
+    export LD_LIBRARY_PATH=\${CONDA_PREFIX}/lib:\${LD_LIBRARY_PATH:-}
+
+    python3 ${projectDir}/scripts/chunked_deskew.py \\
         --image_path "${image_path}" \\
         --cell_name "${cell_name}" \\
         --cell_index "${cell_index}" \\
@@ -27,8 +37,7 @@ process DESKEW {
         --dz ${dz} \\
         --angle ${angle} \\
         --flip ${flip} \\
-        --output_dir . \\
-        --matlab_bin "${params.matlab_bin}"
+        --output_dir .
     """
 }
 

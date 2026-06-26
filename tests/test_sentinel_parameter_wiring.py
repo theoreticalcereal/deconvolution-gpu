@@ -74,9 +74,19 @@ class SentinelParameterWiringTests(unittest.TestCase):
         self.assertIn("deskew_cell_index = optionalValue(params.cell_index)", text)
         self.assertIn("deskew_dx = requireSupplied('dx', params.dx, 'deskew runs')", text)
 
-    def test_deskew_process_passes_configured_matlab_binary(self):
+    def test_decon_process_passes_configured_matlab_binary(self):
         text = (ROOT / "workflow/modules.nf").read_text()
-        self.assertIn('--matlab_bin "${params.matlab_bin}"', text)
+        self.assertIn('matlab_bin="${params.matlab_bin', text)
+        self.assertIn('--matlab_bin "\\$matlab_bin"', text)
+
+    def test_deskew_process_uses_chunked_python_runtime(self):
+        main_text = (ROOT / "workflow/main.nf").read_text()
+        modules_text = (ROOT / "workflow/modules.nf").read_text()
+        self.assertIn("path decon_runtime", modules_text)
+        self.assertIn("chunked_deskew.py", modules_text)
+        self.assertIn("export CONDA_PREFIX=\"${decon_runtime}/decon_env\"", modules_text)
+        self.assertIn("decon_container_ch", main_text)
+        self.assertIn("DESKEW(", main_text)
 
     def test_deskew_wrapper_uses_configured_matlab_binary(self):
         with mock.patch.object(deskew_wrapper.subprocess, "run") as run:
