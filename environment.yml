@@ -17,7 +17,6 @@ dependencies:
   - cuda-version=11.8=h70ddcb2_3
   - cudadecon=0.7.0=h7d8d2aa_1
   - cudatoolkit=11.8.0=h4ba93d1_13
-  - cloud-volume
   - dask
   - dask-jobqueue
   - dav1d=1.2.1=hd590300_0
@@ -123,4 +122,5 @@ dependencies:
   - zlib-ng=2.2.5=hde8ca8f_1
   - zstd=1.5.7=hb78ec9c_6
   - pip:
+    - cloud-volume
     - psfmodels

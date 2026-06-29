@@ -3,4 +3,3 @@ pip
 cudatoolkit=11.8
 cudadecon=0.7.0
 pycudadecon=0.5.1
-cloud-volume

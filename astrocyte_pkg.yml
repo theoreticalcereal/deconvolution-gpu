@@ -268,6 +268,18 @@ workflow_parameters:
       Optional manual GPU memory budget in GB. Use -1 to leave unset; Nextflow
       ignores -1 and the deconvolution code queries available VRAM.
 
+  - id: neuroglancer_data_mode
+    type: select
+    required: false
+    default: 'auto'
+    description: |
+      Choose which TIFF dimensionality the Neuroglancer output conversion
+      accepts. Auto accepts 2-D images as one-slice layers and 3-D volumes.
+    choices:
+      - [ 'auto', 'Auto-detect 2-D images or 3-D volumes' ]
+      - [ '2d', 'Require 2-D TIFF images and publish each as one Z slice' ]
+      - [ '3d', 'Require 3-D TIFF volumes' ]
+
 vizapp_containers:
   - docker://hello-world
 

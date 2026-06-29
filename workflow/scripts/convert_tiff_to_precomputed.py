@@ -11,6 +11,7 @@ from dataclasses import dataclass
 TIFF_SUFFIXES = {".tif", ".tiff"}
 TIFF_STEM_PREFIX = "db2_"
 SUPPORTED_DTYPES = {"uint16"}
+VOLUME_MODES = {"auto", "2d", "3d"}
 
 
 class ConversionError(Exception):
@@ -87,7 +88,18 @@ def write_manifest(output_dir, layers):
     return manifest_path
 
 
-def load_tiff_volume(tiff_path):
+def normalize_volume_mode(volume_mode):
+    normalized = str(volume_mode).lower()
+    if normalized not in VOLUME_MODES:
+        raise ConversionError(
+            f"Unsupported Neuroglancer volume mode '{volume_mode}'; expected one of: "
+            f"{', '.join(sorted(VOLUME_MODES))}"
+        )
+    return normalized
+
+
+def load_tiff_volume(tiff_path, volume_mode="auto"):
+    volume_mode = normalize_volume_mode(volume_mode)
     try:
         import tifffile
     except ImportError as exc:
@@ -101,20 +113,29 @@ def load_tiff_volume(tiff_path):
     except ValueError:
         data = tifffile.imread(tiff_path)
 
-    if data.ndim != 3:
-        raise ConversionError(f"Expected a 3D TIFF volume, found {data.ndim}D: {tiff_path}")
-
     dtype = str(data.dtype)
     if dtype not in SUPPORTED_DTYPES:
         raise ConversionError(
             f"Unsupported TIFF datatype '{dtype}' for {tiff_path}; supported: "
             f"{', '.join(sorted(SUPPORTED_DTYPES))}"
         )
-    return data
+
+    if data.ndim == 2:
+        if volume_mode == "3d":
+            raise ConversionError(f"Expected a 3D TIFF volume, found 2D: {tiff_path}")
+        return data.reshape((1,) + data.shape)
+
+    if data.ndim == 3:
+        if volume_mode == "2d":
+            raise ConversionError(f"Expected a 2D TIFF image, found 3D: {tiff_path}")
+        return data
+
+    expected = "2D or 3D" if volume_mode == "auto" else f"{volume_mode.upper()} TIFF"
+    raise ConversionError(f"Expected a {expected}, found {data.ndim}D: {tiff_path}")
 
 
-def write_precomputed(tiff_path, output_layer_dir):
-    volume = load_tiff_volume(tiff_path)
+def write_precomputed(tiff_path, output_layer_dir, volume_mode="auto"):
+    volume = load_tiff_volume(tiff_path, volume_mode=volume_mode)
     try:
         from cloudvolume import CloudVolume
     except ImportError as exc:
@@ -148,7 +169,7 @@ def write_precomputed(tiff_path, output_layer_dir):
     return layer_path
 
 
-def convert_directory(selected_path, output_dir):
+def convert_directory(selected_path, output_dir, volume_mode="auto"):
     input_dir = resolve_input_directory(selected_path)
     tiff_paths = discover_tiffs(input_dir)
     output = pathlib.Path(output_dir).resolve()
@@ -157,7 +178,7 @@ def convert_directory(selected_path, output_dir):
     layers = []
     for tiff_path, layer_name in zip(tiff_paths, layer_names):
         layer_dir = output / layer_name
-        write_precomputed(tiff_path, layer_dir)
+        write_precomputed(tiff_path, layer_dir, volume_mode=volume_mode)
         layers.append(LayerManifest(layer_name, layer_dir))
 
     return write_manifest(output, layers)
@@ -169,13 +190,19 @@ def parse_args(argv):
     )
     parser.add_argument("--input", required=True, help="Selected file or directory to search")
     parser.add_argument("--output", required=True, help="Output neuroglancer directory")
+    parser.add_argument(
+        "--volume-mode",
+        choices=sorted(VOLUME_MODES),
+        default="auto",
+        help="TIFF dimensionality to accept: auto accepts 2D or 3D, 2d requires 2D, 3d requires 3D.",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv or sys.argv[1:])
     try:
-        manifest_path = convert_directory(args.input, args.output)
+        manifest_path = convert_directory(args.input, args.output, volume_mode=args.volume_mode)
     except ConversionError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

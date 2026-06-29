@@ -281,7 +281,8 @@ class SentinelParameterWiringTests(unittest.TestCase):
         pip_text = (ROOT / "workflow/envs/decon-pip-requirements.txt").read_text()
 
         self.assertRegex(environment_text, r"(?m)^\s*-\s+cloud-volume\b")
-        self.assertRegex(conda_text, r"(?m)^cloud-volume\b")
+        self.assertNotRegex(conda_text, r"(?m)^cloud-volume\b")
+        self.assertRegex(pip_text, r"(?m)^cloud-volume\b")
         self.assertRegex(pip_text, r"(?m)^neuroglancer\b")
 
     def test_nextflow_wires_neuroglancer_conversion_after_decon(self):
@@ -307,6 +308,20 @@ class SentinelParameterWiringTests(unittest.TestCase):
         self.assertTrue((ROOT / "vizapp/neuroloader.py").exists())
         self.assertIn("vizapp_container_runscripts:", astrocyte_text)
         self.assertIn("- run_neuroglancer.sh", astrocyte_text)
+
+    def test_neuroglancer_data_mode_is_user_selectable_and_wired_to_converter(self):
+        astrocyte_text = (ROOT / "astrocyte_pkg.yml").read_text()
+        config_text = (ROOT / "workflow/configs/nextflow.config").read_text()
+        modules_text = (ROOT / "workflow/modules.nf").read_text()
+
+        block = parameter_block(astrocyte_text, "neuroglancer_data_mode")
+        self.assertIn("type: select", block)
+        self.assertIn("default: 'auto'", block)
+        self.assertIn("[ 'auto'", block)
+        self.assertIn("[ '2d'", block)
+        self.assertIn("[ '3d'", block)
+        self.assertRegex(config_text, r"(?m)^\s*neuroglancer_data_mode\s*=\s*'auto'")
+        self.assertIn('--volume-mode "${params.neuroglancer_data_mode}"', modules_text)
 
     def test_decon_uses_conda_runtime_without_container_or_sif(self):
         text = (ROOT / "workflow/modules.nf").read_text()

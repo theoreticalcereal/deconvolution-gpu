@@ -289,6 +289,7 @@ process CONVERT_TIFFS_TO_NEUROGLANCER {
 
     python3 ${projectDir}/scripts/convert_tiff_to_precomputed.py \\
         --input "\$PWD" \\
-        --output neuroglancer
+        --output neuroglancer \\
+        --volume-mode "${params.neuroglancer_data_mode}"
     """
 }

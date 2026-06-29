@@ -2,7 +2,6 @@
 
 import argparse
 import json
-import os
 import pathlib
 import sys
 import threading
@@ -18,15 +17,9 @@ class NeuroloaderError(Exception):
     pass
 
 
-def resolve_manifest_path(base_path):
-    override = os.environ.get("NEUROGLANCER_MANIFEST")
-    if override:
-        return pathlib.Path(override).expanduser().resolve()
-    return pathlib.Path(base_path) / DEFAULT_MANIFEST_RELATIVE_PATH
-
-
-def load_layers_manifest(base_path=PACKAGE_ROOT):
-    manifest_path = resolve_manifest_path(base_path)
+def load_layers_manifest(base_path=PACKAGE_ROOT, base_url=None):
+    base = pathlib.Path(base_path).resolve()
+    manifest_path = base / DEFAULT_MANIFEST_RELATIVE_PATH
     if not manifest_path.exists():
         raise NeuroloaderError(f"layers.json is missing: {manifest_path}")
 
@@ -46,23 +39,38 @@ def load_layers_manifest(base_path=PACKAGE_ROOT):
         source = layer.get("source")
         if not name or not source:
             raise NeuroloaderError(f"Each layer must contain name and source in {manifest_path}")
-        validate_precomputed_source(source)
+        source_path = validate_precomputed_source(source, manifest_path.parent, name)
+        if base_url:
+            layer["source"] = browser_precomputed_source(source_path, base, base_url)
     return layers
 
 
-def validate_precomputed_source(source):
+def validate_precomputed_source(source, published_dir, layer_name):
     prefix = "precomputed://file://"
     if not source.startswith(prefix):
         raise NeuroloaderError(f"Unsupported Neuroglancer source: {source}")
 
-    path = pathlib.Path(source[len(prefix) :])
+    manifest_path = pathlib.Path(source[len(prefix) :])
+    published_path = pathlib.Path(published_dir) / layer_name
+    path = published_path if (published_path / "info").is_file() else manifest_path
     if not path.exists() or not path.is_dir():
         raise NeuroloaderError(f"Layer source points to a missing precomputed dataset: {path}")
     if not (path / "info").is_file():
         raise NeuroloaderError(f"Layer source is missing precomputed info file: {path / 'info'}")
+    return path.resolve()
 
 
-def create_viewer(layers, port):
+def browser_precomputed_source(path, base_path, base_url):
+    try:
+        relative_path = pathlib.Path(path).resolve().relative_to(base_path)
+    except ValueError as exc:
+        raise NeuroloaderError(f"Layer source is outside the served VizApp directory: {path}") from exc
+
+    quoted_path = urllib.parse.quote(relative_path.as_posix())
+    return f"precomputed://{base_url.rstrip('/')}{URL_PREFIX}/{quoted_path}"
+
+
+def create_viewer(layers, port, base_path=PACKAGE_ROOT):
     try:
         import neuroglancer
         import tornado.web as web
@@ -81,7 +89,7 @@ def create_viewer(layers, port):
 
     neuroglancer.server.global_server.app.add_handlers(
         r".*$",
-        [(URL_PREFIX + r"/(.*)", web.StaticFileHandler, {"path": str(PACKAGE_ROOT)})],
+        [(URL_PREFIX + r"/(.*)", web.StaticFileHandler, {"path": str(base_path)})],
     )
     neuroglancer.server.global_server.app.add_handlers(
         r".*$",
@@ -112,14 +120,16 @@ def stay_running():
 
 def main(argv=None):
     args = parse_args(argv)
+    base_url = f"http://127.0.0.1:{args.vizapp_port}"
     try:
-        layers = load_layers_manifest(PACKAGE_ROOT)
-        viewer = create_viewer(layers, args.vizapp_port)
+        layers = load_layers_manifest(PACKAGE_ROOT, base_url)
+        viewer = create_viewer(layers, args.vizapp_port, PACKAGE_ROOT)
     except NeuroloaderError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
     print(f"vizapp port: {args.vizapp_port}")
+    print(f"Folder: {PACKAGE_ROOT}")
     print(f"Loaded {len(layers)} Neuroglancer layer(s)")
     print(viewer)
     return 0
