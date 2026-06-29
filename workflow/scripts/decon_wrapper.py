@@ -11,7 +11,10 @@
 #   XY chunks using map_overlap.  The requested chunk_xy is treated as the
 #   core tile size; <=0 auto-sizes from available VRAM.
 
+from __future__ import annotations
+
 import argparse
+import math
 import re
 import tempfile
 import time
@@ -28,6 +31,7 @@ from psf_estimation import (
     DEFAULT_BLIND_Z_SLICES,
     DEFAULT_SNR_WEIGHT_CAP,
     estimate_psf_from_chunks,
+    detect_vram_bytes,
     open_tiff_memmap,
     resolve_dxy,
     resolve_chunk_xy,
@@ -40,6 +44,47 @@ from psf_modes import generate_psf_seed
 # ---------------------------------------------------------------------------
 
 CHANNEL_TIMEPOINT_RE = re.compile(r"^CH(?P<channel>\d+)_(?P<timepoint>\d+)(?:_registered_consistent)?$")
+
+
+def _tiff_stem(filename: str) -> str:
+    path = Path(filename)
+    suffix = path.suffix.lower()
+    if suffix in {".tif", ".tiff"}:
+        return path.name[: -len(path.suffix)]
+    return path.name
+
+
+def _load_original_name_map(image_dir: Path) -> dict[str, str]:
+    map_path = image_dir / "original_filenames.tsv"
+    if not map_path.exists():
+        return {}
+
+    original_name_map: dict[str, str] = {}
+    with map_path.open() as handle:
+        for line_number, line in enumerate(handle, start=1):
+            line = line.rstrip("\n")
+            if not line:
+                continue
+            parts = line.split("\t")
+            if len(parts) != 2:
+                print(
+                    f"  WARNING: ignoring malformed original filename map line "
+                    f"{line_number} in {map_path}",
+                    flush=True,
+                )
+                continue
+            current_name, original_name = parts
+            original_name_map[current_name] = original_name
+            current_stem = _tiff_stem(current_name)
+            original_stem = _tiff_stem(original_name)
+            original_name_map[f"{current_stem}.tif"] = f"{original_stem}.tif"
+            original_name_map[f"{current_stem}.tiff"] = f"{original_stem}.tiff"
+    return original_name_map
+
+
+def _decon_output_name(tiff_path: Path, original_name_map: dict[str, str]) -> str:
+    original_name = original_name_map.get(tiff_path.name, tiff_path.name)
+    return f"DB2_{_tiff_stem(original_name)}.tif"
 
 
 def _write_tiff_near_input_or_cwd(path: Path, data: np.ndarray) -> Path:
@@ -185,6 +230,32 @@ def _psf_overlap_xy(psf: np.ndarray) -> int:
     return min(48, max(16, int(np.ceil(psf_xy / 4))))
 
 
+def _auto_decon_max_xy(
+    volume_shape: tuple[int, int, int],
+    dtype: np.dtype,
+    workers: int,
+    vram_gb: float | None,
+    fallback_xy: int = 512,
+) -> int:
+    nz, ny, nx = volume_shape
+    image_max_xy = min(ny, nx)
+    if nz > 4:
+        return min(1024, image_max_xy)
+
+    vram_bytes = int(vram_gb * (1024 ** 3)) if vram_gb and vram_gb > 0 else detect_vram_bytes()
+    if not vram_bytes:
+        return min(fallback_xy, image_max_xy)
+
+    workers = max(1, workers)
+    bytes_per_voxel = np.dtype(dtype).itemsize
+    target_bytes = vram_bytes * 0.05 / workers
+    memory_multiplier = 2048.0
+    denom = max(1, nz) * bytes_per_voxel * memory_multiplier
+    max_xy = int(math.sqrt(max(1.0, target_bytes / denom)))
+    max_xy = max(128, (max_xy // 32) * 32)
+    return min(max_xy, 1024, image_max_xy)
+
+
 def deconvolve_tiff(
     image_path: Path,
     psf: np.ndarray,
@@ -222,7 +293,7 @@ def deconvolve_tiff(
         vram_gb=vram_gb,
         workers=decon_workers,
         min_xy=max(128, overlap_xy * 2),
-        max_xy=min(1024, volume.shape[1], volume.shape[2]),
+        max_xy=_auto_decon_max_xy(volume.shape, volume.dtype, decon_workers, vram_gb),
     )
     if core_chunk_xy <= 0:
         raise ValueError(f"Resolved decon chunk size must be positive, got {core_chunk_xy}")
@@ -405,6 +476,7 @@ def main() -> None:
         print(f"Error: no TIFF files found in {image_dir}")
         raise SystemExit(1)
 
+    original_name_map = _load_original_name_map(image_dir)
     print(f"Found {len(tiff_list)} selected TIFF(s) to process.", flush=True)
     selected_channels = _detected_channels(tiff_list)
     if len(selected_channels) > 1:
@@ -511,8 +583,7 @@ def main() -> None:
             overlap_xy=args.overlap_xy,
         )
 
-        stem = tiff_path.name.replace(".tiff", "").replace(".tif", "")
-        out_name = f"DB2_{stem}.tif"
+        out_name = _decon_output_name(tiff_path, original_name_map)
         imwrite(out_name, output)
         print(f"  Saved {out_name}", flush=True)
 

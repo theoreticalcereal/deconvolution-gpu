@@ -1,4 +1,7 @@
 import re
+import sys
+import tempfile
+import types
 import unittest
 from importlib import util
 from pathlib import Path
@@ -12,6 +15,43 @@ DESKEW_WRAPPER_PATH = ROOT / "workflow/scripts/deskew_wrapper.py"
 DESKEW_WRAPPER_SPEC = util.spec_from_file_location("deskew_wrapper", DESKEW_WRAPPER_PATH)
 deskew_wrapper = util.module_from_spec(DESKEW_WRAPPER_SPEC)
 DESKEW_WRAPPER_SPEC.loader.exec_module(deskew_wrapper)
+
+
+def load_decon_wrapper_with_stubs():
+    stubs = {
+        "dask": types.ModuleType("dask"),
+        "dask.array": types.ModuleType("dask.array"),
+        "numpy": types.ModuleType("numpy"),
+        "pycudadecon": types.SimpleNamespace(
+            TemporaryOTF=object,
+            RLContext=object,
+            rl_decon=lambda *args, **kwargs: None,
+        ),
+        "psf_estimation": types.SimpleNamespace(
+            DEFAULT_BLIND_CHUNK_XY=512,
+            DEFAULT_BLIND_Z_SLICES=0,
+            DEFAULT_SNR_WEIGHT_CAP=10.0,
+            estimate_psf_from_chunks=lambda *args, **kwargs: None,
+            detect_vram_bytes=lambda: 0,
+            open_tiff_memmap=lambda *args, **kwargs: None,
+            resolve_dxy=lambda *args, **kwargs: None,
+            resolve_chunk_xy=lambda *args, **kwargs: None,
+        ),
+        "psf_modes": types.SimpleNamespace(
+            generate_psf_seed=lambda *args, **kwargs: None,
+        ),
+        "tifffile": types.SimpleNamespace(imwrite=lambda *args, **kwargs: None),
+    }
+    stubs["dask"].array = stubs["dask.array"]
+    stubs["numpy"].ndarray = object
+    with mock.patch.dict(sys.modules, stubs):
+        spec = util.spec_from_file_location(
+            "decon_wrapper_for_tests",
+            ROOT / "workflow/scripts/decon_wrapper.py",
+        )
+        module = util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
 
 
 def parameter_block(text, parameter_id):
@@ -130,6 +170,40 @@ class SentinelParameterWiringTests(unittest.TestCase):
         self.assertIn('glob(str(image_dir / "*.tiff"))', text)
         self.assertNotIn("No CH##_######", text)
 
+    def test_deskew_preserves_original_input_filename_metadata_for_decon(self):
+        modules_text = (ROOT / "workflow/modules.nf").read_text()
+        chunked_deskew_text = (ROOT / "workflow/scripts/chunked_deskew.py").read_text()
+
+        self.assertIn("original_filenames.tsv", modules_text)
+        self.assertIn("original_filenames.tsv", chunked_deskew_text)
+        self.assertIn("shutil.copy2", chunked_deskew_text)
+
+    def test_decon_names_outputs_from_original_filename_metadata(self):
+        text = (ROOT / "workflow/scripts/decon_wrapper.py").read_text()
+
+        self.assertIn("def _load_original_name_map", text)
+        self.assertIn("def _decon_output_name", text)
+        self.assertIn("original_filenames.tsv", text)
+        self.assertIn('out_name = _decon_output_name(tiff_path, original_name_map)', text)
+
+        decon_wrapper = load_decon_wrapper_with_stubs()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            image_dir = Path(tmpdir)
+            (image_dir / "original_filenames.tsv").write_text(
+                "CH00_000000.tif\toriginal sample 561.tiff\n"
+            )
+
+            original_name_map = decon_wrapper._load_original_name_map(image_dir)
+
+        self.assertEqual(
+            decon_wrapper._decon_output_name(Path("CH00_000000.tif"), original_name_map),
+            "DB2_original sample 561.tif",
+        )
+        self.assertEqual(
+            decon_wrapper._decon_output_name(Path("CH00_000001.tif"), original_name_map),
+            "DB2_CH00_000001.tif",
+        )
+
     def test_deskew_handles_single_page_tiffs(self):
         deskew_text = (ROOT / "workflow/scripts/deskew.m").read_text()
         writer_text = (ROOT / "workflow/scripts/writetiffstack.m").read_text()
@@ -169,7 +243,10 @@ class SentinelParameterWiringTests(unittest.TestCase):
 
     def test_auto_decon_chunking_is_capped_for_wide_single_slice_inputs(self):
         text = (ROOT / "workflow/scripts/decon_wrapper.py").read_text()
-        self.assertIn("max_xy=min(1024, volume.shape[1], volume.shape[2])", text)
+        self.assertIn("def _auto_decon_max_xy", text)
+        self.assertIn("target_bytes = vram_bytes * 0.05 / workers", text)
+        self.assertIn("memory_multiplier = 2048.0", text)
+        self.assertIn("max_xy=_auto_decon_max_xy", text)
 
     def test_astrocyte_config_prepares_decon_container(self):
         text = (ROOT / "workflow/configs/astrocyte.config").read_text()
@@ -197,6 +274,39 @@ class SentinelParameterWiringTests(unittest.TestCase):
         self.assertIn("psfmodels", pip_text)
         self.assertNotIn("imagecodecs", pip_text)
         self.assertNotIn("tifffile", pip_text)
+
+    def test_neuroglancer_dependencies_are_declared(self):
+        environment_text = (ROOT / "environment.yml").read_text()
+        conda_text = (ROOT / "workflow/envs/decon-conda.txt").read_text()
+        pip_text = (ROOT / "workflow/envs/decon-pip-requirements.txt").read_text()
+
+        self.assertRegex(environment_text, r"(?m)^\s*-\s+cloud-volume\b")
+        self.assertRegex(conda_text, r"(?m)^cloud-volume\b")
+        self.assertRegex(pip_text, r"(?m)^neuroglancer\b")
+
+    def test_nextflow_wires_neuroglancer_conversion_after_decon(self):
+        main_text = (ROOT / "workflow/main.nf").read_text()
+        modules_text = (ROOT / "workflow/modules.nf").read_text()
+
+        self.assertIn("include { CONVERT_TIFFS_TO_NEUROGLANCER } from './modules'", main_text)
+        self.assertIn("process CONVERT_TIFFS_TO_NEUROGLANCER", modules_text)
+        self.assertEqual(main_text.count("CONVERT_TIFFS_TO_NEUROGLANCER("), 2)
+        for branch_call in (
+            "DECON(\n            decon_input_ch",
+            "DECON(\n            DESKEW.out.deskewed_path",
+        ):
+            decon_index = main_text.index(branch_call)
+            convert_index = main_text.index("CONVERT_TIFFS_TO_NEUROGLANCER(", decon_index)
+            self.assertGreater(convert_index, decon_index)
+
+    def test_neuroglancer_vizapp_files_are_packaged(self):
+        astrocyte_text = (ROOT / "astrocyte_pkg.yml").read_text()
+
+        self.assertTrue((ROOT / "workflow/scripts/convert_tiff_to_precomputed.py").exists())
+        self.assertTrue((ROOT / "vizapp/run_neuroglancer.sh").exists())
+        self.assertTrue((ROOT / "vizapp/neuroloader.py").exists())
+        self.assertIn("vizapp_container_runscripts:", astrocyte_text)
+        self.assertIn("- run_neuroglancer.sh", astrocyte_text)
 
     def test_decon_uses_conda_runtime_without_container_or_sif(self):
         text = (ROOT / "workflow/modules.nf").read_text()

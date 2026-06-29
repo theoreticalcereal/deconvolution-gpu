@@ -93,10 +93,15 @@ process STAGE_DECON_INPUT {
     def link_commands = input_tiffs.collect { tiff ->
         "ln -s \"\$PWD/${tiff}\" ${shell_quote("decon_input/${tiff.name}")}"
     }.join('\n')
+    def metadata_commands = input_tiffs.collect { tiff ->
+        "printf '%s\\t%s\\n' ${shell_quote(tiff.name)} ${shell_quote(tiff.name)} >> decon_input/original_filenames.tsv"
+    }.join('\n')
 
     """
     mkdir -p decon_input
+    : > decon_input/original_filenames.tsv
     ${link_commands}
+    ${metadata_commands}
     """
 }
 
@@ -256,5 +261,34 @@ process DECON {
         ${vram_gb_flag} \\
         ${cache_dir_flag} \\
         ${no_psf_cache_flag}
+    """
+}
+
+process CONVERT_TIFFS_TO_NEUROGLANCER {
+    tag "neuroglancer"
+
+    publishDir "${params.output_dir}", mode: 'copy', pattern: 'neuroglancer', overwrite: true
+
+    input:
+    path decon_tiffs
+    path decon_runtime
+
+    output:
+    path "neuroglancer", emit: neuroglancer_output
+
+    script:
+    """
+    if [ ! -x "${decon_runtime}/decon_env/bin/python3" ] && [ ! -x "${decon_runtime}/decon_env/bin/python" ]; then
+        echo "ERROR: no supported decon runtime found at ${decon_runtime}" >&2
+        exit 1
+    fi
+    export CONDA_PREFIX="${decon_runtime}/decon_env"
+    export CONDA_DEFAULT_ENV=decon_env
+    export PATH="\${CONDA_PREFIX}/bin:\${PATH}"
+    export LD_LIBRARY_PATH=\${CONDA_PREFIX}/lib:\${LD_LIBRARY_PATH:-}
+
+    python3 ${projectDir}/scripts/convert_tiff_to_precomputed.py \\
+        --input "\$PWD" \\
+        --output neuroglancer
     """
 }

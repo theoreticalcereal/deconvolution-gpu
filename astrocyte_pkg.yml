@@ -267,3 +267,11 @@ workflow_parameters:
     description: |
       Optional manual GPU memory budget in GB. Use -1 to leave unset; Nextflow
       ignores -1 and the deconvolution code queries available VRAM.
+
+vizapp_containers:
+  - docker://hello-world
+
+vizapp_container_runscripts:
+  - run_neuroglancer.sh
+
+vizapp_slurm_partition: super

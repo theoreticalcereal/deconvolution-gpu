@@ -4,3 +4,4 @@ dask-jobqueue
 psfmodels
 psutil
 scipy
+neuroglancer

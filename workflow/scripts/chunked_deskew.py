@@ -12,6 +12,7 @@ import argparse
 from concurrent import futures
 import math
 from pathlib import Path
+import shutil
 import time
 
 import numpy as np
@@ -269,6 +270,9 @@ def run_chunked_deskew(
     output_root = Path(output_dir)
     top_shear_dir = output_root / "Top_shear"
     top_shear_dir.mkdir(parents=True, exist_ok=True)
+    original_name_map = input_dir / "original_filenames.tsv"
+    if original_name_map.exists():
+        shutil.copy2(original_name_map, top_shear_dir / "original_filenames.tsv")
 
     for path in _discover_tiffs(input_dir):
         print(f"Processing TIFF with chunked deskew: {path.name}", flush=True)
