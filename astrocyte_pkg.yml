@@ -290,7 +290,10 @@ workflow_parameters:
       - [ '2d', 'Require 2-D TIFF images and publish each as one Z slice' ]
       - [ '3d', 'Require 3-D TIFF volumes' ]
 
+vizapp_containers:
+  - docker://git.biohpc.swmed.edu:5050/dean-lab/ctASLM2-deconvolution/vizapp-neuroglancer:1.0
+
 vizapp_container_runscripts:
-  - run_neuroglancer.sh
+  - run_container.sh
 
 vizapp_slurm_partition: super
