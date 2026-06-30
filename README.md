@@ -120,9 +120,10 @@ Start with [docs/index.md](docs/index.md). The most relevant pages are:
 
 - Load the cluster Nextflow module before manual runs.
 - `DESKEW` runs on the `super` queue; `DECON` runs on the `GPU` queue.
-- The Astrocyte VizApp image is built from `dockerFileCode/Dockerfile` and
-  published to
-  `git.biohpc.swmed.edu:5050/dean-lab/ctASLM2-deconvolution/vizapp-neuroglancer:1.0`.
+- The Astrocyte VizApp follows the standalone Neuroglancer package pattern:
+  Astrocyte pulls the dummy `docker://hello-world` VizApp container, then
+  `vizapp/run_neuroglancer.sh` loads the BioHPC `neuroglancer/2.40.1` module
+  and runs `vizapp/neuroloader.py`.
 - The theoretical PSF is only a seed. The active deconvolution PSF is the
   merged blind estimate.
 - Nextflow work directories can be large. Clean with `nextflow clean -f` after

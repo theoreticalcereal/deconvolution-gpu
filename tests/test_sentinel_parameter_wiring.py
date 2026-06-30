@@ -360,15 +360,17 @@ class SentinelParameterWiringTests(unittest.TestCase):
 
         self.assertTrue((ROOT / "workflow/scripts/convert_tiff_to_ome_zarr.py").exists())
         self.assertFalse((ROOT / "workflow/scripts/convert_tiff_to_precomputed.py").exists())
-        self.assertTrue((ROOT / "dockerFileCode/Dockerfile").exists())
-        self.assertTrue((ROOT / "vizapp/run_container.sh").exists())
+        self.assertFalse((ROOT / "dockerFileCode/Dockerfile").exists())
+        self.assertFalse((ROOT / "vizapp/run_container.sh").exists())
         self.assertTrue((ROOT / "vizapp/run_neuroglancer.sh").exists())
         self.assertTrue((ROOT / "vizapp/neuroloader.py").exists())
         self.assertIn("vizapp_containers:", astrocyte_text)
-        self.assertIn("docker://git.biohpc.swmed.edu:5050/dean-lab/ctASLM2-deconvolution/vizapp-neuroglancer:1.0", astrocyte_text)
-        self.assertNotIn("docker://hello-world", astrocyte_text)
+        self.assertIn("docker://hello-world", astrocyte_text)
         self.assertIn("vizapp_container_runscripts:", astrocyte_text)
-        self.assertIn("- run_container.sh", astrocyte_text)
+        self.assertIn("- run_neuroglancer.sh", astrocyte_text)
+
+        runscript_text = (ROOT / "vizapp/run_neuroglancer.sh").read_text()
+        self.assertIn("module load neuroglancer/2.40.1", runscript_text)
 
     def test_neuroglancer_data_mode_is_user_selectable_and_wired_to_converter(self):
         astrocyte_text = (ROOT / "astrocyte_pkg.yml").read_text()

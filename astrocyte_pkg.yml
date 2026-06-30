@@ -291,9 +291,9 @@ workflow_parameters:
       - [ '3d', 'Require 3-D TIFF volumes' ]
 
 vizapp_containers:
-  - docker://git.biohpc.swmed.edu:5050/dean-lab/ctASLM2-deconvolution/vizapp-neuroglancer:1.0
+  - docker://hello-world
 
 vizapp_container_runscripts:
-  - run_container.sh
+  - run_neuroglancer.sh
 
 vizapp_slurm_partition: super
