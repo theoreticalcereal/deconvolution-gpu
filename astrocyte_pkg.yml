@@ -290,9 +290,6 @@ workflow_parameters:
       - [ '2d', 'Require 2-D TIFF images and publish each as one Z slice' ]
       - [ '3d', 'Require 3-D TIFF volumes' ]
 
-vizapp_containers:
-  - docker://hello-world
-
 vizapp_container_runscripts:
   - run_neuroglancer.sh
 

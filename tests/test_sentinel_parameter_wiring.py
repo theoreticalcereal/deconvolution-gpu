@@ -362,6 +362,8 @@ class SentinelParameterWiringTests(unittest.TestCase):
         self.assertFalse((ROOT / "workflow/scripts/convert_tiff_to_precomputed.py").exists())
         self.assertTrue((ROOT / "vizapp/run_neuroglancer.sh").exists())
         self.assertTrue((ROOT / "vizapp/neuroloader.py").exists())
+        self.assertNotIn("vizapp_containers:", astrocyte_text)
+        self.assertNotIn("docker://hello-world", astrocyte_text)
         self.assertIn("vizapp_container_runscripts:", astrocyte_text)
         self.assertIn("- run_neuroglancer.sh", astrocyte_text)
 
