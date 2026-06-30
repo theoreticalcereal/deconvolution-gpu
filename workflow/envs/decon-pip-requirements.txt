@@ -4,5 +4,7 @@ dask-jobqueue
 psfmodels
 psutil
 scipy
-cloud-volume
 neuroglancer
+aicsimageio
+nd2
+readlif

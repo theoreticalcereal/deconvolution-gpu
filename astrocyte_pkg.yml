@@ -55,20 +55,21 @@ workflow_parameters:
     type: files
     required: true
     description: |
-      --input (required). Select the TIFF files to process. Choose files from only one
+      --input (required). Select image files to process. Choose files from only one
       channel at a time. This workflow estimates one PSF from the first selected
-      TIFF and applies it to all selected TIFFs; mixing channels with different
+      image and applies it to all selected images; mixing channels with different
       wavelengths can skew deconvolution results.
     min: 1
-    regex: ".*(\\.tif|\\.tiff|\\.TIF|\\.TIFF)$"
+    regex: ".*(\\.tif|\\.tiff|\\.czi|\\.nd2|\\.lif|\\.h5|\\.hdf5|\\.ome\\.zarr|\\.TIF|\\.TIFF|\\.CZI|\\.ND2|\\.LIF|\\.H5|\\.HDF5|\\.OME\\.ZARR)$"
 
   - id: decon_only
     type: select
     required: false
     default: 'false'
     description: |
-      Skip deskewing and run deconvolution directly from the selected TIFF
-      files. Use this for already deskewed or already stacked 3-D TIFFs.
+      Skip deskewing and run deconvolution directly from the selected images
+      after they are normalized to OME-Zarr. Use this for already deskewed or
+      already stacked 3-D volumes.
     choices:
       - [ 'false', 'Run deskew, then deconvolution' ]
       - [ 'true', 'Skip deskew and run deconvolution only' ]
@@ -79,6 +80,15 @@ workflow_parameters:
     default: './output'
     description: |
       Directory where all final workflow outputs are published.
+
+  - id: output_formats
+    type: string
+    required: false
+    default: 'ome_zarr'
+    description: |
+      Comma-separated final export formats to publish. Keep the default
+      ome_zarr for the native workflow output; use ome_zarr,tiff when a TIFF
+      export is also needed by legacy tools.
 
   - id: dx
     type: real

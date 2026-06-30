@@ -39,35 +39,84 @@ def load_layers_manifest(base_path=PACKAGE_ROOT, base_url=None):
         source = layer.get("source")
         if not name or not source:
             raise NeuroloaderError(f"Each layer must contain name and source in {manifest_path}")
-        source_path = validate_precomputed_source(source, manifest_path.parent, name)
         if base_url:
-            layer["source"] = browser_precomputed_source(source_path, base, base_url)
+            layer["source"] = rewrite_local_zarr_source(source, manifest_path.parent, name, base, base_url)
+        else:
+            validate_ome_zarr_source(source, manifest_path.parent, name)
     return layers
 
 
-def validate_precomputed_source(source, published_dir, layer_name):
-    prefix = "precomputed://file://"
+def rewrite_local_zarr_source(source, published_dir, layer_name, base_path, base_url):
+    source_path = validate_ome_zarr_source(source, published_dir, layer_name)
+    return browser_zarr_source(source_path, pathlib.Path(base_path).resolve(), base_url)
+
+
+def validate_ome_zarr_source(source, published_dir, layer_name):
+    prefix = "zarr://file://"
+    if source.startswith("precomputed://"):
+        raise NeuroloaderError("precomputed sources are no longer supported; expected zarr://file:// OME-Zarr sources")
     if not source.startswith(prefix):
         raise NeuroloaderError(f"Unsupported Neuroglancer source: {source}")
 
-    manifest_path = pathlib.Path(source[len(prefix) :])
-    published_path = pathlib.Path(published_dir) / layer_name
-    path = published_path if (published_path / "info").is_file() else manifest_path
+    manifest_path = zarr_file_source_path(source)
+    published_path = published_ome_zarr_path(published_dir, layer_name)
+    path = published_path if (published_path / ".zattrs").is_file() else manifest_path
     if not path.exists() or not path.is_dir():
-        raise NeuroloaderError(f"Layer source points to a missing precomputed dataset: {path}")
-    if not (path / "info").is_file():
-        raise NeuroloaderError(f"Layer source is missing precomputed info file: {path / 'info'}")
+        raise NeuroloaderError(f"Layer source points to a missing OME-Zarr dataset: {path}")
+    if path.name.endswith(".ome.zarr") is False:
+        raise NeuroloaderError(f"Layer source must point to a .ome.zarr directory: {path}")
+    if not (path / ".zattrs").is_file() or not (path / ".zgroup").is_file():
+        raise NeuroloaderError(f"Layer source is missing OME-Zarr metadata: {path}")
+    if not (path / "0" / ".zarray").is_file():
+        raise NeuroloaderError(f"Layer source is missing OME-Zarr scale 0 array metadata: {path / '0' / '.zarray'}")
+    validate_ome_zarr_metadata(path)
     return path.resolve()
 
 
-def browser_precomputed_source(path, base_path, base_url):
+def published_ome_zarr_path(published_dir, layer_name):
+    neuroglancer_dir = pathlib.Path(published_dir)
+    output_dir = neuroglancer_dir.parent
+    deconvolved_path = output_dir / "deconvolved" / f"{layer_name}.ome.zarr"
+    if (deconvolved_path / ".zattrs").is_file():
+        return deconvolved_path
+    return neuroglancer_dir / f"{layer_name}.ome.zarr"
+
+
+def validate_ome_zarr_metadata(path):
+    try:
+        zattrs = json.loads((path / ".zattrs").read_text())
+        zgroup = json.loads((path / ".zgroup").read_text())
+        zarray = json.loads((path / "0" / ".zarray").read_text())
+    except json.JSONDecodeError as exc:
+        raise NeuroloaderError(f"Layer source contains invalid OME-Zarr JSON metadata: {path}") from exc
+
+    if zgroup.get("zarr_format") != 2 or zarray.get("zarr_format") != 2:
+        raise NeuroloaderError(f"Layer source contains invalid OME-Zarr Zarr v2 metadata: {path}")
+
+    multiscales = zattrs.get("multiscales")
+    if not isinstance(multiscales, list) or not multiscales:
+        raise NeuroloaderError(f"Layer source contains invalid OME-Zarr multiscales metadata: {path}")
+
+    datasets = multiscales[0].get("datasets") if isinstance(multiscales[0], dict) else None
+    if not isinstance(datasets, list) or not datasets or datasets[0].get("path") != "0":
+        raise NeuroloaderError(f"Layer source contains invalid OME-Zarr multiscales metadata: {path}")
+
+
+def zarr_file_source_path(source):
+    parsed = urllib.parse.urlparse(source[len("zarr://") :])
+    if parsed.scheme != "file" or parsed.netloc not in ("", "localhost"):
+        raise NeuroloaderError(f"Unsupported Neuroglancer source: {source}")
+    return pathlib.Path(urllib.parse.unquote(parsed.path))
+
+
+def browser_zarr_source(path, base_path, base_url):
     try:
         relative_path = pathlib.Path(path).resolve().relative_to(base_path)
     except ValueError as exc:
         raise NeuroloaderError(f"Layer source is outside the served VizApp directory: {path}") from exc
 
     quoted_path = urllib.parse.quote(relative_path.as_posix())
-    return f"precomputed://{base_url.rstrip('/')}{URL_PREFIX}/{quoted_path}"
+    return f"zarr://{base_url.rstrip('/')}{URL_PREFIX}/{quoted_path}"
 
 
 def create_viewer(layers, port, base_path=PACKAGE_ROOT):

@@ -69,21 +69,21 @@ def requireSupplied(name, value, context) {
 }
 
 workflow {
+    BUILD_DECON_CONTAINER()
+    decon_container_ch = BUILD_DECON_CONTAINER.out.image
+
     input_patterns = normalizeInputPatterns(params.input, workflow.commandLine)
     if (input_patterns) {
-        log.info "Selected ${input_patterns.size()} input TIFF(s): ${input_patterns.join(', ')}"
+        log.info "Selected ${input_patterns.size()} input image(s): ${input_patterns.join(', ')}"
         input_tiffs_ch = Channel
             .fromList(input_patterns)
             .map { input_pattern -> file(input_pattern, checkIfExists: true) }
             .collect()
-        STAGE_DECON_INPUT(input_tiffs_ch)
+        STAGE_DECON_INPUT(input_tiffs_ch, decon_container_ch)
         selected_input_dir_ch = STAGE_DECON_INPUT.out.decon_input_dir
     } else {
         selected_input_dir_ch = Channel.empty()
     }
-
-    BUILD_DECON_CONTAINER()
-    decon_container_ch = BUILD_DECON_CONTAINER.out.image
 
     if (params.decon_only) {
         if (input_patterns) {

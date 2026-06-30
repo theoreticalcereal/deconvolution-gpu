@@ -9,21 +9,19 @@ For a full light-sheet run:
 
 ```text
 <output_dir>/
-|-- shear/
-|   `-- CH00_000000.tif
 |-- Top_shear/
-|   |-- CH00_000000.tif
-|   |-- note.txt
-|   `-- ...
+|   |-- <sample>.ome.zarr/
+|   `-- note.txt
 |-- estimated_psf.tif
-`-- deconvolved/
-    |-- DB2_CH00_000000.tif
-    `-- ...
+|-- deconvolved/
+|   `-- DB2_<sample>.ome.zarr/
+`-- neuroglancer/
+    `-- layers.json
 ```
 
-For decon-only runs, `shear` and `Top_shear` are not created by the workflow.
-`DB2_*` outputs are published to `deconvolved`, and the merged blind PSF is
-published as `<output_dir>/estimated_psf.tif`.
+For decon-only runs, `Top_shear` is not created by the workflow.
+`DB2_*` OME-Zarr outputs are published to `deconvolved`, and the merged blind
+PSF is published as `<output_dir>/estimated_psf.tif`.
 
 ## Process Work Directories
 
@@ -37,24 +35,37 @@ check:
 .command.log
 ```
 
-The process stdout is especially useful because the Python scripts print volume
-shape, chunk sizes, selected workers, MATLAB chunk progress, and deconvolution
-chunk timing.
+The process stdout is useful because the Python scripts print volume shape,
+chunk sizes, selected workers, MATLAB chunk progress, and deconvolution chunk
+timing.
+
+## Input Staging Checks
+
+Expected staging product:
+
+```text
+input_zarr/<sample>.ome.zarr/
+```
+
+If staging fails, confirm the selected file extension is supported and that the
+runtime includes the optional reader needed for that format. TIFF and existing
+OME-Zarr use the core path. CZI, ND2, LIF, and HDF5 use optional dependencies
+declared in the decon runtime environment.
+
+For existing OME-Zarr inputs, the selected path should be the `.ome.zarr`
+directory itself.
 
 ## Deskew Output Checks
 
 Expected deskew products:
 
 ```text
-shear/CH##_######.tif
-Top_shear/CH##_######.tif
+Top_shear/<sample>.ome.zarr/
 Top_shear/note.txt
 ```
 
-If `shear` exists but `Top_shear` does not, the failure likely happened during
-resize, rotation, permutation, or final TIFF writing.
-
-If neither output exists, check input discovery and MATLAB startup first.
+If staging succeeds but deskew does not write `Top_shear`, check the resolved
+geometry parameters and the input volume shape in `.command.out`.
 
 ## Deconvolution Output Checks
 
@@ -62,48 +73,35 @@ Expected deconvolution products:
 
 ```text
 estimated_psf.tif
-DB2_<input_stem>.tif
+deconvolved/DB2_<sample>.ome.zarr/
 ```
 
-If `estimated_psf.tif` exists but no `DB2_*` files exist, PSF estimation
-completed and the failure likely happened during OTF creation, GPU context
-creation, Dask chunk execution, or TIFF output writing.
+If `estimated_psf.tif` exists but no `DB2_*` OME-Zarr output exists, PSF
+estimation completed and the failure likely happened during OTF creation, GPU
+context creation, Dask chunk execution, or OME-Zarr writing.
 
 If no PSF exists, inspect the blind PSF estimation messages first.
 
 ## Common Errors
 
-### Multiple Channels Selected
+### Mixed Optical Configurations
 
-Select TIFFs from one channel unless you intentionally want one estimated PSF
-applied across multiple wavelengths. The workflow estimates one PSF from the
-first selected TIFF and applies it to all selected TIFFs.
+Select inputs from one channel and optical configuration unless you
+intentionally want one estimated PSF applied across multiple wavelengths. The
+workflow estimates one PSF from the first sorted input volume and applies it to
+all inputs in the same `DECON` call.
 
-### No TIFFs Found During Deskew
+### Unsupported Input Type
 
-The deskew process looks in:
+`STAGE_DECON_INPUT` accepts TIFF, OME-Zarr, CZI, ND2, LIF, and HDF5. Other
+formats must be converted before running the workflow.
 
-```text
-<image_path>/
-```
+### Optional Reader Missing
 
-For legacy layouts, set `image_path` to the parent directory and `cell_name` to
-the folder inside it. Otherwise leave `cell_name` blank and set `image_path` to
-the TIFF directory.
-
-### No Matching Deconvolution TIFFs
-
-The deconvolution wrapper accepts `*.tif` and `*.tiff`. Example names:
-
-```text
-CH0_0.tif
-CH00_000000.tif
-CH1_12_registered_consistent.tiff
-```
-
-Channel/timepoint filtering has been removed. Select only the files you intend
-to process, or point `decon_input_dir` at a directory containing only those
-TIFFs.
+Reader-specific import errors during staging mean the current runtime is
+missing the optional package for the selected format. Check
+`workflow/envs/decon-pip-requirements.txt` and the `BUILD_DECON_CONTAINER`
+output.
 
 ### `dxy` Resolution Fails
 
@@ -126,8 +124,8 @@ You can also increase `matlab_timeout` if chunks are progressing but slow.
 
 The PSF estimator aborts after the first three failed chunks when no chunk has
 successfully produced a PSF. This usually points to MATLAB availability,
-`deconvblind` availability, TIFF compatibility, an all-zero seed PSF, or invalid
-optical parameters.
+`deconvblind` availability, temporary TIFF compatibility, an all-zero seed PSF,
+or invalid optical parameters.
 
 ### GPU Memory Errors
 

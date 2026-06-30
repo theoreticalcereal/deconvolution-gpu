@@ -84,9 +84,10 @@ process STAGE_DECON_INPUT {
 
     input:
     path input_tiffs
+    path decon_runtime
 
     output:
-    path "decon_input", emit: decon_input_dir
+    path "input_zarr", emit: decon_input_dir
 
     script:
     def shell_quote = { value -> "'${value.toString().replace("'", "'\\''")}'" }
@@ -102,6 +103,19 @@ process STAGE_DECON_INPUT {
     : > decon_input/original_filenames.tsv
     ${link_commands}
     ${metadata_commands}
+
+    if [ ! -x "${decon_runtime}/decon_env/bin/python3" ] && [ ! -x "${decon_runtime}/decon_env/bin/python" ]; then
+        echo "ERROR: no supported decon runtime found at ${decon_runtime}" >&2
+        exit 1
+    fi
+    export CONDA_PREFIX="${decon_runtime}/decon_env"
+    export CONDA_DEFAULT_ENV=decon_env
+    export PATH="\${CONDA_PREFIX}/bin:\${PATH}"
+    export LD_LIBRARY_PATH=\${CONDA_PREFIX}/lib:\${LD_LIBRARY_PATH:-}
+
+    python3 ${projectDir}/scripts/normalize_input_to_ome_zarr.py \\
+        --input decon_input \\
+        --output input_zarr
     """
 }
 
@@ -267,13 +281,14 @@ process DECON {
 process CONVERT_TIFFS_TO_NEUROGLANCER {
     tag "neuroglancer"
 
-    publishDir "${params.output_dir}", mode: 'copy', pattern: 'neuroglancer', overwrite: true
+    publishDir "${params.output_dir}", mode: 'copy', pattern: '{deconvolved,neuroglancer}', overwrite: true
 
     input:
     path decon_tiffs
     path decon_runtime
 
     output:
+    path "deconvolved", emit: ome_zarr_output
     path "neuroglancer", emit: neuroglancer_output
 
     script:
@@ -287,9 +302,10 @@ process CONVERT_TIFFS_TO_NEUROGLANCER {
     export PATH="\${CONDA_PREFIX}/bin:\${PATH}"
     export LD_LIBRARY_PATH=\${CONDA_PREFIX}/lib:\${LD_LIBRARY_PATH:-}
 
-    python3 ${projectDir}/scripts/convert_tiff_to_precomputed.py \\
+    python3 ${projectDir}/scripts/convert_tiff_to_ome_zarr.py \\
         --input "\$PWD" \\
-        --output neuroglancer \\
+        --output deconvolved \\
+        --manifest-output neuroglancer \\
         --volume-mode "${params.neuroglancer_data_mode}"
     """
 }

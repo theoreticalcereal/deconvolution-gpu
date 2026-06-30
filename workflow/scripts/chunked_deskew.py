@@ -9,6 +9,7 @@ a time.
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 from concurrent import futures
 import math
 from pathlib import Path
@@ -18,23 +19,38 @@ import time
 import numpy as np
 import tifffile
 
+from ome_zarr_io import (
+    create_ome_zarr_array,
+    discover_image_volumes,
+    image_stem,
+    is_ome_zarr_path,
+    log_progress,
+    open_ome_zarr_array,
+)
+
 
 def _selected_input_dir(image_path: str, cell_name: str | None) -> Path:
     base = Path(image_path)
     return base / cell_name if cell_name else base
 
 
-def _discover_tiffs(input_dir: Path) -> list[Path]:
-    paths = sorted([*input_dir.glob("*.tif"), *input_dir.glob("*.tiff")])
+def _discover_inputs(input_dir: Path) -> list[Path]:
+    paths = discover_image_volumes(input_dir)
     if not paths:
-        raise FileNotFoundError(f"No TIFF files found in {input_dir}")
+        raise FileNotFoundError(f"No TIFF or OME-Zarr volumes found in {input_dir}")
     return paths
 
 
 def _open_volume(path: Path) -> np.ndarray:
+    if is_ome_zarr_path(path):
+        log_progress(f"Opening OME-Zarr input volume: {path}")
+        return open_ome_zarr_array(path, mode="r")
+
     try:
+        log_progress(f"Opening TIFF input volume with memmap: {path}")
         volume = tifffile.memmap(str(path), mode="r")
     except Exception:
+        log_progress(f"TIFF memmap failed; reading full TIFF volume: {path}")
         volume = tifffile.imread(str(path))
     array = np.asarray(volume)
     if array.ndim == 2:
@@ -120,6 +136,7 @@ def _write_top_shear(
     deskew_workers: int,
     deskew_prefetch: int,
 ) -> tuple[int, int, int]:
+    start_time = time.perf_counter()
     z_size, y_size, x_size = (int(v) for v in volume_zyx.shape)
     new_dz = float(dz) * math.cos(math.radians(float(angle)))
     cz = math.floor(z_size / 2) + 1
@@ -140,6 +157,23 @@ def _write_top_shear(
     )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    write_ome_zarr = is_ome_zarr_path(output_path)
+    if write_ome_zarr:
+        log_progress(f"Writing deskew output as OME-Zarr: {output_path}")
+        zarr_output = create_ome_zarr_array(
+            output_path,
+            shape=(x_size, shear_y, scaled_z),
+            chunks=(1, min(256, shear_y), min(256, scaled_z)),
+            dtype=np.dtype("uint16"),
+            layer_name=image_stem(output_path),
+        )
+        writer_context = nullcontext()
+        writer = None
+    else:
+        log_progress(f"Writing deskew output as TIFF: {output_path}")
+        zarr_output = None
+        writer_context = tifffile.TiffWriter(str(output_path), bigtiff=True)
+
     z_positions = np.arange(scaled_z, dtype=np.float64)
     source_z = _resize_source_z(z_positions, z_size, scaled_z)
     z0_all = np.floor(source_z).astype(np.int64)
@@ -192,7 +226,7 @@ def _write_top_shear(
         flush=True,
     )
 
-    with tifffile.TiffWriter(str(output_path), bigtiff=True) as writer:
+    with writer_context as writer:
         pending_pages: set[futures.Future[tuple[int, np.ndarray]]] = set()
         write_buffer: dict[int, np.ndarray] = {}
         next_submit = 0
@@ -215,15 +249,19 @@ def _write_top_shear(
                     )
 
                 while next_write in write_buffer:
-                    writer.write(
-                        write_buffer.pop(next_write),
-                        photometric="minisblack",
-                        compression=None,
-                        contiguous=True,
-                    )
+                    page = write_buffer.pop(next_write)
+                    if zarr_output is not None:
+                        zarr_output[next_write, :, :] = page
+                    else:
+                        writer.write(
+                            page,
+                            photometric="minisblack",
+                            compression=None,
+                            contiguous=True,
+                        )
                     next_write += 1
                     if next_write % 50 == 0 or next_write == x_size:
-                        print(f"  Wrote top-view page {next_write}/{x_size}", flush=True)
+                        log_progress(f"Wrote top-view page {next_write}/{x_size}")
 
                 if next_write >= x_size:
                     break
@@ -250,6 +288,10 @@ def _write_top_shear(
                     x_out, page = future.result()
                     write_buffer[int(x_out)] = page
                     completed += 1
+    log_progress(
+        f"Finished top-view deskew output: {output_path} "
+        f"in {time.perf_counter() - start_time:.2f}s"
+    )
     return output_shape
 
 
@@ -266,6 +308,7 @@ def run_chunked_deskew(
     deskew_workers: int,
     deskew_prefetch: int,
 ) -> None:
+    run_start = time.perf_counter()
     input_dir = _selected_input_dir(image_path, cell_name)
     output_root = Path(output_dir)
     top_shear_dir = output_root / "Top_shear"
@@ -273,13 +316,19 @@ def run_chunked_deskew(
     original_name_map = input_dir / "original_filenames.tsv"
     if original_name_map.exists():
         shutil.copy2(original_name_map, top_shear_dir / "original_filenames.tsv")
+        log_progress(f"Copied original filename map to {top_shear_dir}")
 
-    for path in _discover_tiffs(input_dir):
-        print(f"Processing TIFF with chunked deskew: {path.name}", flush=True)
+    inputs = _discover_inputs(input_dir)
+    log_progress(f"Chunked deskew discovered {len(inputs)} input volume(s) in {input_dir}")
+    for index, path in enumerate(inputs, start=1):
+        volume_start = time.perf_counter()
+        log_progress(f"Processing deskew input {index}/{len(inputs)}: {path.name}")
         volume = _open_volume(path)
+        log_progress(f"Opened {path.name}: shape={volume.shape}, dtype={volume.dtype}")
+        output_name = f"{image_stem(path)}.ome.zarr" if is_ome_zarr_path(path) else f"{image_stem(path)}.tif"
         output_shape = _write_top_shear(
             volume,
-            top_shear_dir / f"{path.stem}.tif",
+            top_shear_dir / output_name,
             dx=float(dx),
             dz=float(dz),
             angle=float(angle),
@@ -292,6 +341,11 @@ def run_chunked_deskew(
             "Chunked top-view deskew output. "
             f"output_yzx={output_shape}; z pixel = x(y) pixel.\n"
         )
+        log_progress(
+            f"Finished deskew input {path.name}: output={output_name}, "
+            f"elapsed={time.perf_counter() - volume_start:.2f}s"
+        )
+    log_progress(f"Chunked deskew complete in {time.perf_counter() - run_start:.2f}s")
 
 
 def main() -> None:

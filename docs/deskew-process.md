@@ -1,133 +1,77 @@
 # Deskew Process
 
-The `DESKEW` process corrects oblique ctASLM acquisition geometry before
-deconvolution. It is implemented by `workflow/scripts/deskew_wrapper.py` and
-`workflow/scripts/deskew.m`.
+`DESKEW` corrects oblique ctASLM acquisition geometry before deconvolution. The
+current Nextflow path uses `workflow/scripts/chunked_deskew.py`, which reads the
+normalized OME-Zarr input created by `STAGE_DECON_INPUT` and writes chunked
+OME-Zarr output.
+
+The older MATLAB wrapper remains in the repository for legacy TIFF workflows,
+but the package workflow no longer depends on TIFF stacks as the deskew
+boundary.
 
 ## Inputs
 
-Astrocyte handles file ingestion for package runs. Manual CLI runs can still
-pass an existing `image_path` directory.
+`DESKEW` receives normalized OME-Zarr volumes from:
 
-The process receives these values from Nextflow:
+```text
+input_zarr/<sample>.ome.zarr/
+```
+
+Astrocyte and Nextflow create that directory before processing. Supported
+file-picker inputs include TIFF, existing OME-Zarr, CZI, ND2, LIF, and HDF5.
+
+The process also receives the deskew geometry:
 
 | Value | Meaning |
 |---|---|
-| `image_path` | Directory containing TIFFs, or a parent directory containing the legacy `cell_name` folder. |
-| `cell_name` | Optional legacy dataset folder name under `image_path`. |
-| `cell_index` | Optional value injected into MATLAB as `CellIndex`. |
 | `dx` | Lateral pixel size in microns. |
 | `dz` | Axial step size in microns. |
 | `angle` | Light-sheet acquisition angle in degrees. |
 | `flip` | Orientation flag used in the shear direction. |
-| `output_dir` | Process-local output directory; Nextflow passes `.`. |
 
-The MATLAB code looks for input TIFFs in:
+Manual legacy runs can still use `image_path` and `cell_name` with TIFF stacks,
+but package runs should use `input` so normalization happens once at the
+workflow boundary.
 
-```text
-<image_path>/
-```
+## Chunkwise Deskew
 
-When `cell_name` is supplied for a legacy folder layout, the MATLAB code looks
-in:
+`chunked_deskew.py` loads each OME-Zarr volume through Dask. The implementation
+keeps the operation chunk-aware so large volumes do not need to be materialized
+as a single dense array before writing.
 
-```text
-<image_path>/<cell_name>/
-```
+For each volume, the deskew transform:
 
-Supported raw input filenames are:
+1. Applies the Y shear implied by `angle`, `dz`, `dx`, and `flip`.
+2. Pads the sheared volume so shifted planes are not clipped.
+3. Computes the top-view scaling from `dz * sin(angle) / dx`.
+4. Rotates into the top-view orientation.
+5. Writes the result as OME-Zarr.
 
-```text
-CH00_000000.tif
-CH00_000000.tiff
-CH00_000000_registered_consistent.tif
-CH00_000000_registered_consistent.tiff
-```
-
-The channel and timepoint scanner expects names matching:
-
-```text
-CH<two-or-more digits>_<six digits>[optional _registered_consistent].tif[f]
-```
-
-## Wrapper Behavior
-
-`deskew_wrapper.py` builds one MATLAB `-batch` command. It injects only the
-optional legacy variables that were actually supplied:
-
-- `CellIndex` is omitted when `cell_index` is blank.
-
-`deskew.m` discovers all channels and timepoints from the TIFF names.
-
-## TIFF Reading
-
-`readtiffstack.m` opens the TIFF with MATLAB's `Tiff` interface. It:
-
-- Validates that the file exists.
-- Reads stack dimensions from the first page.
-- Preserves the numeric type from TIFF metadata.
-- Fails if any page has a different size from the first page.
-
-The stack is loaded as a MATLAB array with shape:
-
-```text
-rows x columns x z-slices
-```
-
-## Shear Correction
-
-For each discovered channel/timepoint, `deskew.m` computes:
-
-```text
-newdz = dz * cosd(angle)
-cz = floor(zsize / 2) + 1
-yoffset = round(flip * (z - cz) * (newdz / dx))
-```
-
-Each Z plane is shifted along Y by `yoffset`. The output shear volume is padded
-in Y by the largest possible offset so shifted planes fit without clipping.
-
-After shearing, adjacent slices are averaged:
-
-```text
-ShearImage(:,:,z) = (ShearImage(:,:,z) + ShearImage(:,:,z+1)) / 2
-```
-
-This reduces striping/ringing in the top-view output.
-
-## Top-View Rotation
-
-The process then converts the sheared volume into the final top-view stack:
-
-1. Compute `scale_x = dz * sind(angle) / dx`.
-2. Resize the sheared volume along the third dimension with `imresize3`.
-3. Rotate the scaled 3-D volume by `-flip * angle` around the Z axis with
-   `imrotate3`.
-4. Convert back to `uint16`.
-5. Permute dimensions with `permute(rotTop_ShearImage, [1 3 2])`.
-
-The result is written to `Top_shear`.
+The legacy MATLAB implementation uses the same geometry and remains useful for
+comparison or manual TIFF-only runs.
 
 ## Outputs
 
-For each input `CH00_000000.tif`, the deskew process writes:
+For each normalized input volume, `DESKEW` publishes:
 
 ```text
-shear/CH00_000000.tif
-Top_shear/CH00_000000.tif
-Top_shear/note.txt
+<output_dir>/Top_shear/<sample>.ome.zarr/
+<output_dir>/Top_shear/note.txt
 ```
 
-`writetiffstack.m` writes one TIFF page per Z slice. If the estimated output
-size is larger than 4 GiB, it uses BigTIFF mode automatically.
+The `note.txt` file records the deskew geometry used for the run. Native
+deconvolution consumes the OME-Zarr output directly.
 
 ## Common Failure Points
 
-`No TIFF files found` means the resolved input directory exists but contains no
-`.tif` or `.tiff` files.
+`No normalized OME-Zarr inputs found` means `STAGE_DECON_INPUT` did not create
+an input volume or the deskew process was pointed at the wrong directory.
 
-`No CH##_###### TIFF files found` means files exist, but they do not match the
-expected raw naming pattern.
+Reader import errors during staging usually mean the optional reader for that
+format is missing from the runtime environment. CZI, ND2, LIF, and HDF5 support
+uses optional Python dependencies in addition to the core TIFF and OME-Zarr
+path.
 
-`Missing expected file` means channel/timepoint discovery or user filters asked
-for a specific stack that was not present.
+Geometry errors usually come from missing or invalid `dx`, `dz`, `angle`, or
+`flip` values. Check the process `.command.out` for the resolved parameters and
+input volume shape.

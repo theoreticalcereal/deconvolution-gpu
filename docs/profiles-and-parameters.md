@@ -28,7 +28,8 @@ bootstrap, creates `decon_runtime/decon_env` from
 `workflow/envs/decon-pip-requirements.txt`, then passes the prepared runtime
 path to `DECON`.
 
-`DESKEW` still runs on the host with the MATLAB module.
+The legacy MATLAB deskew and blind PSF code still use the host MATLAB module.
+The current package deskew path is handled by the Python chunked deskew script.
 
 ## Light-Sheet Profile
 
@@ -53,9 +54,10 @@ through `DESKEW`.
 psf_mode = single
 ```
 
-Use `--decon_only true` and `--decon_input_dir` when wide-frame input is already
-a 3-D TIFF stack directory. Also provide dataset-specific optical parameters
-such as `camera_pixel_size`, `magnification`, `dxy`, `dz`, `wavelength`,
+Use `--decon_only true` when wide-frame input is already deskewed or already a
+3-D stack. The selected files are still normalized to OME-Zarr before
+deconvolution. Also provide dataset-specific optical parameters such as
+`camera_pixel_size`, `magnification`, `dxy`, `dz`, `wavelength`,
 `detection_na`, `ni`, and `ns`.
 
 ## Light-Sheet Decon Profile
@@ -118,15 +120,16 @@ The `DECON` process prepends the prepared conda environment to `PATH` and
 
 | Parameter | Purpose |
 |---|---|
-| `input` | TIFF files selected in Astrocyte. Select one channel at a time. |
+| `input` | Astrocyte/file-picker inputs. Supports TIFF, OME-Zarr, CZI, ND2, LIF, and HDF5. |
 | `image_path` | Backward-compatible raw input parent directory for manual CLI runs without `input`. |
 | `cell_name` | Optional legacy dataset folder under `image_path` for manual deskew runs. Ignored when `input` files are selected. |
 | `output_dir` | Published output root. |
 | `decon_only` | Skip `DESKEW` and run `DECON` directly. |
-| `decon_input_dir` | Backward-compatible directory of already deskewed or stacked TIFFs. |
+| `decon_input_dir` | Backward-compatible directory of already deskewed or stacked TIFF/OME-Zarr volumes for manual runs. |
+| `output_formats` | Requested leaf exports. Default is native `ome_zarr`. |
 
-Selected TIFFs should come from the same channel and optical configuration. The
-workflow estimates one PSF and applies it to the selected files, so mixed
+Selected inputs should come from the same channel and optical configuration.
+The workflow estimates one PSF and applies it to the selected volumes, so mixed
 wavelengths can skew deconvolution results.
 
 ### Deskew Geometry

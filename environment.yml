@@ -83,6 +83,7 @@ dependencies:
   - libzopfli=1.0.3=h9c3ff4c_0
   - lz4-c=1.10.0=h5888daf_1
   - ncurses=6.6=hdb14827_0
+  - numcodecs
   - numpy=2.2.6=py310hefbff90_0
   - openjdk=17.0.18=ha668962_0
   - openjpeg=2.5.4=h55fea9a_0
@@ -118,9 +119,10 @@ dependencies:
   - xorg-libxrender=0.9.12=hb9d3cd8_0
   - xorg-libxt=1.3.1=hb9d3cd8_0
   - xorg-libxtst=1.2.5=hb9d3cd8_3
+  - zarr
   - zfp=1.0.1=h909a3a2_5
   - zlib-ng=2.2.5=hde8ca8f_1
   - zstd=1.5.7=hb78ec9c_6
   - pip:
-    - cloud-volume
+    - neuroglancer
     - psfmodels

@@ -1,110 +1,85 @@
 # Workflow Overview
 
-The pipeline is a Nextflow DSL2 workflow with these named processes:
+The pipeline is a Nextflow DSL2 workflow. The control path is defined in
+`workflow/main.nf`; process bodies live in `workflow/modules.nf`.
 
-1. `STAGE_DECON_INPUT`
-2. `DESKEW`
-3. `BUILD_DECON_CONTAINER`
+## Process Order
+
+For file-picker runs, the workflow runs:
+
+1. `BUILD_DECON_CONTAINER`
+2. `STAGE_DECON_INPUT`
+3. `DESKEW` unless `decon_only = true`
 4. `DECON`
+5. `CONVERT_TIFFS_TO_NEUROGLANCER`
 
-The control path is defined in `workflow/main.nf`.
+`BUILD_DECON_CONTAINER` prepares the conda runtime used by normalization,
+deconvolution, and OME-Zarr/Neuroglancer conversion.
+
+## Input Normalization Boundary
+
+`STAGE_DECON_INPUT` links the selected inputs into a process-local
+`decon_input/` directory and writes an `original_filenames.tsv` map. It then
+runs `normalize_input_to_ome_zarr.py`, producing:
+
+```text
+input_zarr/<sample>.ome.zarr/
+input_zarr/original_filenames.tsv
+```
+
+Supported file-picker inputs include TIFF, OME-Zarr, CZI, ND2, LIF, and HDF5.
+Existing OME-Zarr inputs are copied into the normalized input directory.
+
+Manual CLI runs without `input` still support `image_path` and
+`decon_input_dir`. Those paths should already contain compatible TIFF or
+OME-Zarr volumes.
 
 ## Full Light-Sheet Path
 
-When `params.decon_only` is false, the workflow runs:
+When `decon_only = false`, the workflow runs:
 
-1. `DESKEW(...)`
-2. `DECON(DESKEW.out.deskewed_path, ...)`
+```text
+STAGE_DECON_INPUT -> DESKEW -> DECON -> CONVERT_TIFFS_TO_NEUROGLANCER
+```
 
-When Astrocyte file-picker inputs are present, `STAGE_DECON_INPUT` first links
-the selected TIFFs into a `decon_input/` directory. `DESKEW` reads that staged
-directory directly, with `cell_name` ignored for the staged-file path.
-
-The deskew process publishes two directories:
-
-- `shear`: intermediate sheared volumes.
-- `Top_shear`: final deskewed top-view stacks.
-
-The `DECON` process receives the `Top_shear` path emitted by `DESKEW`, filters
-the `CH*.tif` files inside it, estimates a blind PSF from the first selected
-TIFF, and deconvolves every selected TIFF.
+`DESKEW` reads normalized OME-Zarr volumes and writes deskewed volumes in
+`Top_shear/`. `DECON` receives `Top_shear/`, estimates the blind PSF from the
+first volume, and deconvolves each selected volume.
 
 ## Decon-Only Path
 
-When `params.decon_only` is true, the workflow skips `DESKEW` and runs:
+When `decon_only = true`, the workflow skips `DESKEW`:
 
 ```text
-STAGE_DECON_INPUT(input files)
-DECON(decon_input, ...)
+STAGE_DECON_INPUT -> DECON -> CONVERT_TIFFS_TO_NEUROGLANCER
 ```
 
-Use this mode for:
-
-- Already deskewed light-sheet stacks.
-- Wide-frame 3-D TIFF stacks.
-- Any data that already matches the deconvolution input naming pattern.
-
-When Astrocyte file-picker inputs are present, `STAGE_DECON_INPUT` links those
-TIFFs into a `decon_input/` directory and passes that directory to `DECON`.
-Manual CLI runs without `input` still support the backward-compatible directory
-parameters `image_path` and `decon_input_dir`.
-
-## Process Boundaries
-
-`DESKEW` is CPU/MATLAB work. It expects `matlab` on `PATH` from the
-Astrocyte-provided workflow environment, runs `deskew_wrapper.py`, and calls
-`deskew.m` through `matlab -batch`.
-
-`BUILD_DECON_CONTAINER` prepares the runtime used by `DECON`. It expects conda
-to already be available from the Astrocyte-provided workflow environment,
-installs a local conda/libmamba bootstrap, creates `decon_runtime/decon_env`
-from `workflow/envs/decon-conda.txt`, then installs Python dependencies from
-`workflow/envs/decon-pip-requirements.txt`.
-
-`DECON` is GPU work. It activates the prepared conda runtime, checks the GPU with
-`nvidia-smi`, estimates the PSF, and runs CUDA Richardson-Lucy deconvolution.
-
-## Data Flow
-
-```text
-selected or raw TIFF folder
-    |
-    | full light-sheet mode
-    v
-STAGE_DECON_INPUT (Astrocyte file-picker runs only)
-    |
-    v
-DESKEW
-    |-- shear/
-    `-- Top_shear/
-            |
-            v
-          DECON
-            |-- estimated_psf.tif
-            `-- DB2_*.tif
-
-selected or already stacked TIFF folder
-    |
-    | decon-only mode
-    v
-STAGE_DECON_INPUT (Astrocyte file-picker runs only)
-    |
-    v
-DECON
-    |-- estimated_psf.tif
-    `-- DB2_*.tif
-```
+Use this mode for already deskewed light-sheet data, wide-frame 3-D stacks, or
+existing OME-Zarr volumes.
 
 ## Publishing Behavior
 
-Nextflow runs each process in its own work directory. `publishDir` copies
-selected outputs into the configured `output_dir`.
+Nextflow runs each process in an isolated work directory. `publishDir` copies
+stable products into `output_dir`.
 
-`DESKEW` publishes `shear` and `Top_shear` into `output_dir`.
+`DESKEW` publishes:
 
-`DECON` publishes files matching `DB2_*` into `output_dir/deconvolved` and
-publishes the merged blind PSF as `output_dir/estimated_psf.tif`.
+```text
+<output_dir>/Top_shear/
+```
 
-The PSF file may also be written next to the deconvolution input directory when
-that location is writable, but the published copy in `output_dir` is the stable
-workflow result.
+`DECON` publishes:
+
+```text
+<output_dir>/estimated_psf.tif
+<output_dir>/deconvolved/DB2_<sample>.ome.zarr/
+```
+
+`CONVERT_TIFFS_TO_NEUROGLANCER` publishes:
+
+```text
+<output_dir>/neuroglancer/layers.json
+```
+
+The Neuroglancer manifest points at OME-Zarr data. If `DECON` emitted native
+OME-Zarr, no TIFF reconversion is needed.

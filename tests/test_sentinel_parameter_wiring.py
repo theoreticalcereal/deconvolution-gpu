@@ -3,6 +3,7 @@ import sys
 import tempfile
 import types
 import unittest
+import yaml
 from importlib import util
 from pathlib import Path
 from unittest import mock
@@ -107,6 +108,16 @@ class SentinelParameterWiringTests(unittest.TestCase):
             with self.subTest(parameter_id=parameter_id):
                 self.assertRegex(text, rf"(?m)^\s*{parameter_id}\s*=\s*-1\b")
 
+    def test_dataset_params_files_only_use_declared_workflow_parameters(self):
+        astrocyte_text = (ROOT / "astrocyte_pkg.yml").read_text()
+        parameter_ids = set(re.findall(r"(?m)^  - id: ([A-Za-z0-9_]+)$", astrocyte_text))
+
+        for params_path in ROOT.glob("*.params.yml"):
+            with self.subTest(params_path=params_path.name):
+                params = yaml.safe_load(params_path.read_text()) or {}
+                unknown_keys = sorted(set(params) - parameter_ids)
+                self.assertEqual(unknown_keys, [])
+
     def test_main_workflow_normalizes_sentinel_values_before_deskew(self):
         text = (ROOT / "workflow/main.nf").read_text()
         self.assertIn("def isSupplied(value)", text)
@@ -166,8 +177,9 @@ class SentinelParameterWiringTests(unittest.TestCase):
 
     def test_decon_processes_discovered_tiffs_without_channel_timepoint_names(self):
         text = (ROOT / "workflow/scripts/decon_wrapper.py").read_text()
-        self.assertIn('glob(str(image_dir / "*.tif"))', text)
-        self.assertIn('glob(str(image_dir / "*.tiff"))', text)
+        self.assertIn("discover_image_volumes(image_dir)", text)
+        self.assertIn("deconvolve_tiff(", text)
+        self.assertIn("deconvolve_ome_zarr(", text)
         self.assertNotIn("No CH##_######", text)
 
     def test_deskew_preserves_original_input_filename_metadata_for_decon(self):
@@ -178,13 +190,24 @@ class SentinelParameterWiringTests(unittest.TestCase):
         self.assertIn("original_filenames.tsv", chunked_deskew_text)
         self.assertIn("shutil.copy2", chunked_deskew_text)
 
+    def test_selected_inputs_are_normalized_to_ome_zarr_before_processing(self):
+        main_text = (ROOT / "workflow/main.nf").read_text()
+        modules_text = (ROOT / "workflow/modules.nf").read_text()
+
+        self.assertIn("STAGE_DECON_INPUT(input_tiffs_ch, decon_container_ch)", main_text)
+        self.assertIn('path "input_zarr", emit: decon_input_dir', modules_text)
+        self.assertIn("normalize_input_to_ome_zarr.py", modules_text)
+        self.assertIn("--output input_zarr", modules_text)
+
     def test_decon_names_outputs_from_original_filename_metadata(self):
         text = (ROOT / "workflow/scripts/decon_wrapper.py").read_text()
 
         self.assertIn("def _load_original_name_map", text)
         self.assertIn("def _decon_output_name", text)
+        self.assertIn("def _decon_ome_zarr_output_name", text)
         self.assertIn("original_filenames.tsv", text)
-        self.assertIn('out_name = _decon_output_name(tiff_path, original_name_map)', text)
+        self.assertIn("out_name = _decon_output_name(image_path, original_name_map)", text)
+        self.assertIn("out_name = _decon_ome_zarr_output_name(image_path, original_name_map)", text)
 
         decon_wrapper = load_decon_wrapper_with_stubs()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -202,6 +225,10 @@ class SentinelParameterWiringTests(unittest.TestCase):
         self.assertEqual(
             decon_wrapper._decon_output_name(Path("CH00_000001.tif"), original_name_map),
             "DB2_CH00_000001.tif",
+        )
+        self.assertEqual(
+            decon_wrapper._decon_ome_zarr_output_name(Path("CH00_000001.ome.zarr"), original_name_map),
+            "DB2_CH00_000001.ome.zarr",
         )
 
     def test_deskew_handles_single_page_tiffs(self):
@@ -280,10 +307,29 @@ class SentinelParameterWiringTests(unittest.TestCase):
         conda_text = (ROOT / "workflow/envs/decon-conda.txt").read_text()
         pip_text = (ROOT / "workflow/envs/decon-pip-requirements.txt").read_text()
 
-        self.assertRegex(environment_text, r"(?m)^\s*-\s+cloud-volume\b")
+        self.assertNotRegex(environment_text, r"(?m)^\s*-\s+cloud-volume\b")
         self.assertNotRegex(conda_text, r"(?m)^cloud-volume\b")
-        self.assertRegex(pip_text, r"(?m)^cloud-volume\b")
+        self.assertNotRegex(pip_text, r"(?m)^cloud-volume\b")
+        for dependency in ("numpy", "tifffile", "zarr", "numcodecs"):
+            self.assertRegex(conda_text, rf"(?m)^{dependency}\b")
+            self.assertRegex(environment_text, rf"(?m)^\s*-\s+{dependency}\b")
+        self.assertRegex(environment_text, r"(?m)^\s*-\s+neuroglancer\b")
         self.assertRegex(pip_text, r"(?m)^neuroglancer\b")
+
+    def test_dynamic_input_formats_are_declared_and_normalized_to_ome_zarr(self):
+        astrocyte_text = (ROOT / "astrocyte_pkg.yml").read_text()
+        normalizer_text = (ROOT / "workflow/scripts/normalize_input_to_ome_zarr.py").read_text()
+        conda_text = (ROOT / "workflow/envs/decon-conda.txt").read_text()
+        pip_text = (ROOT / "workflow/envs/decon-pip-requirements.txt").read_text()
+
+        block = parameter_block(astrocyte_text, "input")
+        for suffix in ("tif", "tiff", "czi", "nd2", "lif", "h5", "hdf5", "ome\\\\.zarr"):
+            self.assertIn(suffix, block)
+        for loader in ("load_tiff_volume", "load_czi_volume", "load_nd2_volume", "load_lif_volume", "load_hdf5_volume"):
+            self.assertIn(loader, normalizer_text)
+        self.assertRegex(conda_text, r"(?m)^h5py\b")
+        for dependency in ("aicsimageio", "nd2", "readlif"):
+            self.assertRegex(pip_text, rf"(?m)^{dependency}\b")
 
     def test_nextflow_wires_neuroglancer_conversion_after_decon(self):
         main_text = (ROOT / "workflow/main.nf").read_text()
@@ -300,10 +346,20 @@ class SentinelParameterWiringTests(unittest.TestCase):
             convert_index = main_text.index("CONVERT_TIFFS_TO_NEUROGLANCER(", decon_index)
             self.assertGreater(convert_index, decon_index)
 
+    def test_neuroglancer_conversion_publishes_zarr_data_under_deconvolved_contract(self):
+        modules_text = (ROOT / "workflow/modules.nf").read_text()
+
+        self.assertIn('publishDir "${params.output_dir}", mode: \'copy\', pattern: \'{deconvolved,neuroglancer}\'', modules_text)
+        self.assertIn('path "deconvolved", emit: ome_zarr_output', modules_text)
+        self.assertIn('path "neuroglancer", emit: neuroglancer_output', modules_text)
+        self.assertIn("--output deconvolved", modules_text)
+        self.assertIn("--manifest-output neuroglancer", modules_text)
+
     def test_neuroglancer_vizapp_files_are_packaged(self):
         astrocyte_text = (ROOT / "astrocyte_pkg.yml").read_text()
 
-        self.assertTrue((ROOT / "workflow/scripts/convert_tiff_to_precomputed.py").exists())
+        self.assertTrue((ROOT / "workflow/scripts/convert_tiff_to_ome_zarr.py").exists())
+        self.assertFalse((ROOT / "workflow/scripts/convert_tiff_to_precomputed.py").exists())
         self.assertTrue((ROOT / "vizapp/run_neuroglancer.sh").exists())
         self.assertTrue((ROOT / "vizapp/neuroloader.py").exists())
         self.assertIn("vizapp_container_runscripts:", astrocyte_text)
@@ -321,7 +377,18 @@ class SentinelParameterWiringTests(unittest.TestCase):
         self.assertIn("[ '2d'", block)
         self.assertIn("[ '3d'", block)
         self.assertRegex(config_text, r"(?m)^\s*neuroglancer_data_mode\s*=\s*'auto'")
+        self.assertIn("convert_tiff_to_ome_zarr.py", modules_text)
         self.assertIn('--volume-mode "${params.neuroglancer_data_mode}"', modules_text)
+
+    def test_output_formats_defaults_to_native_ome_zarr(self):
+        astrocyte_text = (ROOT / "astrocyte_pkg.yml").read_text()
+        config_text = (ROOT / "workflow/configs/nextflow.config").read_text()
+
+        block = parameter_block(astrocyte_text, "output_formats")
+        self.assertIn("type: string", block)
+        self.assertIn("default: 'ome_zarr'", block)
+        self.assertIn("ome_zarr,tiff", block)
+        self.assertRegex(config_text, r"(?m)^\s*output_formats\s*=\s*'ome_zarr'")
 
     def test_decon_uses_conda_runtime_without_container_or_sif(self):
         text = (ROOT / "workflow/modules.nf").read_text()

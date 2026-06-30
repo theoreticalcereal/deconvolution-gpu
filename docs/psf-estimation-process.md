@@ -12,17 +12,20 @@ The implementation is split across:
 
 ## Input Selection
 
-`decon_wrapper.py` sorts the selected deconvolution input TIFFs first. The
-first selected TIFF is used for blind PSF estimation.
+`decon_wrapper.py` sorts the selected deconvolution input volumes first. The
+first sorted volume is used for blind PSF estimation.
 
-Deconvolution input can be any TIFF stack. Channel/timepoint filtering is not
-performed by the wrapper; select only the files intended for one optical
-configuration.
+Package runs normally pass OME-Zarr volumes created by `STAGE_DECON_INPUT` or
+`DESKEW`. Compatibility runs can still pass TIFF stacks directly. Channel and
+timepoint filtering is not performed by the wrapper, so select only inputs
+intended for one optical configuration.
+
+Example normalized names:
 
 ```text
-CH0_0
-CH1_0
-CH0_0_registered_consistent
+CH00_000000.ome.zarr
+sample_a.ome.zarr
+DB_input.ome.zarr
 ```
 
 ## Lateral Pixel Size Resolution
@@ -89,8 +92,8 @@ and uses that window for chunked blind estimation.
 
 ## XY Tiling
 
-The first TIFF is memory-mapped where possible. It is tiled into XY chunks with
-full Z from the selected Z window.
+The first selected volume is opened as a Dask-backed image when possible. It is
+tiled into XY chunks with full Z from the selected Z window.
 
 Positive `chunk_xy` is used directly. A non-positive value triggers
 VRAM-aware sizing through `resolve_chunk_xy`.
@@ -101,15 +104,22 @@ reflect padding.
 
 ## MATLAB `deconvblind`
 
-Each tile is written to a temporary TIFF and processed by MATLAB:
+MATLAB still operates on temporary TIFF chunks. For each tile, the Python code:
 
-1. Read chunk with `readtiffstack`.
-2. Read seed PSF with `readtiffstack`.
-3. Normalize the seed.
-4. Optionally pad Z symmetrically by `pad_z`.
-5. Run `[~, psf_est] = deconvblind(chunk, psf_seed, blind_iters)`.
-6. Normalize the estimated PSF.
-7. Write the tile PSF with `writetiffstack`.
+1. Writes the chunk to a temporary TIFF.
+2. Writes the seed PSF to a temporary TIFF.
+3. Calls MATLAB `deconvblind`.
+4. Reads the estimated tile PSF back from TIFF.
+
+The MATLAB side:
+
+1. Reads the chunk with `readtiffstack`.
+2. Reads the seed PSF with `readtiffstack`.
+3. Normalizes the seed.
+4. Optionally pads Z symmetrically by `pad_z`.
+5. Runs `[~, psf_est] = deconvblind(chunk, psf_seed, blind_iters)`.
+6. Normalizes the estimated PSF.
+7. Writes the tile PSF with `writetiffstack`.
 
 `matlab_threads` is clamped to one or two threads per MATLAB process.
 `matlab_workers` controls concurrent MATLAB calls and is capped by the resolved
@@ -143,22 +153,20 @@ estimated_psf_<cache-key>.tif
 The cache root is resolved in this order:
 
 1. Explicit `--cache_dir`.
-2. `.psf_cache` next to the input TIFF.
+2. `.psf_cache` next to the input volume when possible.
 3. `.psf_cache` in the process working directory.
 
-The cache key includes the input file path, size, modification time, seed
-content hash, iteration count, chunking, padding, script path, merge mode,
-SNR cap, and Z window. Use `--no_psf_cache` to force re-estimation.
+The cache key includes the input path, size, modification time, seed content
+hash, iteration count, chunking, padding, script path, merge mode, SNR cap, and
+Z window. Use `--no_psf_cache` to force re-estimation.
 
-The active PSF is also saved as:
+The active PSF is saved as:
 
 ```text
-<decon input directory>/estimated_psf.tif
+estimated_psf.tif
 ```
 
-If that directory is not writable, the wrapper writes `estimated_psf.tif` in
-the current process directory instead. In both cases, Nextflow publishes the
-process-local copy to:
+Nextflow publishes the process-local copy to:
 
 ```text
 <output_dir>/estimated_psf.tif

@@ -7,7 +7,7 @@
 #   recovered per-chunk blind PSFs with SNR weighting and save estimated_psf.tif.
 #
 # Deconvolution:
-#   pycudadecon (TemporaryOTF + RLContext) processes each TIFF as full-Z
+#   pycudadecon (TemporaryOTF + RLContext) processes each volume as full-Z
 #   XY chunks using map_overlap.  The requested chunk_xy is treated as the
 #   core tile size; <=0 auto-sizes from available VRAM.
 
@@ -16,9 +16,9 @@ from __future__ import annotations
 import argparse
 import math
 import re
+import sys
 import tempfile
 import time
-from glob import glob
 from pathlib import Path
 
 import dask.array as da
@@ -37,6 +37,26 @@ from psf_estimation import (
     resolve_chunk_xy,
 )
 from psf_modes import generate_psf_seed
+
+try:
+    from ome_zarr_io import (
+        discover_image_volumes,
+        image_stem,
+        is_ome_zarr_path,
+        log_progress,
+        open_ome_zarr_array,
+        write_ome_zarr_array,
+    )
+except ModuleNotFoundError:
+    sys.path.append(str(Path(__file__).resolve().parent))
+    from ome_zarr_io import (
+        discover_image_volumes,
+        image_stem,
+        is_ome_zarr_path,
+        log_progress,
+        open_ome_zarr_array,
+        write_ome_zarr_array,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +105,11 @@ def _load_original_name_map(image_dir: Path) -> dict[str, str]:
 def _decon_output_name(tiff_path: Path, original_name_map: dict[str, str]) -> str:
     original_name = original_name_map.get(tiff_path.name, tiff_path.name)
     return f"DB2_{_tiff_stem(original_name)}.tif"
+
+
+def _decon_ome_zarr_output_name(image_path: Path, original_name_map: dict[str, str]) -> str:
+    original_name = original_name_map.get(image_path.name, image_path.name)
+    return f"DB2_{image_stem(original_name)}.ome.zarr"
 
 
 def _write_tiff_near_input_or_cwd(path: Path, data: np.ndarray) -> Path:
@@ -256,8 +281,9 @@ def _auto_decon_max_xy(
     return min(max_xy, 1024, image_max_xy)
 
 
-def deconvolve_tiff(
-    image_path: Path,
+def deconvolve_volume(
+    volume,
+    image_name: str,
     psf: np.ndarray,
     n_iters: int,
     dz: float,
@@ -271,13 +297,12 @@ def deconvolve_tiff(
     overlap_xy: int = 0,
 ) -> np.ndarray:
     """
-    Deconvolve a single TIFF using the supplied PSF.
+    Deconvolve a single 3-D volume using the supplied PSF.
 
     Chunks are full-Z XY tiles with PSF-dependent XY overlap so tile boundaries
     are invisible in the merged output.  Z is never split.  `chunk_xy` is the
     core tile size; <=0 chooses a VRAM-aware size.
     """
-    volume = open_tiff_memmap(image_path)
     if volume.ndim != 3:
         raise ValueError(f"Expected 3-D volume, got shape {volume.shape}")
 
@@ -307,20 +332,21 @@ def deconvolve_tiff(
     )
     total_chunks = int(np.prod(lazy.numblocks))
 
-    print(f"  Deconvolving {image_path.name}  shape={original_shape}", flush=True)
-    print(
+    log_progress(f"Deconvolving {image_name}: shape={original_shape}, dtype={volume.dtype}")
+    log_progress(
         f"  Deconvolution chunks: total={total_chunks}, "
         f"core_chunk_shape=(z={nz}, y={core_chunk_xy}, x={core_chunk_xy}), "
         f"psf_overlap_xy={overlap_xy}, image_xy=({ny}, {nx}), "
-        f"iterations_per_chunk={n_iters}, workers={decon_workers}",
-        flush=True,
+        f"iterations_per_chunk={n_iters}, workers={decon_workers}"
     )
 
     temp_psf = tempfile.NamedTemporaryFile(suffix=".tif", delete=False)
     psf_path = Path(temp_psf.name)
     temp_psf.close()
     try:
+        log_progress(f"Writing temporary PSF for OTF creation: {psf_path}")
         imwrite(str(psf_path), psf.astype(np.float32, copy=False))
+        log_progress("Creating temporary OTF for CUDA deconvolution")
         with TemporaryOTF(
             str(psf_path),
             dzpsf=dz,
@@ -341,18 +367,88 @@ def deconvolve_tiff(
                 total_chunks=total_chunks,
             )
             scheduler = "threads" if decon_workers > 1 else "single-threaded"
+            log_progress(
+                f"Computing deconvolution graph for {image_name}: "
+                f"scheduler={scheduler}, workers={decon_workers}"
+            )
             output = processed.compute(scheduler=scheduler, num_workers=decon_workers)
     finally:
         psf_path.unlink(missing_ok=True)
+        log_progress(f"Removed temporary PSF: {psf_path}")
 
     output = _match_input_intensity_range(output, volume)
-    print(
+    log_progress(
         f"  Matched deconvolution intensity range to input: "
-        f"min={int(output.min())}, max={int(output.max())}",
-        flush=True,
+        f"min={int(output.min())}, max={int(output.max())}"
     )
 
     return output
+
+
+def deconvolve_tiff(
+    image_path: Path,
+    psf: np.ndarray,
+    n_iters: int,
+    dz: float,
+    dxy: float,
+    wavelength: float,
+    na: float,
+    ni: float,
+    chunk_xy: int = 0,
+    vram_gb: float | None = None,
+    decon_workers: int = 1,
+    overlap_xy: int = 0,
+) -> np.ndarray:
+    log_progress(f"Opening TIFF for deconvolution: {image_path}")
+    volume = open_tiff_memmap(image_path)
+    return deconvolve_volume(
+        volume,
+        image_path.name,
+        psf,
+        n_iters,
+        dz,
+        dxy,
+        wavelength,
+        na,
+        ni,
+        chunk_xy=chunk_xy,
+        vram_gb=vram_gb,
+        decon_workers=decon_workers,
+        overlap_xy=overlap_xy,
+    )
+
+
+def deconvolve_ome_zarr(
+    image_path: Path,
+    psf: np.ndarray,
+    n_iters: int,
+    dz: float,
+    dxy: float,
+    wavelength: float,
+    na: float,
+    ni: float,
+    chunk_xy: int = 0,
+    vram_gb: float | None = None,
+    decon_workers: int = 1,
+    overlap_xy: int = 0,
+) -> np.ndarray:
+    log_progress(f"Opening OME-Zarr for deconvolution: {image_path}")
+    volume = open_ome_zarr_array(image_path, mode="r")
+    return deconvolve_volume(
+        volume,
+        image_path.name,
+        psf,
+        n_iters,
+        dz,
+        dxy,
+        wavelength,
+        na,
+        ni,
+        chunk_xy=chunk_xy,
+        vram_gb=vram_gb,
+        decon_workers=decon_workers,
+        overlap_xy=overlap_xy,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -360,13 +456,14 @@ def deconvolve_tiff(
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    run_start = time.perf_counter()
     parser = argparse.ArgumentParser(
         description="Dask-orchestrated GPU deconvolution with blind PSF estimation."
     )
 
     # Required options
     parser.add_argument("--image_path", required=True,
-                        help="Directory containing deskewed CH*.tif files.")
+                        help="Directory containing normalized OME-Zarr or TIFF image volumes.")
 
     # Blind estimation options
     parser.add_argument("--blind_iters", type=int, default=10,
@@ -465,25 +562,25 @@ def main() -> None:
     args = parser.parse_args()
 
     image_dir = Path(args.image_path)
+    log_progress(f"DECON starting: image_path={image_dir}")
 
-    # Collect all TIFFs, sorted so index 0 is deterministic. File selection is
-    # handled by the workflow before this wrapper runs.
-    tiff_list = sorted(
-        glob(str(image_dir / "*.tif")) +
-        glob(str(image_dir / "*.tiff"))
-    )
-    if not tiff_list:
-        print(f"Error: no TIFF files found in {image_dir}")
+    # Collect all image volumes, sorted so index 0 is deterministic. File
+    # selection is handled by the workflow before this wrapper runs.
+    image_inputs = discover_image_volumes(image_dir)
+    if not image_inputs:
+        print(f"Error: no TIFF or OME-Zarr image volumes found in {image_dir}")
         raise SystemExit(1)
 
     original_name_map = _load_original_name_map(image_dir)
-    print(f"Found {len(tiff_list)} selected TIFF(s) to process.", flush=True)
-    selected_channels = _detected_channels(tiff_list)
+    log_progress(f"Found {len(image_inputs)} selected image volume(s) to process")
+    for index, image_input in enumerate(image_inputs, start=1):
+        log_progress(f"  Input {index}/{len(image_inputs)}: {image_input.name}")
+    selected_channels = _detected_channels([str(path) for path in image_inputs if not is_ome_zarr_path(path)])
     if len(selected_channels) > 1:
         print(
-            "WARNING: Multiple channels were detected in the selected TIFFs: "
+            "WARNING: Multiple channels were detected in the selected TIFF inputs: "
             f"{selected_channels}. This workflow estimates one PSF from the first "
-            "selected TIFF and applies it to all selected TIFFs. Process one "
+            "selected image and applies it to all selected images. Process one "
             "channel at a time unless applying one PSF across wavelengths is intentional.",
             flush=True,
         )
@@ -501,6 +598,11 @@ def main() -> None:
     detection_na = _require_positive("detection_na", detection_na)
     if args.psf_mode == "light_sheet":
         _require_positive("illumination_na", args.illumination_na)
+    log_progress(
+        "Resolved optical parameters: "
+        f"dxy={dxy}, dz={dz}, wavelength={wavelength}, "
+        f"detection_na={detection_na}, ni={ni}, ns={ns}, psf_mode={args.psf_mode}"
+    )
 
     # Build the optical-model PSF seed. This is intentionally not accepted as
     # the final deconvolution PSF because the measured blind estimates are much
@@ -528,15 +630,27 @@ def main() -> None:
         background=args.background,
         light_sheet_angle=args.light_sheet_angle,
     )
-    print(
+    log_progress(
         f"Using PSF seed mode={args.psf_mode}, shape={psf_seed.shape}, "
-        f"sum={float(psf_seed.sum()):.6g}",
-        flush=True,
+        f"sum={float(psf_seed.sum()):.6g}"
     )
 
-    print("Running blind PSF estimation on first TIFF...", flush=True)
+    psf_tempdir = None
+    psf_input_path = image_inputs[0]
+    if is_ome_zarr_path(psf_input_path):
+        psf_tempdir = tempfile.TemporaryDirectory()
+        materialized_psf_input = Path(psf_tempdir.name) / f"{image_stem(psf_input_path)}.tif"
+        log_progress(
+            "Materializing first OME-Zarr input to temporary TIFF for blind PSF estimation: "
+            f"{psf_input_path.name}",
+        )
+        imwrite(str(materialized_psf_input), np.asarray(open_ome_zarr_array(psf_input_path, mode="r")))
+        psf_input_path = materialized_psf_input
+
+    log_progress(f"Running blind PSF estimation on first image volume: {psf_input_path}")
+    psf_start = time.perf_counter()
     psf = estimate_psf_from_chunks(
-        image_path=tiff_list[0],
+        image_path=str(psf_input_path),
         psf_seed=psf_seed,
         n_iters=args.blind_iters,
         chunk_xy=args.chunk_xy,
@@ -555,39 +669,68 @@ def main() -> None:
         snr_weight_cap=args.snr_weight_cap,
         blind_z_slices=args.blind_z_slices,
     )
+    if psf_tempdir is not None:
+        psf_tempdir.cleanup()
+        log_progress("Removed temporary materialized PSF input directory")
     psf_save_path = image_dir / "estimated_psf.tif"
     psf_save_path = _write_tiff_near_input_or_cwd(psf_save_path, psf)
     published_psf_path = Path.cwd() / "estimated_psf.tif"
     if psf_save_path.resolve() != published_psf_path.resolve():
         imwrite(str(published_psf_path), psf)
-    print(f"Merged PSF saved to {psf_save_path}", flush=True)
+    log_progress(
+        f"Merged PSF saved to {psf_save_path}; "
+        f"shape={psf.shape}, elapsed={time.perf_counter() - psf_start:.2f}s"
+    )
 
     # ------------------------------------------------------------------
-    # Deconvolve all TIFFs with the resolved PSF
+    # Deconvolve all image volumes with the resolved PSF
     # ------------------------------------------------------------------
 
-    for tiff_path in tiff_list:
-        tiff_path = Path(tiff_path)
-        output = deconvolve_tiff(
-            image_path=tiff_path,
-            psf=psf,
-            n_iters=args.iter,
-            dz=dz,
-            dxy=dxy,
-            wavelength=wavelength,
-            na=detection_na,
-            ni=ni,
-            chunk_xy=args.decon_chunk_xy,
-            vram_gb=args.vram_gb,
-            decon_workers=args.decon_workers,
-            overlap_xy=args.overlap_xy,
+    for index, image_path in enumerate(image_inputs, start=1):
+        image_path = Path(image_path)
+        volume_start = time.perf_counter()
+        log_progress(f"Starting deconvolution input {index}/{len(image_inputs)}: {image_path.name}")
+        if is_ome_zarr_path(image_path):
+            output = deconvolve_ome_zarr(
+                image_path=image_path,
+                psf=psf,
+                n_iters=args.iter,
+                dz=dz,
+                dxy=dxy,
+                wavelength=wavelength,
+                na=detection_na,
+                ni=ni,
+                chunk_xy=args.decon_chunk_xy,
+                vram_gb=args.vram_gb,
+                decon_workers=args.decon_workers,
+                overlap_xy=args.overlap_xy,
+            )
+            out_name = _decon_ome_zarr_output_name(image_path, original_name_map)
+            log_progress(f"Writing deconvolved OME-Zarr output: {out_name}")
+            write_ome_zarr_array(out_name, output, layer_name=image_stem(out_name))
+        else:
+            output = deconvolve_tiff(
+                image_path=image_path,
+                psf=psf,
+                n_iters=args.iter,
+                dz=dz,
+                dxy=dxy,
+                wavelength=wavelength,
+                na=detection_na,
+                ni=ni,
+                chunk_xy=args.decon_chunk_xy,
+                vram_gb=args.vram_gb,
+                decon_workers=args.decon_workers,
+                overlap_xy=args.overlap_xy,
+            )
+            out_name = _decon_output_name(image_path, original_name_map)
+            log_progress(f"Writing deconvolved TIFF output: {out_name}")
+            imwrite(out_name, output)
+        log_progress(
+            f"Saved {out_name}; elapsed={time.perf_counter() - volume_start:.2f}s"
         )
 
-        out_name = _decon_output_name(tiff_path, original_name_map)
-        imwrite(out_name, output)
-        print(f"  Saved {out_name}", flush=True)
-
-    print("All TIFFs deconvolved.", flush=True)
+    log_progress(f"All image volumes deconvolved in {time.perf_counter() - run_start:.2f}s")
 
 
 if __name__ == "__main__":

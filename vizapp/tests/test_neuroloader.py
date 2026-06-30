@@ -32,18 +32,21 @@ class NeuroloaderManifestTests(unittest.TestCase):
         self.manifest_path.write_text(json.dumps({"layers": layers}))
 
     def make_layer(self, name, root=None):
-        layer_dir = (root or self.manifest_path.parent) / name
+        layer_dir = (root or self.manifest_path.parent) / f"{name}.ome.zarr"
         layer_dir.mkdir(parents=True)
-        (layer_dir / "info").write_text("{}")
+        (layer_dir / ".zgroup").write_text('{"zarr_format": 2}')
+        (layer_dir / ".zattrs").write_text('{"multiscales": [{"datasets": [{"path": "0"}]}]}')
+        (layer_dir / "0").mkdir()
+        (layer_dir / "0" / ".zarray").write_text('{"zarr_format": 2}')
         return layer_dir
 
-    def test_loads_valid_manifest_and_rewrites_file_sources_to_http(self):
+    def test_loads_valid_ome_zarr_manifest_and_rewrites_file_sources_to_http(self):
         layer_dir = self.make_layer("DB2_CH00_000000")
         self.write_manifest(
             [
                 {
                     "name": "DB2_CH00_000000",
-                    "source": f"precomputed://file://{layer_dir}",
+                    "source": f"zarr://file://{layer_dir}",
                 }
             ]
         )
@@ -54,27 +57,74 @@ class NeuroloaderManifestTests(unittest.TestCase):
         self.assertEqual(layers[0]["name"], "DB2_CH00_000000")
         self.assertEqual(
             layers[0]["source"],
-            "precomputed://http://127.0.0.1:4141/f/workflow/output/neuroglancer/DB2_CH00_000000",
+            "zarr://http://127.0.0.1:4141/f/workflow/output/neuroglancer/DB2_CH00_000000.ome.zarr",
         )
 
+    def test_loads_encoded_file_uri_sources(self):
+        layer_dir = self.make_layer(
+            "DB2_CH00_000000",
+            root=self.root / "workflow" / "work" / "with space" / "neuroglancer",
+        )
+        self.write_manifest(
+            [
+                {
+                    "name": "DB2_CH00_000000",
+                    "source": f"zarr://{layer_dir.resolve().as_uri()}",
+                }
+            ]
+        )
+
+        layers = self.module.load_layers_manifest(self.root, "http://127.0.0.1:4141")
+
+        self.assertEqual(
+            layers[0]["source"],
+            "zarr://http://127.0.0.1:4141/f/workflow/work/with%20space/neuroglancer/DB2_CH00_000000.ome.zarr",
+        )
+
+    def test_rewrites_local_zarr_source_to_browser_http_source(self):
+        layer_dir = self.make_layer(
+            "DB2_CH00_000000",
+            root=self.root / "workflow" / "work" / "with space" / "neuroglancer",
+        )
+
+        source = self.module.rewrite_local_zarr_source(
+            f"zarr://{layer_dir.resolve().as_uri()}",
+            self.manifest_path.parent,
+            "DB2_CH00_000000",
+            self.root,
+            "http://127.0.0.1:4141",
+        )
+
+        self.assertEqual(
+            source,
+            "zarr://http://127.0.0.1:4141/f/workflow/work/with%20space/neuroglancer/DB2_CH00_000000.ome.zarr",
+        )
+        self.assertNotIn("file://", source)
+
     def test_work_dir_manifest_paths_are_rewritten_to_stable_published_output(self):
-        stable_layer_dir = self.make_layer("DB2_fused_skin_561")
+        stable_layer_dir = self.make_layer(
+            "DB2_fused_skin_561",
+            root=self.root / "workflow" / "output" / "deconvolved",
+        )
         work_layer_dir = (
             self.root
             / "workflow"
             / "work"
             / "b8"
             / "1e1ddace4d36c4b97c8466c7a6aa03"
-            / "neuroglancer"
-            / "DB2_fused_skin_561"
+            / "deconvolved"
+            / "DB2_fused_skin_561.ome.zarr"
         )
         work_layer_dir.mkdir(parents=True)
-        (work_layer_dir / "info").write_text("{}")
+        (work_layer_dir / ".zgroup").write_text('{"zarr_format": 2}')
+        (work_layer_dir / ".zattrs").write_text('{"multiscales": [{"datasets": [{"path": "0"}]}]}')
+        (work_layer_dir / "0").mkdir()
+        (work_layer_dir / "0" / ".zarray").write_text('{"zarr_format": 2}')
         self.write_manifest(
             [
                 {
                     "name": "DB2_fused_skin_561",
-                    "source": f"precomputed://file://{work_layer_dir}",
+                    "source": f"zarr://file://{work_layer_dir}",
                 }
             ]
         )
@@ -83,9 +133,9 @@ class NeuroloaderManifestTests(unittest.TestCase):
 
         self.assertEqual(
             layers[0]["source"],
-            "precomputed://http://127.0.0.1:5151/f/workflow/output/neuroglancer/DB2_fused_skin_561",
+            "zarr://http://127.0.0.1:5151/f/workflow/output/deconvolved/DB2_fused_skin_561.ome.zarr",
         )
-        self.assertTrue((stable_layer_dir / "info").exists())
+        self.assertTrue((stable_layer_dir / ".zattrs").exists())
 
     def test_missing_manifest_raises_clear_error(self):
         with self.assertRaisesRegex(self.module.NeuroloaderError, "layers.json is missing"):
@@ -97,23 +147,22 @@ class NeuroloaderManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(self.module.NeuroloaderError, "invalid JSON"):
             self.module.load_layers_manifest(self.root)
 
-    def test_missing_precomputed_dataset_raises_clear_error(self):
+    def test_missing_ome_zarr_dataset_raises_clear_error(self):
         missing_dir = self.manifest_path.parent / "missing"
         self.write_manifest(
             [
                 {
                     "name": "missing",
-                    "source": f"precomputed://file://{missing_dir}",
+                    "source": f"zarr://file://{missing_dir}",
                 }
             ]
         )
 
-        with self.assertRaisesRegex(self.module.NeuroloaderError, "missing precomputed dataset"):
+        with self.assertRaisesRegex(self.module.NeuroloaderError, "missing OME-Zarr dataset"):
             self.module.load_layers_manifest(self.root)
 
-    def test_layer_source_without_precomputed_info_raises_clear_error(self):
+    def test_precomputed_source_is_rejected_with_clear_error(self):
         layer_dir = self.manifest_path.parent / "DB2_CH00_000000"
-        layer_dir.mkdir()
         self.write_manifest(
             [
                 {
@@ -123,14 +172,63 @@ class NeuroloaderManifestTests(unittest.TestCase):
             ]
         )
 
-        with self.assertRaisesRegex(self.module.NeuroloaderError, "missing precomputed info"):
+        with self.assertRaisesRegex(self.module.NeuroloaderError, "precomputed sources are no longer supported"):
+            self.module.load_layers_manifest(self.root)
+
+    def test_layer_source_without_ome_zarr_metadata_raises_clear_error(self):
+        layer_dir = self.manifest_path.parent / "DB2_CH00_000000.ome.zarr"
+        layer_dir.mkdir()
+        self.write_manifest(
+            [
+                {
+                    "name": "DB2_CH00_000000",
+                    "source": f"zarr://file://{layer_dir}",
+                }
+            ]
+        )
+
+        with self.assertRaisesRegex(self.module.NeuroloaderError, "missing OME-Zarr metadata"):
+            self.module.load_layers_manifest(self.root)
+
+    def test_layer_source_without_ome_zarr_suffix_raises_clear_error(self):
+        layer_dir = self.manifest_path.parent / "DB2_CH00_000000.zarr"
+        layer_dir.mkdir()
+        (layer_dir / ".zgroup").write_text('{"zarr_format": 2}')
+        (layer_dir / ".zattrs").write_text('{"multiscales": [{"datasets": [{"path": "0"}]}]}')
+        (layer_dir / "0").mkdir()
+        (layer_dir / "0" / ".zarray").write_text('{"zarr_format": 2}')
+        self.write_manifest(
+            [
+                {
+                    "name": "DB2_CH00_000000",
+                    "source": f"zarr://file://{layer_dir}",
+                }
+            ]
+        )
+
+        with self.assertRaisesRegex(self.module.NeuroloaderError, "must point to a .ome.zarr directory"):
+            self.module.load_layers_manifest(self.root)
+
+    def test_layer_source_with_invalid_multiscales_metadata_raises_clear_error(self):
+        layer_dir = self.make_layer("DB2_CH00_000000")
+        (layer_dir / ".zattrs").write_text('{"not_multiscales": []}')
+        self.write_manifest(
+            [
+                {
+                    "name": "DB2_CH00_000000",
+                    "source": f"zarr://file://{layer_dir}",
+                }
+            ]
+        )
+
+        with self.assertRaisesRegex(self.module.NeuroloaderError, "invalid OME-Zarr multiscales metadata"):
             self.module.load_layers_manifest(self.root)
 
     def test_create_viewer_uses_rewritten_layer_sources(self):
         layers = [
             {
                 "name": "DB2_CH00_000000",
-                "source": "precomputed://http://127.0.0.1:4141/f/workflow/output/neuroglancer/DB2_CH00_000000",
+                "source": "zarr://http://127.0.0.1:4141/f/workflow/output/neuroglancer/DB2_CH00_000000.ome.zarr",
             }
         ]
         appended = []

@@ -1,73 +1,81 @@
 # GPU Deconvolution Process
 
-The `DECON` process runs Richardson-Lucy deconvolution on GPU with
+`DECON` runs chunkwise Richardson-Lucy deconvolution on GPU with
 `pycudadecon`. It is orchestrated by `workflow/scripts/decon_wrapper.py`.
+
+The current workflow is OME-Zarr-first. Deconvolution reads normalized
+OME-Zarr volumes from the staging step or deskewed OME-Zarr volumes from
+`Top_shear`. TIFF input remains supported for manual and compatibility runs.
 
 ## Input Discovery
 
-Astrocyte handles file ingestion for package runs. The wrapper scans the
-selected input directory for:
+Package runs normalize selected files before deconvolution:
 
 ```text
-*.tif
-*.tiff
+input_zarr/<sample>.ome.zarr/
 ```
 
-Decon-only inputs can use arbitrary TIFF names. Channel/timepoint filtering is
-not performed by the wrapper; choose the exact files to process with the
-Astrocyte file picker or by pointing `decon_input_dir` at a directory that
-contains only the intended TIFFs.
-
-Examples:
+Full light-sheet runs pass the deskewed output into `DECON`:
 
 ```text
-CH0_0.tif
-CH1_0.tif
-CH0_0_registered_consistent.tif
+Top_shear/<sample>.ome.zarr/
 ```
 
-The deskew process writes raw-style names such as `CH00_000000.tif`.
+Decon-only runs use the normalized selected input directly. Existing OME-Zarr
+inputs are copied into the normalized input directory. TIFF, CZI, ND2, LIF, and
+HDF5 inputs are converted there before any GPU work starts.
 
-Select files from one channel at a time. The PSF is estimated from the first
-selected TIFF and reused for every selected TIFF, so mixing wavelengths/channels
-can skew the result.
+For compatibility, `decon_wrapper.py` can also scan a directory containing
+`*.tif` or `*.tiff` stacks. Use that path only when intentionally bypassing the
+normalization process.
+
+Select inputs from one optical configuration at a time. The PSF is estimated
+from the first sorted input volume and reused for every volume in the same
+`DECON` call, so mixing wavelengths or acquisition modes can skew the result.
 
 ## PSF to OTF Conversion
 
-Before deconvolving a TIFF, the wrapper writes the merged blind PSF to a
-temporary TIFF and passes it to `pycudadecon.TemporaryOTF`.
+Blind PSF estimation is still TIFF-backed internally because MATLAB
+`deconvblind` and `pycudadecon.TemporaryOTF` consume TIFF files. The wrapper
+materializes the selected OME-Zarr volume or TIFF input into temporary TIFF
+chunks for PSF estimation, writes the merged blind PSF to `estimated_psf.tif`,
+and then builds the OTF from that file.
 
 The OTF is built with:
 
-- `dzpsf = dz`
-- `dxpsf = dxy`
-- `wavelength = round(wavelength * 1000)` in nanometers
-- `na = detection_na` or backward-compatible `na`
-- `nimm = ni`
+| Value | Source |
+|---|---|
+| `dzpsf` | `dz` |
+| `dxpsf` | `dxy` |
+| `wavelength` | `round(wavelength * 1000)` nanometers |
+| `na` | `detection_na`, or backward-compatible `na` |
+| `nimm` | `ni` |
 
-The temporary PSF file is removed after processing.
+Temporary PSF files are removed after processing. The published
+`estimated_psf.tif` is retained as the reproducible PSF artifact for the run.
 
 ## Chunking Model
 
-Each input TIFF is memory-mapped where possible and must be a 3-D volume.
+OME-Zarr inputs are opened as Dask arrays. TIFF compatibility inputs are
+memory-mapped where possible. Every input must resolve to a 3-D volume.
 
-The Dask array chunks are full-Z and tiled only in XY:
+The deconvolution chunks are full-Z and tiled only in XY:
 
 ```text
 (z = full stack depth, y = decon_chunk_xy, x = decon_chunk_xy)
 ```
 
-Z is never split. This avoids stitching artifacts along the axial dimension.
+Z is not split. This avoids stitching artifacts along the axial dimension.
 
 If `decon_chunk_xy > 0`, it is used as the core tile size. If
 `decon_chunk_xy <= 0`, the code estimates a tile size from available VRAM, data
-type, stack depth, overlap, and worker count. Automatic deconvolution chunks
-are capped at 1024 pixels in XY so very wide single-slice images do not turn
-into one or two long-running GPU chunks.
+type, stack depth, overlap, and worker count. Shallow inputs use a conservative
+per-chunk VRAM target so very wide single-slice images do not turn into a few
+long-running GPU chunks. Deeper stacks remain capped at 1024 pixels in XY.
 
 ## Overlap Handling
 
-The deconvolution uses Dask `map_overlap` with reflect boundaries.
+Deconvolution uses Dask `map_overlap` with reflect boundaries.
 
 If `overlap_xy > 0`, that value is used. Otherwise, overlap is derived from the
 PSF support:
@@ -85,51 +93,39 @@ For each overlapped chunk, `_decon_chunk`:
 
 1. Opens a `pycudadecon.RLContext`.
 2. Runs `rl_decon` with `n_iters = iter`.
-3. Clips values to the uint16 range.
+3. Clips values to the `uint16` range.
 4. Returns a `uint16` block to Dask.
 
 If `decon_workers > 1`, Dask uses the threaded scheduler. Otherwise it uses the
 single-threaded scheduler. The Nextflow process requests one GPU, so increasing
-`decon_workers` should be tested carefully on the target GPU.
+`decon_workers` should be tested on the target GPU.
 
 ## Intensity Rescaling
 
-After all chunks are merged, the output is linearly mapped back to the original
-input TIFF intensity range:
+After chunks are merged, the output is linearly mapped back to the original
+input intensity range:
 
 ```text
 scaled = (output - output_min) / (output_max - output_min)
 scaled = scaled * (input_max - input_min) + input_min
 ```
 
-The final array is rounded, clipped to the uint16 range, and written as
-`uint16`.
+The final array is rounded, clipped to `uint16`, and written as OME-Zarr for
+native inputs.
 
 ## Outputs
 
-The merged PSF used for all selected TIFFs is published to:
+The merged PSF is published to:
 
 ```text
 <output_dir>/estimated_psf.tif
 ```
 
-For each selected input TIFF, the process writes:
+For each native OME-Zarr input, the process writes:
 
 ```text
-DB2_<input_stem>.tif
+<output_dir>/deconvolved/DB2_<sample>.ome.zarr/
 ```
 
-Examples:
-
-```text
-DB2_CH0_0.tif
-DB2_CH00_000000.tif
-DB2_CH0_0_registered_consistent.tif
-DB2_my_stack.tif
-```
-
-Nextflow publishes these files to:
-
-```text
-<output_dir>/deconvolved/
-```
+Compatibility TIFF runs may still emit `DB2_<input_stem>.tif`, but the package
+workflow treats OME-Zarr as the primary deconvolution output.
