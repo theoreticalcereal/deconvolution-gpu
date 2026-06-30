@@ -349,11 +349,11 @@ class SentinelParameterWiringTests(unittest.TestCase):
     def test_neuroglancer_conversion_publishes_zarr_data_under_deconvolved_contract(self):
         modules_text = (ROOT / "workflow/modules.nf").read_text()
 
-        self.assertIn('publishDir "${params.output_dir}", mode: \'copy\', pattern: \'{deconvolved,neuroglancer}\'', modules_text)
-        self.assertIn('path "deconvolved", emit: ome_zarr_output', modules_text)
-        self.assertIn('path "neuroglancer", emit: neuroglancer_output', modules_text)
-        self.assertIn("--output deconvolved", modules_text)
-        self.assertIn("--manifest-output neuroglancer", modules_text)
+        self.assertNotIn("pattern: '{deconvolved,neuroglancer}'", modules_text)
+        self.assertNotIn('path "deconvolved", emit: ome_zarr_output', modules_text)
+        self.assertIn("workflow.launchDir", modules_text)
+        self.assertIn('--output "${outputPrefix}/deconvolved"', modules_text)
+        self.assertIn('--manifest-output "${outputPrefix}/neuroglancer"', modules_text)
 
     def test_neuroglancer_vizapp_files_are_packaged(self):
         astrocyte_text = (ROOT / "astrocyte_pkg.yml").read_text()

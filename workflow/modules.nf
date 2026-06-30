@@ -122,7 +122,6 @@ process STAGE_DECON_INPUT {
 process DECON {
     tag "decon"
 
-    publishDir "${params.output_dir}/deconvolved", mode: 'copy', pattern: 'DB2_*'
     publishDir "${params.output_dir}", mode: 'copy', pattern: 'estimated_psf.tif'
 
     maxForks 8
@@ -281,17 +280,13 @@ process DECON {
 process CONVERT_TIFFS_TO_NEUROGLANCER {
     tag "neuroglancer"
 
-    publishDir "${params.output_dir}", mode: 'copy', pattern: '{deconvolved,neuroglancer}', overwrite: true
-
     input:
     path decon_tiffs
     path decon_runtime
 
-    output:
-    path "deconvolved", emit: ome_zarr_output
-    path "neuroglancer", emit: neuroglancer_output
-
     script:
+    def outputRoot = params.output_dir.toString()
+    def outputPrefix = outputRoot.startsWith('/') ? outputRoot : "${workflow.launchDir}/${outputRoot}"
     """
     if [ ! -x "${decon_runtime}/decon_env/bin/python3" ] && [ ! -x "${decon_runtime}/decon_env/bin/python" ]; then
         echo "ERROR: no supported decon runtime found at ${decon_runtime}" >&2
@@ -304,8 +299,8 @@ process CONVERT_TIFFS_TO_NEUROGLANCER {
 
     python3 ${projectDir}/scripts/convert_tiff_to_ome_zarr.py \\
         --input "\$PWD" \\
-        --output deconvolved \\
-        --manifest-output neuroglancer \\
+        --output "${outputPrefix}/deconvolved" \\
+        --manifest-output "${outputPrefix}/neuroglancer" \\
         --volume-mode "${params.neuroglancer_data_mode}"
     """
 }
