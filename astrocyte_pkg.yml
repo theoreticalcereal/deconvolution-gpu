@@ -24,7 +24,9 @@ citation: |
 
 minimum_astrocyte_version: '2.1.0'
 nextflow_version: '24.10.0'
-nextflow_config: 'astrocyte.config'
+nextflow_config: 'biohpc.config'
+container: 'singularity'
+singularity_version: '3.9.9'
 
 # -----------------------------------------------------------------------------
 # DOCUMENTATION
@@ -48,6 +50,11 @@ workflow_modules:
   - 'lmod/8.4'
   - 'matlab/2024a'
   - 'anaconda3/2023.09-0'
+
+# Dummy workflow container used to trigger Astrocyte's Singularity image
+# provisioning path. The decon runtime is built by the workflow itself.
+workflow_containers:
+  - docker://hello-world
 
 workflow_parameters:
 

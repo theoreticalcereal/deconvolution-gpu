@@ -8,3 +8,11 @@ workflow/images/*.sif
 workflow/images/decon_env/
 workflow/images/*.tar.gz
 astrocyte_danuser_first_file.yml
+
+# Nextflow/Astrocyte run artifacts
+workflow/output/
+workflow/workflow/
+workflow/report.html
+workflow/timeline.html
+workflow/trace.txt
+BUILD_DECON_CONTAINER*
