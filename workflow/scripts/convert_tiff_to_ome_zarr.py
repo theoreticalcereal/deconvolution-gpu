@@ -294,9 +294,9 @@ def multiscales_metadata(layer_name, shapes):
                 "version": "0.4",
                 "name": layer_name,
                 "axes": [
-                    {"name": "z", "type": "space", "unit": "pixel"},
-                    {"name": "y", "type": "space", "unit": "pixel"},
-                    {"name": "x", "type": "space", "unit": "pixel"},
+                    {"name": "z", "type": "space"},
+                    {"name": "y", "type": "space"},
+                    {"name": "x", "type": "space"},
                 ],
                 "datasets": datasets,
             }

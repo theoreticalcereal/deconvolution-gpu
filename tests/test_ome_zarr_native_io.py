@@ -74,6 +74,14 @@ class OmeZarrNativeIoTests(unittest.TestCase):
         zattrs = json.loads((output / ".zattrs").read_text())
         self.assertEqual(zattrs["multiscales"][0]["name"], "CH00_000000")
         self.assertEqual(zattrs["multiscales"][0]["datasets"][0]["path"], "0")
+        self.assertEqual(
+            zattrs["multiscales"][0]["axes"],
+            [
+                {"name": "z", "type": "space"},
+                {"name": "y", "type": "space"},
+                {"name": "x", "type": "space"},
+            ],
+        )
 
 
 if __name__ == "__main__":

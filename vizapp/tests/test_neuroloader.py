@@ -259,13 +259,16 @@ class NeuroloaderManifestTests(unittest.TestCase):
             def add_handlers(self, host_pattern, handler_list):
                 handlers.append((host_pattern, handler_list))
 
+        def fake_image_layer(**kwargs):
+            return kwargs
+
         fake_neuroglancer = type(
             "FakeNeuroglancer",
             (),
             {
                 "set_server_bind_address": staticmethod(lambda **kwargs: None),
                 "Viewer": FakeViewer,
-                "ImageLayer": staticmethod(lambda source: {"source": source}),
+                "ImageLayer": staticmethod(fake_image_layer),
                 "server": type("Server", (), {"global_server": type("Global", (), {"app": FakeApp()})()})(),
             },
         )
@@ -290,6 +293,12 @@ class NeuroloaderManifestTests(unittest.TestCase):
 
         self.assertEqual(appended[0]["name"], "DB2_CH00_000000")
         self.assertEqual(appended[0]["layer"]["source"], layers[0]["source"])
+        self.assertIn("#uicontrol invlerp normalized", appended[0]["layer"]["shader"])
+        self.assertIn("emitGrayscale(normalized())", appended[0]["layer"]["shader"])
+        self.assertEqual(
+            appended[0]["layer"]["shader_controls"],
+            {"normalized": {"range": [0, 400]}},
+        )
         self.assertTrue(any("/f/(.*)" in str(handler_list) for _, handler_list in handlers))
 
 

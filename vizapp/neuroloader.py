@@ -11,6 +11,13 @@ import urllib.parse
 URL_PREFIX = r"/f"
 PACKAGE_ROOT = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_MANIFEST_RELATIVE_PATH = pathlib.Path("workflow/output/neuroglancer/layers.json")
+DEFAULT_IMAGE_SHADER = """
+#uicontrol invlerp normalized
+void main() {
+  emitGrayscale(normalized());
+}
+""".strip()
+DEFAULT_SHADER_CONTROLS = {"normalized": {"range": [0, 400]}}
 
 
 class NeuroloaderError(Exception):
@@ -133,7 +140,11 @@ def create_viewer(layers, port, base_path=PACKAGE_ROOT):
         for layer in layers:
             state.layers.append(
                 name=layer["name"],
-                layer=neuroglancer.ImageLayer(source=layer["source"]),
+                layer=neuroglancer.ImageLayer(
+                    source=layer["source"],
+                    shader=DEFAULT_IMAGE_SHADER,
+                    shader_controls=DEFAULT_SHADER_CONTROLS,
+                ),
             )
 
     neuroglancer.server.global_server.app.add_handlers(

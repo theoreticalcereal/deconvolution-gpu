@@ -38,6 +38,7 @@ documentation_files:
   - [ 'deskew-process.md', 'Deskew Process' ]
   - [ 'psf-estimation-process.md', 'PSF Estimation Process' ]
   - [ 'gpu-deconvolution-process.md', 'GPU Deconvolution Process' ]
+  - [ 'neuroglancer.md', 'Neuroglancer VizApp' ]
   - [ 'profiles-and-parameters.md', 'Profiles and Parameters' ]
   - [ 'workflow-output.md', 'workflow/output - Output from the Workflow' ]
   - [ 'outputs-and-troubleshooting.md', 'Outputs and Troubleshooting' ]

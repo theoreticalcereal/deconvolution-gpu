@@ -118,6 +118,14 @@ class ConvertTiffToOmeZarrTests(unittest.TestCase):
         self.assertEqual(zarray["shape"], [1, 5, 7])
         self.assertEqual(zarray["chunks"], [1, 5, 7])
         self.assertEqual(zattrs["multiscales"][0]["datasets"][0]["path"], "0")
+        self.assertEqual(
+            zattrs["multiscales"][0]["axes"],
+            [
+                {"name": "z", "type": "space"},
+                {"name": "y", "type": "space"},
+                {"name": "x", "type": "space"},
+            ],
+        )
         self.assertTrue((layer_path / "0" / "0.0.0").is_file())
 
     def test_write_ome_zarr_writes_multiscale_3d_dataset_metadata(self):

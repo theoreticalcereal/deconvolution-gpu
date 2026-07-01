@@ -17,6 +17,7 @@ provides workflow modules such as Nextflow, Java, MATLAB, and Anaconda.
 | [Deskew Process](deskew-process.md) | Chunked deskew from normalized OME-Zarr and deskew output layout. |
 | [PSF Estimation Process](psf-estimation-process.md) | PSF seed generation, blind MATLAB estimation, chunking, merge weights, and cache behavior. |
 | [GPU Deconvolution Process](gpu-deconvolution-process.md) | OME-Zarr/TIFF input discovery, Dask chunking, `pycudadecon`, and native outputs. |
+| [Neuroglancer VizApp](neuroglancer.md) | Launch instructions, display defaults, and VizApp troubleshooting. |
 | [Profiles and Parameters](profiles-and-parameters.md) | Nextflow profiles, cluster resources, and user parameters. |
 | [workflow/output](workflow-output.md) | Published output directory and stable products. |
 | [Outputs and Troubleshooting](outputs-and-troubleshooting.md) | Expected files, common failures, and tuning order. |

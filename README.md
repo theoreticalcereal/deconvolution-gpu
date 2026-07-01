@@ -112,6 +112,7 @@ Start with [docs/index.md](docs/index.md). The most relevant pages are:
 - [Workflow Overview](docs/workflow-overview.md)
 - [Deskew Process](docs/deskew-process.md)
 - [GPU Deconvolution Process](docs/gpu-deconvolution-process.md)
+- [Neuroglancer VizApp](docs/neuroglancer.md)
 - [Profiles and Parameters](docs/profiles-and-parameters.md)
 - [workflow/output](docs/workflow-output.md)
 - [Outputs and Troubleshooting](docs/outputs-and-troubleshooting.md)
@@ -125,7 +126,8 @@ Start with [docs/index.md](docs/index.md). The most relevant pages are:
   `vizapp/run_neuroglancer.sh` loads the BioHPC `neuroglancer/2.40.1` module
   and runs `vizapp/neuroloader.py`. The package does not declare
   `workflow_containers`; the deconvolution runtime is prepared by the
-  `BUILD_DECON_CONTAINER` workflow process.
+  `BUILD_DECON_CONTAINER` workflow process. Image layers open with a grayscale
+  0-400 contrast range by default.
 - The theoretical PSF is only a seed. The active deconvolution PSF is the
   merged blind estimate.
 - Nextflow work directories can be large. Clean with `nextflow clean -f` after
