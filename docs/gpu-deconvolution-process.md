@@ -128,4 +128,6 @@ For each native OME-Zarr input, the process writes:
 ```
 
 Compatibility TIFF runs may still emit `DB2_<input_stem>.tif`, but the package
-workflow treats OME-Zarr as the primary deconvolution output.
+workflow treats OME-Zarr as the primary deconvolution output. Set
+`output_formats` to `tiff` to publish TIFF stack exports under
+`<output_dir>/deconvolved_tiff/`.

@@ -229,6 +229,7 @@ class NeuroloaderManifestTests(unittest.TestCase):
             {
                 "name": "DB2_CH00_000000",
                 "source": "zarr://http://127.0.0.1:4141/f/workflow/output/neuroglancer/DB2_CH00_000000.ome.zarr",
+                "shader_controls": {"normalized": {"range": [7, 123]}},
             }
         ]
         appended = []
@@ -297,7 +298,7 @@ class NeuroloaderManifestTests(unittest.TestCase):
         self.assertIn("emitGrayscale(normalized())", appended[0]["layer"]["shader"])
         self.assertEqual(
             appended[0]["layer"]["shader_controls"],
-            {"normalized": {"range": [0, 400]}},
+            {"normalized": {"range": [7, 123]}},
         )
         self.assertTrue(any("/f/(.*)" in str(handler_list) for _, handler_list in handlers))
 

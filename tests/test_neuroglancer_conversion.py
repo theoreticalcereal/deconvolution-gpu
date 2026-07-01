@@ -205,20 +205,40 @@ class ConvertTiffToOmeZarrTests(unittest.TestCase):
         (zarr_dir / "0").mkdir()
         (zarr_dir / "0" / ".zarray").write_text("{}")
 
-        manifest_path = self.module.convert_directory(
-            input_dir,
-            self.root / "published_zarr",
-            manifest_dir=self.root / "neuroglancer",
-            volume_mode="3d",
-            max_levels=1,
-        )
+        with mock.patch.object(self.module, "estimate_display_range", return_value=[7, 123]):
+            manifest_path = self.module.convert_directory(
+                input_dir,
+                self.root / "published_zarr",
+                manifest_dir=self.root / "neuroglancer",
+                volume_mode="3d",
+                max_levels=1,
+            )
 
         payload = self.module.json.loads(manifest_path.read_text())
         expected_layer_dir = (self.root / "published_zarr" / "DB2_native.ome.zarr").resolve()
         self.assertEqual(payload["layers"][0]["name"], "DB2_native")
         self.assertEqual(payload["layers"][0]["source"], f"zarr://{expected_layer_dir.as_uri()}")
+        self.assertEqual(payload["layers"][0]["shader_controls"], {"normalized": {"range": [7, 123]}})
         self.assertTrue((expected_layer_dir / ".zattrs").exists())
         self.assertTrue((expected_layer_dir / "0" / ".zarray").exists())
+
+    def test_estimates_shader_range_from_zarr_chunks_for_manifest(self):
+        zarr_dir = self.root / "DB2_native.ome.zarr"
+        zarr_dir.mkdir()
+        arrays = []
+
+        class FakeArray:
+            shape = (3, 5, 7)
+            chunks = (2, 3, 4)
+
+            def __getitem__(self, key):
+                arrays.append(key)
+                return types.SimpleNamespace(min=lambda: 7, max=lambda: 123)
+
+        with mock.patch.object(self.module, "open_zarr_array", return_value=FakeArray()):
+            self.assertEqual(self.module.estimate_display_range(zarr_dir), [7, 123])
+
+        self.assertGreater(len(arrays), 1)
 
     def test_convert_directory_writes_browser_safe_file_uri_sources(self):
         input_dir = self.root / "deconvolved"

@@ -21,6 +21,8 @@ workflow/output/
 |-- estimated_psf.tif
 |-- deconvolved/
 |   `-- DB2_<sample>.ome.zarr/
+|-- deconvolved_tiff/
+|   `-- DB2_<sample>.tif        # only when output_formats = tiff
 `-- neuroglancer/
     `-- layers.json
 ```
@@ -32,6 +34,8 @@ workflow/output/
 |-- estimated_psf.tif
 |-- deconvolved/
 |   `-- DB2_<sample>.ome.zarr/
+|-- deconvolved_tiff/
+|   `-- DB2_<sample>.tif        # only when output_formats = tiff
 `-- neuroglancer/
     `-- layers.json
 ```
@@ -55,3 +59,7 @@ OME-Zarr volumes for downstream processes.
 points at the OME-Zarr outputs. Legacy TIFF conversion support remains in the
 script for compatibility, but native OME-Zarr output does not need a
 separate visualization data conversion step.
+
+`EXPORT_OUTPUT_FORMAT` runs only when `output_formats = 'tiff'` and publishes
+TIFF stack copies of the final deconvolved volumes to
+`workflow/output/deconvolved_tiff/`.

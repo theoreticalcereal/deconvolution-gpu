@@ -46,7 +46,7 @@ volumes.
 |---|---|
 | `input` | File-picker inputs. Supported formats are normalized to OME-Zarr. |
 | `output_dir` | Directory where final outputs are published. |
-| `output_formats` | Requested leaf export formats. Default: `ome_zarr`. |
+| `output_formats` | Final published image format. Default: `ome_zarr`; choose `tiff` to export TIFF stacks. |
 | `decon_only` | Skip deskewing and run deconvolution directly. |
 | `dx`, `dz`, `angle`, `flip` | Deskew geometry. |
 | `dxy`, `wavelength`, `detection_na`, `illumination_na`, `ni`, `ns` | Optical/acquisition values. |
@@ -61,6 +61,8 @@ workflow/output/
 |-- estimated_psf.tif
 |-- deconvolved/
 |   `-- DB2_<sample>.ome.zarr/
+|-- deconvolved_tiff/
+|   `-- DB2_<sample>.tif        # only when output_formats = tiff
 `-- neuroglancer/
     `-- layers.json
 ```
@@ -75,6 +77,7 @@ workflow/output/
 | `workflow/scripts/chunked_deskew.py` | Reads OME-Zarr/TIFF volumes and writes chunked deskew outputs. |
 | `workflow/scripts/decon_wrapper.py` | Resolves PSF, runs chunked GPU deconvolution, and writes `DB2_*` outputs. |
 | `workflow/scripts/convert_tiff_to_ome_zarr.py` | Converts legacy TIFF outputs or writes Neuroglancer manifests for existing OME-Zarr. |
+| `workflow/scripts/export_ome_zarr_to_tiff.py` | Exports final OME-Zarr outputs to TIFF stacks when requested. |
 | `vizapp/neuroloader.py` | Validates OME-Zarr layers and rewrites local sources for browser serving. |
 
 ## Citation

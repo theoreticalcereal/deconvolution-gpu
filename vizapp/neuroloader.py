@@ -138,12 +138,13 @@ def create_viewer(layers, port, base_path=PACKAGE_ROOT):
 
     with viewer.txn() as state:
         for layer in layers:
+            shader_controls = layer.get("shader_controls") or DEFAULT_SHADER_CONTROLS
             state.layers.append(
                 name=layer["name"],
                 layer=neuroglancer.ImageLayer(
                     source=layer["source"],
                     shader=DEFAULT_IMAGE_SHADER,
-                    shader_controls=DEFAULT_SHADER_CONTROLS,
+                    shader_controls=shader_controls,
                 ),
             )
 

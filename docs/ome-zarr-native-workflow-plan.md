@@ -88,7 +88,8 @@ ome_zarr
 ```
 
 Native OME-Zarr is the stable published image output. TIFF export can be added
-or used for legacy tooling, but it is not the default processing contract.
+for legacy tooling by setting `output_formats` to `tiff`, but it is not the
+default processing contract.
 
 ## Runtime Dependencies
 

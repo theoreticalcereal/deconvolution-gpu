@@ -33,10 +33,11 @@ http://127.0.0.1:9876
 
 ## Display Defaults
 
-The VizApp applies a grayscale shader to every image layer with the normalized
-contrast range set to `0` through `400`. This makes the initial view use 400 as
-the white point instead of stretching to the data maximum. The shader control
-remains available in Neuroglancer if you need to adjust contrast interactively.
+The VizApp applies a grayscale shader to every image layer. The workflow
+estimates each layer's initial contrast range from the dimmest and brightest
+chunks in the published OME-Zarr data and writes that range into
+`layers.json`. The shader control remains available in Neuroglancer if you need
+to adjust contrast interactively.
 
 ## Troubleshooting
 

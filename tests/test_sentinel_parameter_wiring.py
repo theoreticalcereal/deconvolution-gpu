@@ -393,12 +393,19 @@ class SentinelParameterWiringTests(unittest.TestCase):
     def test_output_formats_defaults_to_native_ome_zarr(self):
         astrocyte_text = (ROOT / "astrocyte_pkg.yml").read_text()
         config_text = (ROOT / "workflow/configs/nextflow.config").read_text()
+        main_text = (ROOT / "workflow/main.nf").read_text()
+        modules_text = (ROOT / "workflow/modules.nf").read_text()
 
         block = parameter_block(astrocyte_text, "output_formats")
-        self.assertIn("type: string", block)
+        self.assertIn("type: select", block)
         self.assertIn("default: 'ome_zarr'", block)
-        self.assertIn("ome_zarr,tiff", block)
+        self.assertIn("[ 'ome_zarr'", block)
+        self.assertIn("[ 'tiff'", block)
         self.assertRegex(config_text, r"(?m)^\s*output_formats\s*=\s*'ome_zarr'")
+        self.assertIn("include { EXPORT_OUTPUT_FORMAT } from './modules'", main_text)
+        self.assertEqual(main_text.count("EXPORT_OUTPUT_FORMAT("), 2)
+        self.assertIn("process EXPORT_OUTPUT_FORMAT", modules_text)
+        self.assertIn("export_ome_zarr_to_tiff.py", modules_text)
 
     def test_decon_uses_conda_runtime_without_container_or_sif(self):
         text = (ROOT / "workflow/modules.nf").read_text()

@@ -12,6 +12,7 @@ For file-picker runs, the workflow runs:
 3. `DESKEW` unless `decon_only = true`
 4. `DECON`
 5. `CONVERT_TIFFS_TO_NEUROGLANCER`
+6. `EXPORT_OUTPUT_FORMAT` only when `output_formats = 'tiff'`
 
 `BUILD_DECON_CONTAINER` prepares the conda runtime used by normalization,
 deconvolution, and OME-Zarr/Neuroglancer conversion.
@@ -83,3 +84,9 @@ stable products into `output_dir`.
 
 The Neuroglancer manifest points at OME-Zarr data. If `DECON` emitted native
 OME-Zarr, no TIFF reconversion is needed.
+
+When `output_formats = 'tiff'`, `EXPORT_OUTPUT_FORMAT` also publishes:
+
+```text
+<output_dir>/deconvolved_tiff/DB2_<sample>.tif
+```

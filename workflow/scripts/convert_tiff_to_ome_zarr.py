@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import math
 import pathlib
 import re
 import shutil
@@ -31,6 +32,7 @@ def log_progress(message):
 class LayerManifest:
     name: str
     path: pathlib.Path
+    shader_controls: dict
 
     @property
     def source(self):
@@ -107,13 +109,102 @@ def write_manifest(output_dir, layers):
             {
                 "name": layer.name,
                 "source": layer.source,
+                "shader_controls": layer.shader_controls,
             }
             for layer in layers
         ]
     }
     manifest_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     log_progress(f"Wrote Neuroglancer OME-Zarr manifest: {manifest_path}")
-    return manifest_path
+    return manifest_path.resolve()
+
+
+def open_zarr_array(layer_path):
+    try:
+        import zarr
+    except ImportError as exc:
+        raise ConversionError("Missing required dependency 'zarr' for OME-Zarr display range estimation") from exc
+
+    return zarr.open(str(pathlib.Path(layer_path) / "0"), mode="r")
+
+
+def chunk_slices(shape, chunks):
+    for starts in itertools_product(
+        *[
+            range(int(math.ceil(int(axis_size) / int(chunk_size))))
+            for axis_size, chunk_size in zip(shape, chunks)
+        ]
+    ):
+        yield tuple(
+            slice(
+                int(start) * int(chunk_size),
+                min((int(start) + 1) * int(chunk_size), int(axis_size)),
+            )
+            for start, axis_size, chunk_size in zip(starts, shape, chunks)
+        )
+
+
+def itertools_product(*args):
+    try:
+        import itertools
+    except ImportError as exc:
+        raise ConversionError("Missing required Python dependency 'itertools'") from exc
+
+    return itertools.product(*args)
+
+
+def estimate_display_range(layer_path):
+    try:
+        import numpy as np
+    except ImportError as exc:
+        raise ConversionError("Missing required dependency 'numpy' for OME-Zarr display range estimation") from exc
+
+    array = open_zarr_array(layer_path)
+    chunks = tuple(int(chunk) for chunk in getattr(array, "chunks", array.shape))
+    min_value = None
+    max_value = None
+    for chunk_slice in chunk_slices(tuple(int(axis) for axis in array.shape), chunks):
+        chunk = array[chunk_slice]
+        chunk_min = float(chunk.min() if hasattr(chunk, "min") else np.min(chunk))
+        chunk_max = float(chunk.max() if hasattr(chunk, "max") else np.max(chunk))
+        min_value = chunk_min if min_value is None else min(min_value, chunk_min)
+        max_value = chunk_max if max_value is None else max(max_value, chunk_max)
+
+    if min_value is None or max_value is None or not np.isfinite([min_value, max_value]).all():
+        return [0, 1]
+    if max_value <= min_value:
+        max_value = min_value + 1
+    return [int(math.floor(min_value)), int(math.ceil(max_value))]
+
+
+def estimate_display_range_from_array(array):
+    try:
+        import numpy as np
+    except ImportError as exc:
+        raise ConversionError("Missing required dependency 'numpy' for display range estimation") from exc
+
+    min_value = None
+    max_value = None
+    shape = tuple(int(axis) for axis in array.shape)
+    chunks = tuple(int(chunk) for chunk in getattr(array, "chunks", bounded_chunks(shape)))
+    try:
+        slices = chunk_slices(shape, chunks)
+        for chunk_slice in slices:
+            chunk = array[chunk_slice]
+            chunk_min = float(chunk.min() if hasattr(chunk, "min") else np.min(chunk))
+            chunk_max = float(chunk.max() if hasattr(chunk, "max") else np.max(chunk))
+            min_value = chunk_min if min_value is None else min(min_value, chunk_min)
+            max_value = chunk_max if max_value is None else max(max_value, chunk_max)
+    except (TypeError, ValueError):
+        return [0, 1]
+
+    if min_value is None or max_value is None:
+        return [0, 1]
+    if not np.isfinite([min_value, max_value]).all():
+        return [0, 1]
+    if max_value <= min_value:
+        max_value = min_value + 1
+    return [int(math.floor(min_value)), int(math.ceil(max_value))]
 
 
 def normalize_volume_mode(volume_mode):
@@ -304,9 +395,8 @@ def multiscales_metadata(layer_name, shapes):
     }
 
 
-def write_ome_zarr(tiff_path, output_layer_dir, volume_mode="auto", max_levels=DEFAULT_MAX_LEVELS):
+def write_ome_zarr_volume(volume, output_layer_dir, max_levels=DEFAULT_MAX_LEVELS):
     start = datetime.now()
-    volume = load_tiff_volume(tiff_path, volume_mode=volume_mode)
     layer_path = pathlib.Path(output_layer_dir).resolve()
     if layer_path.exists():
         log_progress(f"Removing existing OME-Zarr layer: {layer_path}")
@@ -333,6 +423,11 @@ def write_ome_zarr(tiff_path, output_layer_dir, volume_mode="auto", max_levels=D
     elapsed = (datetime.now() - start).total_seconds()
     log_progress(f"Finished OME-Zarr layer: {layer_path} in {elapsed:.2f}s")
     return layer_path
+
+
+def write_ome_zarr(tiff_path, output_layer_dir, volume_mode="auto", max_levels=DEFAULT_MAX_LEVELS):
+    volume = load_tiff_volume(tiff_path, volume_mode=volume_mode)
+    return write_ome_zarr_volume(volume, output_layer_dir, max_levels=max_levels)
 
 
 def hardlink_or_copy_file(source, destination):
@@ -383,13 +478,15 @@ def convert_directory(
     for index, (tiff_path, layer_name) in enumerate(zip(tiff_paths, tiff_layer_names), start=1):
         layer_dir = output / f"{layer_name}.ome.zarr"
         log_progress(f"Converting TIFF layer {index}/{len(tiff_paths)}: {tiff_path.name}")
-        write_ome_zarr(tiff_path, layer_dir, volume_mode=volume_mode, max_levels=max_levels)
-        layers.append(LayerManifest(layer_name, layer_dir))
+        volume = load_tiff_volume(tiff_path, volume_mode=volume_mode)
+        display_range = estimate_display_range_from_array(volume)
+        write_ome_zarr_volume(volume, layer_dir, max_levels=max_levels)
+        layers.append(LayerManifest(layer_name, layer_dir, {"normalized": {"range": display_range}}))
     for index, (zarr_path, layer_name) in enumerate(zip(zarr_paths, zarr_layer_names), start=1):
         layer_dir = output / f"{layer_name}.ome.zarr"
         log_progress(f"Adding existing OME-Zarr layer {index}/{len(zarr_paths)}: {zarr_path.name}")
         staged_layer = stage_existing_ome_zarr(zarr_path, layer_dir)
-        layers.append(LayerManifest(layer_name, staged_layer))
+        layers.append(LayerManifest(layer_name, staged_layer, {"normalized": {"range": estimate_display_range(staged_layer)}}))
 
     if not layers:
         raise ConversionError(f"No DB2 TIFF or OME-Zarr volumes found under {input_dir}")

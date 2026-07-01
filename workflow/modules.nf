@@ -304,3 +304,31 @@ process CONVERT_TIFFS_TO_NEUROGLANCER {
         --volume-mode "${params.neuroglancer_data_mode}"
     """
 }
+
+process EXPORT_OUTPUT_FORMAT {
+    tag "${output_format}"
+
+    input:
+    path decon_outputs
+    val output_format
+    path decon_runtime
+
+    script:
+    def outputRoot = params.output_dir.toString()
+    def outputPrefix = outputRoot.startsWith('/') ? outputRoot : "${workflow.launchDir}/${outputRoot}"
+    """
+    if [ ! -x "${decon_runtime}/decon_env/bin/python3" ] && [ ! -x "${decon_runtime}/decon_env/bin/python" ]; then
+        echo "ERROR: no supported decon runtime found at ${decon_runtime}" >&2
+        exit 1
+    fi
+    export CONDA_PREFIX="${decon_runtime}/decon_env"
+    export CONDA_DEFAULT_ENV=decon_env
+    export PATH="\${CONDA_PREFIX}/bin:\${PATH}"
+    export LD_LIBRARY_PATH=\${CONDA_PREFIX}/lib:\${LD_LIBRARY_PATH:-}
+
+    python3 ${projectDir}/scripts/export_ome_zarr_to_tiff.py \\
+        --input "\$PWD" \\
+        --output "${outputPrefix}/deconvolved_tiff" \\
+        --output-format "${output_format}"
+    """
+}

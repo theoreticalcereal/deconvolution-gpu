@@ -85,13 +85,16 @@ workflow_parameters:
       Directory where all final workflow outputs are published.
 
   - id: output_formats
-    type: string
+    type: select
     required: false
     default: 'ome_zarr'
     description: |
-      Comma-separated final export formats to publish. Keep the default
-      ome_zarr for the native workflow output; use ome_zarr,tiff when a TIFF
-      export is also needed by legacy tools.
+      Final image output format to publish. OME-Zarr is the native workflow
+      output and is always used for Neuroglancer visualization. Choose TIFF to
+      also export the final deconvolved OME-Zarr volumes as TIFF stacks.
+    choices:
+      - [ 'ome_zarr', 'OME-Zarr output' ]
+      - [ 'tiff', 'TIFF stack export' ]
 
   - id: dx
     type: real

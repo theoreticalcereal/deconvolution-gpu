@@ -21,6 +21,8 @@ internal image contract.
    `DB2_*.ome.zarr` for native Zarr inputs.
 5. `CONVERT_TIFFS_TO_NEUROGLANCER` writes `neuroglancer/layers.json`. If
    deconvolution output is already OME-Zarr, it points directly to that data.
+6. `EXPORT_OUTPUT_FORMAT` runs only when `output_formats = 'tiff'` and exports
+   final `DB2_*.ome.zarr` volumes as TIFF stacks.
 
 ## Supported Inputs
 
@@ -79,7 +81,7 @@ Use `-resume` to restart from successful Nextflow checkpoints.
 |---|---|
 | `input` | Astrocyte/file-picker inputs. Supported formats are normalized to OME-Zarr. |
 | `output_dir` | Published output root. Default: `./workflow/output`. |
-| `output_formats` | Requested leaf exports. Default: `ome_zarr`; `ome_zarr,tiff` is reserved for TIFF export support. |
+| `output_formats` | Final published image format. Default: `ome_zarr`; choose `tiff` to also export TIFF stacks. |
 | `decon_only` | Skip `DESKEW` and run `DECON` directly. |
 | `decon_input_dir` | Manual decon-only input directory. |
 | `dx`, `dz`, `angle`, `flip` | Deskew geometry. |
@@ -98,6 +100,8 @@ Use `-resume` to restart from successful Nextflow checkpoints.
 |-- estimated_psf.tif
 |-- deconvolved/
 |   `-- DB2_<sample>.ome.zarr/
+|-- deconvolved_tiff/
+|   `-- DB2_<sample>.tif        # only when output_formats = tiff
 `-- neuroglancer/
     `-- layers.json
 ```
@@ -127,7 +131,7 @@ Start with [docs/index.md](docs/index.md). The most relevant pages are:
   and runs `vizapp/neuroloader.py`. The package does not declare
   `workflow_containers`; the deconvolution runtime is prepared by the
   `BUILD_DECON_CONTAINER` workflow process. Image layers open with a grayscale
-  0-400 contrast range by default.
+  shader and per-layer contrast ranges estimated from the published Zarr data.
 - The theoretical PSF is only a seed. The active deconvolution PSF is the
   merged blind estimate.
 - Nextflow work directories can be large. Clean with `nextflow clean -f` after

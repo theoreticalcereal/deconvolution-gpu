@@ -134,7 +134,7 @@ The `DECON` process prepends the prepared conda environment to `PATH` and
 | `output_dir` | Published output root. |
 | `decon_only` | Skip `DESKEW` and run `DECON` directly. |
 | `decon_input_dir` | Backward-compatible directory of already deskewed or stacked TIFF/OME-Zarr volumes for manual runs. |
-| `output_formats` | Requested leaf exports. Default is native `ome_zarr`. |
+| `output_formats` | Final published image format. Default is native `ome_zarr`; choose `tiff` to export TIFF stacks under `deconvolved_tiff/`. |
 
 Selected inputs should come from the same channel and optical configuration.
 The workflow estimates one PSF and applies it to the selected volumes, so mixed

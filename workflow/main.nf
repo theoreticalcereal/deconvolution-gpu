@@ -6,6 +6,7 @@ include { BUILD_DECON_CONTAINER } from './modules'
 include { STAGE_DECON_INPUT } from './modules'
 include { DECON }  from './modules'
 include { CONVERT_TIFFS_TO_NEUROGLANCER } from './modules'
+include { EXPORT_OUTPUT_FORMAT } from './modules'
 
 def inputTextFromCommandLine(commandLine) {
     if (!commandLine) {
@@ -100,6 +101,9 @@ workflow {
             decon_container_ch
         )
         CONVERT_TIFFS_TO_NEUROGLANCER(DECON.out.decon_output, decon_container_ch)
+        if (params.output_formats == 'tiff') {
+            EXPORT_OUTPUT_FORMAT(DECON.out.decon_output, params.output_formats, decon_container_ch)
+        }
     } else {
         deskew_image_path_ch = input_patterns ? selected_input_dir_ch : Channel.value(params.image_path)
         deskew_cell_name = input_patterns ? '' : params.cell_name
@@ -127,5 +131,8 @@ workflow {
             decon_container_ch
         )
         CONVERT_TIFFS_TO_NEUROGLANCER(DECON.out.decon_output, decon_container_ch)
+        if (params.output_formats == 'tiff') {
+            EXPORT_OUTPUT_FORMAT(DECON.out.decon_output, params.output_formats, decon_container_ch)
+        }
     }
 }
