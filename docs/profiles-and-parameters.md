@@ -1,8 +1,10 @@
 # Profiles and Parameters
 
 Runtime defaults and profiles live in `workflow/configs/nextflow.config`.
-Astrocyte uses `workflow/configs/astrocyte.config`, which includes the standard
-config and builds the conda runtime for `DECON`.
+Astrocyte uses `workflow/configs/biohpc.config`, which includes the standard
+config, enables Singularity support for Astrocyte-managed container handling,
+and builds the conda runtime for `DECON`. `workflow/configs/astrocyte.config`
+is kept as a compatibility wrapper that includes `biohpc.config`.
 
 ## Profiles
 
@@ -16,9 +18,15 @@ config and builds the conda runtime for `DECON`.
 
 ## Astrocyte Container Config
 
-`astrocyte_pkg.yml` points Astrocyte at `astrocyte.config`. That config includes
-`nextflow.config`, disables Nextflow-managed conda for the decon path, and sets
-`build_decon_container = true`.
+`astrocyte_pkg.yml` points Astrocyte at `biohpc.config` and declares
+`container: 'singularity'` with the dummy `docker://hello-world` VizApp
+container used by `vizapp/run_neuroglancer.sh`. It does not declare
+`workflow_containers`, so Astrocyte does not try to provision a workflow image
+for the deconvolution pipeline itself.
+
+`biohpc.config` includes `nextflow.config`, disables Nextflow-managed conda for
+the decon path, enables the Astrocyte Singularity cache under
+`$baseDir/images/singularity`, and sets `build_decon_container = true`.
 
 When `build_decon_container` is true, the workflow runs `BUILD_DECON_CONTAINER`
 before `DECON`. That process expects conda to already be available from the

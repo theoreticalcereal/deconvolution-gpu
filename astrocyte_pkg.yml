@@ -51,11 +51,6 @@ workflow_modules:
   - 'matlab/2024a'
   - 'anaconda3/2023.09-0'
 
-# Dummy workflow container used to trigger Astrocyte's Singularity image
-# provisioning path. The decon runtime is built by the workflow itself.
-workflow_containers:
-  - docker://hello-world
-
 workflow_parameters:
 
   - id: input

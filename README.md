@@ -123,7 +123,9 @@ Start with [docs/index.md](docs/index.md). The most relevant pages are:
 - The Astrocyte VizApp follows the standalone Neuroglancer package pattern:
   Astrocyte pulls the dummy `docker://hello-world` VizApp container, then
   `vizapp/run_neuroglancer.sh` loads the BioHPC `neuroglancer/2.40.1` module
-  and runs `vizapp/neuroloader.py`.
+  and runs `vizapp/neuroloader.py`. The package does not declare
+  `workflow_containers`; the deconvolution runtime is prepared by the
+  `BUILD_DECON_CONTAINER` workflow process.
 - The theoretical PSF is only a seed. The active deconvolution PSF is the
   merged blind estimate.
 - Nextflow work directories can be large. Clean with `nextflow clean -f` after

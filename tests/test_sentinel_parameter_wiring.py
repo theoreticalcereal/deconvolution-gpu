@@ -276,7 +276,10 @@ class SentinelParameterWiringTests(unittest.TestCase):
         self.assertIn("max_xy=_auto_decon_max_xy", text)
 
     def test_astrocyte_config_prepares_decon_container(self):
-        text = (ROOT / "workflow/configs/astrocyte.config").read_text()
+        wrapper_text = (ROOT / "workflow/configs/astrocyte.config").read_text()
+        text = (ROOT / "workflow/configs/biohpc.config").read_text()
+
+        self.assertIn("includeConfig 'biohpc.config'", wrapper_text)
         self.assertRegex(text, r"(?m)^\s*params\.build_decon_container\s*=\s*true\b")
 
     def test_container_prep_builds_conda_libmamba_env_each_run(self):
@@ -406,15 +409,22 @@ class SentinelParameterWiringTests(unittest.TestCase):
         self.assertIn('for candidate in "\\${matlab_bin}" matlab /home1/apps/MATLAB/R2024a/bin/matlab', text)
         self.assertIn('--matlab_bin "\\$matlab_bin"', text)
 
-    def test_astrocyte_package_does_not_declare_external_container(self):
+    def test_astrocyte_package_declares_only_vizapp_dummy_container(self):
         package_text = (ROOT / "astrocyte_pkg.yml").read_text()
         config_text = (ROOT / "workflow/configs/nextflow.config").read_text()
+        biohpc_text = (ROOT / "workflow/configs/biohpc.config").read_text()
 
-        self.assertNotIn("container: 'singularity'", package_text)
+        self.assertIn("nextflow_config: 'biohpc.config'", package_text)
+        self.assertIn("container: 'singularity'", package_text)
+        self.assertIn("singularity_version: '3.9.9'", package_text)
+        self.assertIn("singularity {", biohpc_text)
+        self.assertIn("cacheDir = \"$baseDir/images/singularity\"", biohpc_text)
         self.assertIn("  - 'matlab/2024a'", package_text)
         self.assertIn("  - 'anaconda3/2023.09-0'", package_text)
         self.assertNotIn("  - 'mamba/2.3.0'", package_text)
         self.assertNotIn("workflow_containers:", package_text)
+        self.assertIn("vizapp_containers:", package_text)
+        self.assertIn("docker://hello-world", package_text)
         self.assertNotIn("docker://git.biohpc.swmed.edu:5050/dean-lab/ctaslm2-deconvolution/decon_env:latest", package_text)
         self.assertNotIn("decon_container_image", config_text)
         self.assertNotIn("decon_conda_env_archive", config_text)
