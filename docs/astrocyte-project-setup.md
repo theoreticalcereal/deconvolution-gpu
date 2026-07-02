@@ -20,7 +20,5 @@ Use these steps to create a project in Astrocyte and upload workflow input data.
 
 5. Upload the input data through the upload channel you want to use.
 
-   ![Screenshot: Astrocyte upload channel selection](images/astrocyte-upload-channel.png)
-
 After the upload completes, the files should appear in the project input area and
 can be selected when launching a workflow.
