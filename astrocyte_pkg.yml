@@ -113,19 +113,18 @@ workflow_parameters:
     required: false
     default: -1
     min: -1
-    description: Detection objective numerical aperture; -1 falls back to na.
+    description: Detection objective numerical aperture; -1 falls back to Backward-compatible numerical aperture.
 
   - id: illumination_na
     type: real
     required: false
     default: -1
     min: -1
-    description: Illumination objective numerical aperture for light-sheet PSF metadata.
+    description: Illumination objective numerical aperture for light-sheet PSF metadata; -1 falls back to Backward-compatible numerical aperture.
 
   - id: ni
     type: real
-    required: true
-    default: -1
+    required: true 
     min: -1
     description: Immersion refractive index for PSF generation.
 
@@ -134,7 +133,7 @@ workflow_parameters:
     required: true
     default: -1
     min: -1
-    description: Specimen/sample refractive index.
+    description: Specimen/sample refractive index; -1 falls back to immersion refractive index.
 
   - id: dxy
     type: real
