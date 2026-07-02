@@ -43,12 +43,6 @@ workflow_parameters:
       Select deskewed or otherwise ready-to-deconvolve image volumes.
     regex: ".*(\\.tif|\\.tiff|\\.czi|\\.nd2|\\.lif|\\.h5|\\.hdf5|\\.ome\\.zarr|\\.TIF|\\.TIFF|\\.CZI|\\.ND2|\\.LIF|\\.H5|\\.HDF5|\\.OME\\.ZARR)$"
 
-  - id: output_dir
-    type: string
-    required: true
-    default: './output'
-    description: Directory where final workflow outputs are published.
-
   - id: output_formats
     type: select
     required: false
@@ -189,11 +183,11 @@ workflow_parameters:
     required: false
     default: 1
     min: 1
-    description: Parallel CUDA deconvolution workers per process.
+    description: Parallel CUDA deconvolution workers per process. Recommend 1, safe limit at 2 until multi-GPU nodes are called. 
 
   - id: vram_gb
     type: real
     required: false
     default: -1
     min: -1
-    description: Optional manual GPU memory budget in GB.
+    description: Optional manual GPU memory budget in GB; -1 automatically sizes chunks. 
