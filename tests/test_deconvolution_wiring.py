@@ -26,6 +26,12 @@ class DeconvolutionWiringTest(unittest.TestCase):
         self.assertNotIn("process DESKEW", modules_text)
         self.assertNotIn("process CONVERT_TIFFS_TO_NEUROGLANCER", modules_text)
 
+    def test_matlab_stack_helpers_are_packaged_for_blind_psf_estimation(self):
+        script_dir = ROOT / "workflow/scripts"
+
+        self.assertTrue((script_dir / "readtiffstack.m").is_file())
+        self.assertTrue((script_dir / "writetiffstack.m").is_file())
+
     def test_light_sheet_profile_preserves_psf_mode(self):
         config_text = (ROOT / "workflow/configs/nextflow.config").read_text(encoding="utf-8")
 

@@ -73,7 +73,17 @@ class OmeZarrNativeIoTests(unittest.TestCase):
         self.assertEqual(json.loads((output / ".zgroup").read_text())["zarr_format"], 2)
         zattrs = json.loads((output / ".zattrs").read_text())
         self.assertEqual(zattrs["multiscales"][0]["name"], "CH00_000000")
-        self.assertEqual(zattrs["multiscales"][0]["datasets"][0]["path"], "0")
+        self.assertEqual(
+            [dataset["path"] for dataset in zattrs["multiscales"][0]["datasets"]],
+            ["0", "1", "2", "3", "4"],
+        )
+        self.assertEqual(
+            [
+                dataset["coordinateTransformations"][0]["scale"]
+                for dataset in zattrs["multiscales"][0]["datasets"]
+            ],
+            [[1, 1, 1], [1, 2, 2], [1, 4, 4], [1, 8, 8], [1, 16, 16]],
+        )
         self.assertEqual(
             zattrs["multiscales"][0]["axes"],
             [
@@ -82,6 +92,13 @@ class OmeZarrNativeIoTests(unittest.TestCase):
                 {"name": "x", "type": "space"},
             ],
         )
+
+    def test_downsample_xy_uses_row_and_column_stride_slicing(self):
+        fake_array = mock.MagicMock()
+
+        self.module.downsample_xy(fake_array, 8)
+
+        fake_array.__getitem__.assert_called_once_with((slice(None), slice(None, None, 8), slice(None, None, 8)))
 
 
 if __name__ == "__main__":
