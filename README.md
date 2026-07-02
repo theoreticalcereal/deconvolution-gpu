@@ -17,6 +17,14 @@ geometric correction.
 The native output is OME-Zarr. TIFF export remains available for downstream
 tools that require TIFF stacks.
 
+## Runtime Reuse
+
+By default, this package runs `BUILD_DECON_CONTAINER` and creates its own conda
+runtime. For integrated deskew-to-deconvolution runs, pass
+`--decon_runtime_dir` to reuse an existing runtime and skip that build step.
+The path may point to a directory containing `decon_env/` or `deskew_env/`, or
+directly to a conda environment directory.
+
 ## Inputs
 
 Astrocyte `input` accepts TIFF, OME-Zarr, CZI, ND2, LIF, HDF5, and H5 files.
@@ -32,6 +40,7 @@ nextflow run main.nf \
   -profile light_sheet \
   --input '/path/to/deskewed/*.ome.zarr' \
   --output_dir ./output \
+  --decon_runtime_dir /path/to/deskew_runtime \
   --wavelength 0.561 \
   --na 1.0 \
   --ni 1.33 \

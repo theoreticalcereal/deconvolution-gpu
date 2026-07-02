@@ -49,8 +49,13 @@ def normalizeInputPatterns(input, commandLine = null) {
 }
 
 workflow {
-    BUILD_DECON_CONTAINER()
-    decon_container_ch = BUILD_DECON_CONTAINER.out.image
+    if (params.decon_runtime_dir) {
+        log.info "Using external deconvolution runtime: ${params.decon_runtime_dir}"
+        decon_container_ch = Channel.value(file(params.decon_runtime_dir, checkIfExists: true))
+    } else {
+        BUILD_DECON_CONTAINER()
+        decon_container_ch = BUILD_DECON_CONTAINER.out.image
+    }
 
     input_patterns = normalizeInputPatterns(params.input, workflow.commandLine)
     if (input_patterns) {

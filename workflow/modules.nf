@@ -59,12 +59,26 @@ process STAGE_DECON_INPUT {
     ${link_commands}
     ${metadata_commands}
 
-    if [ ! -x "${decon_runtime}/decon_env/bin/python3" ] && [ ! -x "${decon_runtime}/decon_env/bin/python" ]; then
-        echo "ERROR: no supported decon runtime found at ${decon_runtime}" >&2
+    runtime_env=""
+    runtime_name=""
+    if [ -x "${decon_runtime}/bin/python3" ] || [ -x "${decon_runtime}/bin/python" ]; then
+        runtime_env="${decon_runtime}"
+        runtime_name="\$(basename "${decon_runtime}")"
+    else
+        for candidate in decon_env deskew_env; do
+            if [ -x "${decon_runtime}/\${candidate}/bin/python3" ] || [ -x "${decon_runtime}/\${candidate}/bin/python" ]; then
+                runtime_env="${decon_runtime}/\${candidate}"
+                runtime_name="\${candidate}"
+                break
+            fi
+        done
+    fi
+    if [ -z "\${runtime_env}" ]; then
+        echo "ERROR: no supported decon runtime found at ${decon_runtime}; expected decon_env, deskew_env, or a direct conda environment." >&2
         exit 1
     fi
-    export CONDA_PREFIX="${decon_runtime}/decon_env"
-    export CONDA_DEFAULT_ENV=decon_env
+    export CONDA_PREFIX="\${runtime_env}"
+    export CONDA_DEFAULT_ENV="\${runtime_name}"
     export PATH="\${CONDA_PREFIX}/bin:\${PATH}"
     export LD_LIBRARY_PATH=\${CONDA_PREFIX}/lib:\${LD_LIBRARY_PATH:-}
 
@@ -150,12 +164,26 @@ process DECON {
     def no_psf_cache_flag = params.no_psf_cache ? "--no_psf_cache"                    : ""
 
     """
-    if [ ! -x "${decon_runtime}/decon_env/bin/python3" ] && [ ! -x "${decon_runtime}/decon_env/bin/python" ]; then
-        echo "ERROR: no supported decon runtime found at ${decon_runtime}" >&2
+    runtime_env=""
+    runtime_name=""
+    if [ -x "${decon_runtime}/bin/python3" ] || [ -x "${decon_runtime}/bin/python" ]; then
+        runtime_env="${decon_runtime}"
+        runtime_name="\$(basename "${decon_runtime}")"
+    else
+        for candidate in decon_env deskew_env; do
+            if [ -x "${decon_runtime}/\${candidate}/bin/python3" ] || [ -x "${decon_runtime}/\${candidate}/bin/python" ]; then
+                runtime_env="${decon_runtime}/\${candidate}"
+                runtime_name="\${candidate}"
+                break
+            fi
+        done
+    fi
+    if [ -z "\${runtime_env}" ]; then
+        echo "ERROR: no supported decon runtime found at ${decon_runtime}; expected decon_env, deskew_env, or a direct conda environment." >&2
         exit 1
     fi
-    export CONDA_PREFIX="${decon_runtime}/decon_env"
-    export CONDA_DEFAULT_ENV=decon_env
+    export CONDA_PREFIX="\${runtime_env}"
+    export CONDA_DEFAULT_ENV="\${runtime_name}"
     export PATH="\${CONDA_PREFIX}/bin:\${PATH}"
     export LD_LIBRARY_PATH=\${CONDA_PREFIX}/lib:\${LD_LIBRARY_PATH:-}
 
@@ -244,12 +272,26 @@ process EXPORT_OUTPUT_FORMAT {
     def outputRoot = params.output_dir.toString()
     def outputPrefix = outputRoot.startsWith('/') ? outputRoot : "${workflow.launchDir}/${outputRoot}"
     """
-    if [ ! -x "${decon_runtime}/decon_env/bin/python3" ] && [ ! -x "${decon_runtime}/decon_env/bin/python" ]; then
-        echo "ERROR: no supported decon runtime found at ${decon_runtime}" >&2
+    runtime_env=""
+    runtime_name=""
+    if [ -x "${decon_runtime}/bin/python3" ] || [ -x "${decon_runtime}/bin/python" ]; then
+        runtime_env="${decon_runtime}"
+        runtime_name="\$(basename "${decon_runtime}")"
+    else
+        for candidate in decon_env deskew_env; do
+            if [ -x "${decon_runtime}/\${candidate}/bin/python3" ] || [ -x "${decon_runtime}/\${candidate}/bin/python" ]; then
+                runtime_env="${decon_runtime}/\${candidate}"
+                runtime_name="\${candidate}"
+                break
+            fi
+        done
+    fi
+    if [ -z "\${runtime_env}" ]; then
+        echo "ERROR: no supported decon runtime found at ${decon_runtime}; expected decon_env, deskew_env, or a direct conda environment." >&2
         exit 1
     fi
-    export CONDA_PREFIX="${decon_runtime}/decon_env"
-    export CONDA_DEFAULT_ENV=decon_env
+    export CONDA_PREFIX="\${runtime_env}"
+    export CONDA_DEFAULT_ENV="\${runtime_name}"
     export PATH="\${CONDA_PREFIX}/bin:\${PATH}"
     export LD_LIBRARY_PATH=\${CONDA_PREFIX}/lib:\${LD_LIBRARY_PATH:-}
 

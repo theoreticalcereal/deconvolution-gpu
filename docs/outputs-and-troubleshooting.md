@@ -21,3 +21,7 @@ MATLAB module and passes the resolved executable into the deconvolution process.
 The workflow builds its conda runtime from `workflow/envs/decon-conda.txt` and
 `workflow/envs/decon-pip-requirements.txt`. Visualization dependencies are not
 installed by this package.
+
+For integrated deskew-to-deconvolution runs, pass `decon_runtime_dir` to reuse a
+runtime built by `deskew-gpu`. The deconvolution workflow accepts both
+`decon_env` and `deskew_env` runtime layouts.

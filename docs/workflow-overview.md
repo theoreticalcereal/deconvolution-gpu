@@ -4,7 +4,7 @@ The deconvolution package contains only the deconvolution half of the original
 combined workflow.
 
 ```text
-BUILD_DECON_CONTAINER
+BUILD_DECON_CONTAINER  # skipped when decon_runtime_dir is supplied
 STAGE_DECON_INPUT
 DECON
 EXPORT_OUTPUT_FORMAT  # only when output_formats = tiff
@@ -17,3 +17,7 @@ PSF to all selected volumes in the run.
 
 Use profile `light_sheet` to preserve light-sheet PSF behavior for data that has
 already been deskewed by `deskew-gpu`.
+
+Set `decon_runtime_dir` to reuse a runtime built upstream by `deskew-gpu`. The
+workflow accepts a path containing `decon_env/` or `deskew_env/`, or a direct
+conda environment path.

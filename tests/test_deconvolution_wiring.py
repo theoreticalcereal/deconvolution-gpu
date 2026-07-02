@@ -34,6 +34,24 @@ class DeconvolutionWiringTest(unittest.TestCase):
         self.assertNotIn("decon_only", config_text)
         self.assertNotIn("deskew_backend", config_text)
 
+    def test_external_runtime_skips_decon_container_build(self):
+        main_text = (ROOT / "workflow/main.nf").read_text(encoding="utf-8")
+        config_text = (ROOT / "workflow/configs/nextflow.config").read_text(encoding="utf-8")
+        package_text = (ROOT / "astrocyte_pkg.yml").read_text(encoding="utf-8")
+
+        self.assertIn("decon_runtime_dir = ''", config_text)
+        self.assertIn("id: decon_runtime_dir", package_text)
+        self.assertIn("if (params.decon_runtime_dir)", main_text)
+        self.assertIn("file(params.decon_runtime_dir, checkIfExists: true)", main_text)
+        self.assertIn("else {\n        BUILD_DECON_CONTAINER()", main_text)
+
+    def test_decon_processes_accept_deskew_runtime_layout(self):
+        modules_text = (ROOT / "workflow/modules.nf").read_text(encoding="utf-8")
+
+        self.assertIn('for candidate in decon_env deskew_env; do', modules_text)
+        self.assertIn('runtime_env="${decon_runtime}/\\${candidate}"', modules_text)
+        self.assertIn('export CONDA_PREFIX="\\${runtime_env}"', modules_text)
+
 
 if __name__ == "__main__":
     unittest.main()
