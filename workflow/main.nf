@@ -1,11 +1,9 @@
 #!/usr/bin/env nextflow
 nextflow.enable.dsl=2
 
-include { DESKEW } from './modules'
 include { BUILD_DECON_CONTAINER } from './modules'
 include { STAGE_DECON_INPUT } from './modules'
-include { DECON }  from './modules'
-include { CONVERT_TIFFS_TO_NEUROGLANCER } from './modules'
+include { DECON } from './modules'
 include { EXPORT_OUTPUT_FORMAT } from './modules'
 
 def inputTextFromCommandLine(commandLine) {
@@ -50,25 +48,6 @@ def normalizeInputPatterns(input, commandLine = null) {
         .findAll { it }
 }
 
-def isSupplied(value) {
-    if (value == null) {
-        return false
-    }
-    def text = value.toString().trim()
-    return text && text != '-1' && text != '-1.0'
-}
-
-def optionalValue(value) {
-    return isSupplied(value) ? value : ''
-}
-
-def requireSupplied(name, value, context) {
-    if (!isSupplied(value)) {
-        throw new IllegalArgumentException("${name} must be provided for ${context}; -1 means unset and is ignored only when that parameter is optional.")
-    }
-    return value
-}
-
 workflow {
     BUILD_DECON_CONTAINER()
     decon_container_ch = BUILD_DECON_CONTAINER.out.image
@@ -76,63 +55,25 @@ workflow {
     input_patterns = normalizeInputPatterns(params.input, workflow.commandLine)
     if (input_patterns) {
         log.info "Selected ${input_patterns.size()} input image(s): ${input_patterns.join(', ')}"
-        input_tiffs_ch = Channel
+        input_files_ch = Channel
             .fromList(input_patterns)
             .map { input_pattern -> file(input_pattern, checkIfExists: true) }
             .collect()
-        STAGE_DECON_INPUT(input_tiffs_ch, decon_container_ch)
-        selected_input_dir_ch = STAGE_DECON_INPUT.out.decon_input_dir
+        STAGE_DECON_INPUT(input_files_ch, decon_container_ch)
+        decon_input_ch = STAGE_DECON_INPUT.out.decon_input_dir
     } else {
-        selected_input_dir_ch = Channel.empty()
+        decon_input_ch = Channel.value(params.image_path)
     }
 
-    if (params.decon_only) {
-        if (input_patterns) {
-            decon_input_ch = selected_input_dir_ch
-        } else {
-            decon_input_ch = Channel.value(params.decon_input_dir ?: params.image_path)
-        }
+    DECON(
+        decon_input_ch,
+        params.background,
+        params.iter,
+        params.output_dir,
+        decon_container_ch
+    )
 
-        DECON(
-            decon_input_ch,
-            params.background,
-            params.iter,
-            params.output_dir,
-            decon_container_ch
-        )
-        CONVERT_TIFFS_TO_NEUROGLANCER(DECON.out.decon_output, decon_container_ch)
-        if (params.output_formats == 'tiff') {
-            EXPORT_OUTPUT_FORMAT(DECON.out.decon_output, params.output_formats, decon_container_ch)
-        }
-    } else {
-        deskew_image_path_ch = input_patterns ? selected_input_dir_ch : Channel.value(params.image_path)
-        deskew_cell_name = input_patterns ? '' : params.cell_name
-        deskew_cell_index = optionalValue(params.cell_index)
-        deskew_dx = requireSupplied('dx', params.dx, 'deskew runs')
-        deskew_dz = requireSupplied('dz', params.dz, 'deskew runs')
-
-        DESKEW(
-            deskew_image_path_ch,
-            deskew_cell_name,
-            deskew_cell_index,
-            deskew_dx,
-            deskew_dz,
-            params.angle,
-            params.flip,
-            params.output_dir,
-            decon_container_ch
-        )
-
-        DECON(
-            DESKEW.out.deskewed_path,
-            params.background,
-            params.iter,
-            params.output_dir,
-            decon_container_ch
-        )
-        CONVERT_TIFFS_TO_NEUROGLANCER(DECON.out.decon_output, decon_container_ch)
-        if (params.output_formats == 'tiff') {
-            EXPORT_OUTPUT_FORMAT(DECON.out.decon_output, params.output_formats, decon_container_ch)
-        }
+    if (params.output_formats == 'tiff') {
+        EXPORT_OUTPUT_FORMAT(DECON.out.decon_output, params.output_formats, decon_container_ch)
     }
 }

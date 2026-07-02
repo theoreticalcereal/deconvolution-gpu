@@ -1,20 +1,12 @@
-#
-# Metadata for the deskew/deconvolution workflow package.
-#
-
-# -----------------------------------------------------------------------------
-# BASIC INFORMATION
-# -----------------------------------------------------------------------------
-
-name: '3d_deskewdeconvolution'
+name: '3d_deconvolution_gpu'
 author: 'Ricky Wang'
 email: 'ricky.wang@utsouthwestern.edu'
-title: '3D Deskew + Deconvolution Workflow'
+title: '3D GPU Deconvolution Workflow'
 description: |
-  This workflow deskews light-sheet microscopy TIFF data, estimates a
-  blind PSF, and runs GPU-accelerated Richardson-Lucy deconvolution. It supports
-  full light-sheet deskew plus deconvolution runs, light-sheet decon-only runs,
-  and wide-frame deconvolution from existing 3-D TIFF stacks.
+  This workflow normalizes selected microscopy image volumes to OME-Zarr,
+  estimates a blind PSF, and runs GPU-accelerated Richardson-Lucy
+  deconvolution. Use the separate deskew-gpu package to deskew ctASLM data
+  before running this workflow.
 
 citation: |
   Please acknowledge our contribution:
@@ -28,24 +20,14 @@ nextflow_config: 'biohpc.config'
 container: 'singularity'
 singularity_version: '3.9.9'
 
-# -----------------------------------------------------------------------------
-# DOCUMENTATION
-# -----------------------------------------------------------------------------
-
 documentation_files:
-  - [ 'index.md', 'ctASLM2 Deskew/Deconvolution Help' ]
+  - [ 'index.md', '3D GPU Deconvolution Help' ]
   - [ 'workflow-overview.md', 'Workflow Overview' ]
-  - [ 'deskew-process.md', 'Deskew Process' ]
   - [ 'psf-estimation-process.md', 'PSF Estimation Process' ]
   - [ 'gpu-deconvolution-process.md', 'GPU Deconvolution Process' ]
-  - [ 'neuroglancer.md', 'Neuroglancer VizApp' ]
   - [ 'profiles-and-parameters.md', 'Profiles and Parameters' ]
   - [ 'workflow-output.md', 'workflow/output - Output from the Workflow' ]
   - [ 'outputs-and-troubleshooting.md', 'Outputs and Troubleshooting' ]
-
-# -----------------------------------------------------------------------------
-# NEXTFLOW WORKFLOW CONFIGURATION
-# -----------------------------------------------------------------------------
 
 workflow_modules:
   - 'lmod/8.4'
@@ -53,36 +35,19 @@ workflow_modules:
   - 'anaconda3/2023.09-0'
 
 workflow_parameters:
-
   - id: input
     type: files
     required: true
-    description: |
-      --input (required). Select image files to process. Choose files from only one
-      channel at a time. This workflow estimates one PSF from the first selected
-      image and applies it to all selected images; mixing channels with different
-      wavelengths can skew deconvolution results.
     min: 1
-    regex: ".*(\\.tif|\\.tiff|\\.czi|\\.nd2|\\.lif|\\.h5|\\.hdf5|\\.ome\\.zarr|\\.TIF|\\.TIFF|\\.CZI|\\.ND2|\\.LIF|\\.H5|\\.HDF5|\\.OME\\.ZARR)$"
-
-  - id: decon_only
-    type: select
-    required: false
-    default: 'false'
     description: |
-      Skip deskewing and run deconvolution directly from the selected images
-      after they are normalized to OME-Zarr. Use this for already deskewed or
-      already stacked 3-D volumes.
-    choices:
-      - [ 'false', 'Run deskew, then deconvolution' ]
-      - [ 'true', 'Skip deskew and run deconvolution only' ]
+      Select deskewed or otherwise ready-to-deconvolve image volumes.
+    regex: ".*(\\.tif|\\.tiff|\\.czi|\\.nd2|\\.lif|\\.h5|\\.hdf5|\\.ome\\.zarr|\\.TIF|\\.TIFF|\\.CZI|\\.ND2|\\.LIF|\\.H5|\\.HDF5|\\.OME\\.ZARR)$"
 
   - id: output_dir
     type: string
     required: true
     default: './output'
-    description: |
-      Directory where all final workflow outputs are published.
+    description: Directory where final workflow outputs are published.
 
   - id: output_formats
     type: select
@@ -90,216 +55,145 @@ workflow_parameters:
     default: 'ome_zarr'
     description: |
       Final image output format to publish. OME-Zarr is the native workflow
-      output and is always used for Neuroglancer visualization. Choose TIFF to
-      also export the final deconvolved OME-Zarr volumes as TIFF stacks.
+      output. Choose TIFF to also export final deconvolved volumes as TIFF stacks.
     choices:
       - [ 'ome_zarr', 'OME-Zarr output' ]
       - [ 'tiff', 'TIFF stack export' ]
-
-  - id: dx
-    type: real
-    required: false
-    default: -1
-    min: -1
-    description: |
-      Deskew voxel size in X/Y, in microns. Use -1 to leave unset; Nextflow
-      ignores -1 when this parameter is not needed. Full deskew runs require a
-      positive value.
-
-  - id: dz
-    type: real
-    required: true
-    min: 0
-    description: |
-      (required) Deskew/deconvolution voxel size in Z, in microns.
-
-  - id: angle
-    type: real
-    required: false
-    default: 0
-    description: |
-      Deskew shear angle in degrees.
-
-  - id: flip
-    type: integer
-    required: false
-    default: 1
-    description: |
-      Deskew flip/orientation flag passed to the deskew code. Usually 1 or -1.
 
   - id: iter
     type: integer
     required: false
     default: 20
     min: 1
-    description: |
-      Richardson-Lucy iteration count for CUDA deconvolution.
+    description: Richardson-Lucy iteration count for CUDA deconvolution.
 
   - id: background
     type: real
     required: false
     default: 0
-    description: |
-      Constant background subtraction value applied during PSF generation and
-      deconvolution handling.
+    description: Constant background subtraction value.
 
   - id: psf_mode
     type: select
     required: false
     default: 'single'
-    description: |
-      Seed PSF mode used before blind PSF estimation.
+    description: Seed PSF mode used before blind PSF estimation.
     choices:
       - [ 'single', 'Single detection PSF' ]
-      - [ 'light_sheet', 'Detection PSF times rotated illumination PSF (light sheet calculation)' ]
+      - [ 'light_sheet', 'Detection PSF times rotated illumination PSF' ]
 
   - id: psf_model
     type: select
     required: false
     default: 'vectorial'
-    description: |
-      Theoretical PSF model used as the blind-estimation seed.
+    description: Theoretical PSF model used as the blind-estimation seed.
     choices:
       - [ 'vectorial', 'Vectorial Gibson-Lanni model' ]
       - [ 'scalar', 'Scalar Gibson-Lanni model' ]
       - [ 'gaussian', 'Gaussian approximation' ]
 
-  - id: dxy
-    type: real
-    required: false
-    default: -1
-    min: -1
-    description: |
-      Final sample pixel size in X/Y, in microns, unless derived from camera
-      settings. Use -1 to leave unset; Nextflow ignores -1 and the deconvolution
-      wrapper derives or validates the required value.
-
-  - id: camera_pixel_size
-    type: real
-    required: false
-    default: -1
-    min: -1
-    description: |
-      Camera pixel size in microns. With magnification, this can derive dxy.
-      Use -1 to leave unset; Nextflow ignores -1.
-
-  - id: magnification
-    type: real
-    required: false
-    default: -1
-    min: -1
-    description: |
-      Objective/tube magnification. With camera_pixel_size, this can derive dxy.
-      Use -1 to leave unset; Nextflow ignores -1.
-
   - id: wavelength
     type: real
     required: true
     min: 0
-    description: |
-      Emission wavelength in microns for PSF generation and CUDA deconvolution.
+    description: Emission wavelength in microns.
 
   - id: na
     type: real
     required: true
     min: 0
-    description: |
-      Backward-compatible detection numerical aperture. Prefer detection_na and illumination_na.
+    description: Backward-compatible detection numerical aperture.
 
   - id: detection_na
     type: real
     required: false
     default: -1
     min: -1
-    description: |
-      Detection objective numerical aperture. Use -1 to leave unset; Nextflow
-      ignores -1 and falls back to na where supported.
+    description: Detection objective numerical aperture; -1 falls back to na.
 
   - id: illumination_na
     type: real
     required: false
     default: -1
     min: -1
-    description: |
-      Illumination objective numerical aperture for light-sheet PSF metadata.
-      Use -1 to leave unset; Nextflow ignores -1.
+    description: Illumination objective numerical aperture for light-sheet PSF metadata.
 
   - id: ni
     type: real
     required: true
     default: -1
     min: -1
-    description: |
-      Immersion refractive index for PSF generation. Use -1 to leave unset;
-      Nextflow ignores -1 and the deconvolution wrapper validates the required
-      optical inputs.
+    description: Immersion refractive index for PSF generation.
 
   - id: ns
     type: real
     required: true
     default: -1
     min: -1
-    description: |
-      Specimen/sample refractive index. Use -1 to leave unset; Nextflow ignores
-      -1 and the deconvolution wrapper validates the required optical inputs.
+    description: Specimen/sample refractive index.
+
+  - id: dxy
+    type: real
+    required: false
+    default: -1
+    min: -1
+    description: Final sample pixel size in X/Y, in microns.
+
+  - id: dz
+    type: real
+    required: true
+    min: 0
+    description: Sample pixel size in Z, in microns.
+
+  - id: camera_pixel_size
+    type: real
+    required: false
+    default: -1
+    min: -1
+    description: Camera pixel size in microns; with magnification this can derive dxy.
+
+  - id: magnification
+    type: real
+    required: false
+    default: -1
+    min: -1
+    description: Objective/tube magnification; with camera_pixel_size this can derive dxy.
+
+  - id: light_sheet_angle
+    type: real
+    required: false
+    default: 90
+    description: Illumination PSF rotation angle for light-sheet PSF mode.
 
   - id: blind_iters
     type: integer
     required: false
     default: 20
     min: 1
-    description: |
-      MATLAB deconvblind iteration count per blind PSF chunk.
+    description: MATLAB deconvblind iteration count per blind PSF chunk.
 
   - id: chunk_xy
     type: integer
     required: false
     default: 256
-    description: |
-      XY tile size for blind PSF estimation. Values <= 0 auto-size
-      conservatively.
+    description: XY tile size for blind PSF estimation; values <= 0 auto-size.
 
   - id: decon_chunk_xy
     type: integer
     required: false
     default: 0
-    description: |
-      Core XY tile size for CUDA deconvolution. Values <= 0 auto-size from
-      available VRAM.
+    description: Core XY tile size for CUDA deconvolution; values <= 0 auto-size.
 
   - id: decon_workers
     type: integer
     required: false
     default: 1
     min: 1
-    description: |
-      Parallel CUDA deconvolution workers per process.
+    description: Parallel CUDA deconvolution workers per process.
 
   - id: vram_gb
     type: real
     required: false
     default: -1
     min: -1
-    description: |
-      Optional manual GPU memory budget in GB. Use -1 to leave unset; Nextflow
-      ignores -1 and the deconvolution code queries available VRAM.
-
-  - id: neuroglancer_data_mode
-    type: select
-    required: false
-    default: 'auto'
-    description: |
-      Choose which TIFF dimensionality the Neuroglancer output conversion
-      accepts. Auto accepts 2-D images as one-slice layers and 3-D volumes.
-    choices:
-      - [ 'auto', 'Auto-detect 2-D images or 3-D volumes' ]
-      - [ '2d', 'Require 2-D TIFF images and publish each as one Z slice' ]
-      - [ '3d', 'Require 3-D TIFF volumes' ]
-
-vizapp_containers:
-  - docker://hello-world
-
-vizapp_container_runscripts:
-  - run_neuroglancer.sh
-
-vizapp_slurm_partition: super
+    description: Optional manual GPU memory budget in GB.

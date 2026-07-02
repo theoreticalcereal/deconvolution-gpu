@@ -84,6 +84,7 @@ dependencies:
   - lz4-c=1.10.0=h5888daf_1
   - ncurses=6.6=hdb14827_0
   - numcodecs
+  - numba
   - numpy=2.2.6=py310hefbff90_0
   - openjdk=17.0.18=ha668962_0
   - openjpeg=2.5.4=h55fea9a_0
@@ -124,5 +125,4 @@ dependencies:
   - zlib-ng=2.2.5=hde8ca8f_1
   - zstd=1.5.7=hb78ec9c_6
   - pip:
-    - neuroglancer
     - psfmodels

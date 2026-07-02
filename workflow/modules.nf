@@ -1,48 +1,3 @@
-process DESKEW {
-    tag "${cell_name ?: 'deskew'}"
-
-    publishDir "${params.output_dir}", mode: 'copy'
-
-    input:
-    val image_path
-    val cell_name
-    val cell_index
-    val dx
-    val dz
-    val angle
-    val flip
-    val output_dir
-    path decon_runtime
-
-    output:
-    path "Top_shear", emit: deskewed_path
-    path "shear", optional: true, emit: shear_output
-
-    script:
-    """
-    if [ ! -x "${decon_runtime}/decon_env/bin/python3" ] && [ ! -x "${decon_runtime}/decon_env/bin/python" ]; then
-        echo "ERROR: no supported decon runtime found at ${decon_runtime}" >&2
-        exit 1
-    fi
-    export CONDA_PREFIX="${decon_runtime}/decon_env"
-    export CONDA_DEFAULT_ENV=decon_env
-    export PATH="\${CONDA_PREFIX}/bin:\${PATH}"
-    export LD_LIBRARY_PATH=\${CONDA_PREFIX}/lib:\${LD_LIBRARY_PATH:-}
-
-    python3 ${projectDir}/scripts/chunked_deskew.py \\
-        --image_path "${image_path}" \\
-        --cell_name "${cell_name}" \\
-        --cell_index "${cell_index}" \\
-        --dx ${dx} \\
-        --dz ${dz} \\
-        --angle ${angle} \\
-        --flip ${flip} \\
-        --output_dir . \\
-        --deskew_workers ${params.deskew_workers} \\
-        --deskew_prefetch ${params.deskew_prefetch}
-    """
-}
-
 process BUILD_DECON_CONTAINER {
     tag "decon_env"
 
@@ -70,7 +25,7 @@ process BUILD_DECON_CONTAINER {
         -c conda-forge \\
         -c bioconda \\
         --file "${projectDir}/envs/decon-conda.txt"
-    decon_runtime/decon_env/bin/python -m pip install -r "${projectDir}/envs/decon-pip-requirements.txt"
+    decon_runtime/decon_env/bin/python -m pip install --constraint "${projectDir}/envs/decon-pip-constraints.txt" -r "${projectDir}/envs/decon-pip-requirements.txt"
 
     if [ ! -x decon_runtime/decon_env/bin/python3 ] && [ ! -x decon_runtime/decon_env/bin/python ]; then
         echo "ERROR: failed to build a usable decon conda environment." >&2
@@ -274,34 +229,6 @@ process DECON {
         ${vram_gb_flag} \\
         ${cache_dir_flag} \\
         ${no_psf_cache_flag}
-    """
-}
-
-process CONVERT_TIFFS_TO_NEUROGLANCER {
-    tag "neuroglancer"
-
-    input:
-    path decon_tiffs
-    path decon_runtime
-
-    script:
-    def outputRoot = params.output_dir.toString()
-    def outputPrefix = outputRoot.startsWith('/') ? outputRoot : "${workflow.launchDir}/${outputRoot}"
-    """
-    if [ ! -x "${decon_runtime}/decon_env/bin/python3" ] && [ ! -x "${decon_runtime}/decon_env/bin/python" ]; then
-        echo "ERROR: no supported decon runtime found at ${decon_runtime}" >&2
-        exit 1
-    fi
-    export CONDA_PREFIX="${decon_runtime}/decon_env"
-    export CONDA_DEFAULT_ENV=decon_env
-    export PATH="\${CONDA_PREFIX}/bin:\${PATH}"
-    export LD_LIBRARY_PATH=\${CONDA_PREFIX}/lib:\${LD_LIBRARY_PATH:-}
-
-    python3 ${projectDir}/scripts/convert_tiff_to_ome_zarr.py \\
-        --input "\$PWD" \\
-        --output "${outputPrefix}/deconvolved" \\
-        --manifest-output "${outputPrefix}/neuroglancer" \\
-        --volume-mode "${params.neuroglancer_data_mode}"
     """
 }
 
