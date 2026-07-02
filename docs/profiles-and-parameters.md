@@ -14,6 +14,7 @@
 | --- | --- |
 | `input` | Selected ready-to-deconvolve image volumes. |
 | `decon_runtime_dir` | Optional existing decon/deskew runtime. Use `-1` to build the default runtime. |
+| `pyramid_max_downsample` | Required OME-Zarr pyramid depth selection. Default `16` preserves the full `1x, 2x, 4x, 8x, 16x` multiscale output. |
 | `wavelength` | Emission wavelength in microns. |
 | `na` | Detection numerical aperture fallback. |
 | `ni` | Immersion refractive index. |
@@ -27,3 +28,7 @@ wrapper can derive X/Y pixel size.
 
 `output_formats = ome_zarr` writes native OME-Zarr outputs. Set
 `output_formats = tiff` to also publish TIFF stacks under `deconvolved_tiff/`.
+
+`pyramid_max_downsample` controls the maximum XY pyramid level written for
+OME-Zarr outputs. Lower values reduce pyramid generation time and disk usage;
+Z is preserved at full resolution for every level.

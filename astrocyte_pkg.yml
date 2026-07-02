@@ -28,6 +28,7 @@ documentation_files:
   - [ 'profiles-and-parameters.md', 'Profiles and Parameters' ]
   - [ 'workflow-output.md', 'workflow/output - Output from the Workflow' ]
   - [ 'outputs-and-troubleshooting.md', 'Outputs and Troubleshooting' ]
+  - [ 'astrocyte-project-setup.md', 'Creating an Astrocyte Project' ]
 
 workflow_modules:
   - 'lmod/8.4'
@@ -53,6 +54,21 @@ workflow_parameters:
     choices:
       - [ 'ome_zarr', 'OME-Zarr output' ]
       - [ 'tiff', 'TIFF stack export' ]
+
+  - id: pyramid_max_downsample
+    type: select
+    required: true
+    default: '16'
+    description: |
+      Maximum XY downsampling level for OME-Zarr multiscale pyramid output.
+      Level 0 is full resolution; higher levels downsample rows and columns by
+      the selected factor while preserving Z resolution.
+    choices:
+      - [ '1', 'Full resolution only' ]
+      - [ '2', 'Build 2x pyramid level' ]
+      - [ '4', 'Build up to 4x pyramid levels' ]
+      - [ '8', 'Build up to 8x pyramid levels' ]
+      - [ '16', 'Build up to 16x pyramid levels' ]
 
   - id: decon_runtime_dir
     type: string

@@ -160,6 +160,7 @@ process DECON {
     def decon_workers_flag = flag('decon_workers', params.decon_workers)
     def overlap_xy_flag  = flag('overlap_xy', params.overlap_xy)
     def vram_gb_flag     = flag('vram_gb', params.vram_gb)
+    def pyramid_max_downsample_flag = flag('pyramid_max_downsample', params.pyramid_max_downsample)
     def cache_dir_flag   = flag('cache_dir', params.psf_cache_dir)
     def no_psf_cache_flag = params.no_psf_cache ? "--no_psf_cache"                    : ""
 
@@ -255,6 +256,7 @@ process DECON {
         ${decon_workers_flag} \\
         ${overlap_xy_flag} \\
         ${vram_gb_flag} \\
+        ${pyramid_max_downsample_flag} \\
         ${cache_dir_flag} \\
         ${no_psf_cache_flag}
     """

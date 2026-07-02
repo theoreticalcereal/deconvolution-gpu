@@ -50,7 +50,26 @@ def discover_image_volumes(input_dir: Path | str) -> list[Path]:
     return sorted(paths, key=lambda path: path.name)
 
 
-def multiscales_metadata(layer_name: str, downsample_factors: Iterable[int] = PYRAMID_DOWNSAMPLE_FACTORS) -> dict:
+def _selected_downsample_factors(
+    max_downsample: int,
+    downsample_factors: Iterable[int] = PYRAMID_DOWNSAMPLE_FACTORS,
+) -> tuple[int, ...]:
+    max_downsample = int(max_downsample)
+    if max_downsample < 1:
+        raise ValueError(f"max_downsample must be >= 1, got {max_downsample}")
+    return tuple(
+        int(factor)
+        for factor in downsample_factors
+        if int(factor) <= max_downsample
+    )
+
+
+def multiscales_metadata(
+    layer_name: str,
+    downsample_factors: Iterable[int] = PYRAMID_DOWNSAMPLE_FACTORS,
+    max_downsample: int = 16,
+) -> dict:
+    selected_factors = _selected_downsample_factors(max_downsample, downsample_factors)
     datasets = [
         {
             "path": str(level),
@@ -58,7 +77,7 @@ def multiscales_metadata(layer_name: str, downsample_factors: Iterable[int] = PY
                 {"type": "scale", "scale": [1, int(factor), int(factor)]}
             ],
         }
-        for level, factor in enumerate(downsample_factors)
+        for level, factor in enumerate(selected_factors)
     ]
     return {
         "multiscales": [
@@ -130,6 +149,7 @@ def create_ome_zarr_array(
     dtype,
     chunks: Iterable[int],
     layer_name: str | None = None,
+    max_downsample: int = 16,
     overwrite: bool = True,
 ):
     try:
@@ -145,7 +165,7 @@ def create_ome_zarr_array(
     (zarr_path / ".zgroup").write_text(json.dumps({"zarr_format": 2}) + "\n")
     (zarr_path / ".zattrs").write_text(
         json.dumps(
-            multiscales_metadata(layer_name or image_stem(zarr_path)),
+            multiscales_metadata(layer_name or image_stem(zarr_path), max_downsample=max_downsample),
             indent=2,
             sort_keys=True,
         )
@@ -185,11 +205,8 @@ def write_downsampled_pyramid(
     source_chunks = _normalise_chunks(getattr(source, "chunks", None), source_shape)
     dtype = getattr(source, "dtype", None)
 
-    for level, factor in enumerate(downsample_factors):
-        factor = int(factor)
+    for level, factor in enumerate(_selected_downsample_factors(max_downsample, downsample_factors)):
         if level == 0 or factor == 1:
-            continue
-        if factor > int(max_downsample):
             continue
         shape = _downsampled_shape_xy(source_shape, factor)
         chunks = _downsampled_chunks(source_chunks, shape, factor)
@@ -211,7 +228,14 @@ def write_downsampled_pyramid(
             target[z_start:z_stop, :, :] = source[z_start:z_stop, ::factor, ::factor]
 
 
-def write_ome_zarr_array(path: Path | str, array, *, chunks=None, layer_name: str | None = None) -> Path:
+def write_ome_zarr_array(
+    path: Path | str,
+    array,
+    *,
+    chunks=None,
+    layer_name: str | None = None,
+    max_downsample: int = 16,
+) -> Path:
     shape = tuple(int(axis) for axis in array.shape)
     if len(shape) != 3:
         raise ValueError(f"OME-Zarr workflow volumes must be 3-D, got shape {shape}")
@@ -229,8 +253,9 @@ def write_ome_zarr_array(path: Path | str, array, *, chunks=None, layer_name: st
         dtype=array.dtype,
         chunks=chunks,
         layer_name=layer_name,
+        max_downsample=max_downsample,
     )
     zarr_array[:] = array
-    write_downsampled_pyramid(output)
+    write_downsampled_pyramid(output, max_downsample=max_downsample)
     log_progress(f"Finished OME-Zarr volume: {output.resolve()}")
     return output.resolve()

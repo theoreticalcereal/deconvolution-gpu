@@ -61,6 +61,22 @@ class DeconvolutionWiringTest(unittest.TestCase):
         self.assertIn('runtime_env="${decon_runtime}/\\${candidate}"', modules_text)
         self.assertIn('export CONDA_PREFIX="\\${runtime_env}"', modules_text)
 
+    def test_downsampling_parameter_is_exposed_and_forwarded(self):
+        config_text = (ROOT / "workflow/configs/nextflow.config").read_text(encoding="utf-8")
+        package_text = (ROOT / "astrocyte_pkg.yml").read_text(encoding="utf-8")
+        modules_text = (ROOT / "workflow/modules.nf").read_text(encoding="utf-8")
+        script_text = (ROOT / "workflow/scripts/decon_wrapper.py").read_text(encoding="utf-8")
+
+        self.assertIn("pyramid_max_downsample = 16", config_text)
+        self.assertIn("id: pyramid_max_downsample", package_text)
+        self.assertIn("type: select", package_text)
+        self.assertIn("required: true", package_text)
+        self.assertIn("default: '16'", package_text)
+        self.assertIn("pyramid_max_downsample_flag = flag('pyramid_max_downsample', params.pyramid_max_downsample)", modules_text)
+        self.assertIn("${pyramid_max_downsample_flag}", modules_text)
+        self.assertIn('parser.add_argument("--pyramid_max_downsample"', script_text)
+        self.assertIn("max_downsample=args.pyramid_max_downsample", script_text)
+
 
 if __name__ == "__main__":
     unittest.main()

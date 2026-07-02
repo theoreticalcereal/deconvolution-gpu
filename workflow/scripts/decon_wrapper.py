@@ -498,6 +498,8 @@ def main() -> None:
                         help="Override CUDA decon XY overlap. <=0 uses a capped PSF/4 estimate.")
     parser.add_argument("--vram_gb", type=float, default=None,
                         help="Override detected free VRAM in GiB for auto chunk sizing.")
+    parser.add_argument("--pyramid_max_downsample", type=int, choices=(1, 2, 4, 8, 16), default=16,
+                        help="Maximum XY downsampling factor for OME-Zarr pyramid output.")
     parser.add_argument("--cache_dir", default=None,
                         help="Directory for cached blind PSF estimates.")
     parser.add_argument("--no_psf_cache", action="store_true",
@@ -707,7 +709,12 @@ def main() -> None:
             )
             out_name = _decon_ome_zarr_output_name(image_path, original_name_map)
             log_progress(f"Writing deconvolved OME-Zarr output: {out_name}")
-            write_ome_zarr_array(out_name, output, layer_name=image_stem(out_name))
+            write_ome_zarr_array(
+                out_name,
+                output,
+                layer_name=image_stem(out_name),
+                max_downsample=args.pyramid_max_downsample,
+            )
         else:
             output = deconvolve_tiff(
                 image_path=image_path,
