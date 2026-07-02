@@ -25,7 +25,8 @@ By default, this package runs `BUILD_DECON_CONTAINER` and creates its own conda
 runtime. For integrated deskew-to-deconvolution runs, pass
 `--decon_runtime_dir` to reuse an existing runtime and skip that build step.
 The path may point to a directory containing `decon_env/` or `deskew_env/`, or
-directly to a conda environment directory.
+directly to a conda environment directory. Leave it at `-1` to build the default
+runtime.
 
 ## Inputs
 

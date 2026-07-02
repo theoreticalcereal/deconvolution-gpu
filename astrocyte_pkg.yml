@@ -57,11 +57,12 @@ workflow_parameters:
   - id: decon_runtime_dir
     type: string
     required: false
-    default: ''
+    default: '-1'
     description: |
       Optional existing runtime directory to reuse instead of building a new
       conda environment. This can point to a deconvolution runtime, a deskew
-      runtime, or directly to the conda environment directory.
+      runtime, or directly to the conda environment directory. Use -1 to build
+      the default deconvolution runtime.
 
   - id: iter
     type: integer

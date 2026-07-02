@@ -13,7 +13,7 @@
 | Parameter | Description |
 | --- | --- |
 | `input` | Selected ready-to-deconvolve image volumes. |
-| `decon_runtime_dir` | Optional existing decon/deskew runtime. When set, `BUILD_DECON_CONTAINER` is skipped. |
+| `decon_runtime_dir` | Optional existing decon/deskew runtime. Use `-1` to build the default runtime. |
 | `wavelength` | Emission wavelength in microns. |
 | `na` | Detection numerical aperture fallback. |
 | `ni` | Immersion refractive index. |

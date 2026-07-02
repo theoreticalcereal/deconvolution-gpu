@@ -24,4 +24,5 @@ already been deskewed by `deskew-gpu`.
 
 Set `decon_runtime_dir` to reuse a runtime built upstream by `deskew-gpu`. The
 workflow accepts a path containing `decon_env/` or `deskew_env/`, or a direct
-conda environment path.
+conda environment path. The sentinel value `-1` means no external runtime was
+supplied and the workflow should build its own runtime.

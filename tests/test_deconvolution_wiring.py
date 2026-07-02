@@ -45,11 +45,14 @@ class DeconvolutionWiringTest(unittest.TestCase):
         config_text = (ROOT / "workflow/configs/nextflow.config").read_text(encoding="utf-8")
         package_text = (ROOT / "astrocyte_pkg.yml").read_text(encoding="utf-8")
 
-        self.assertIn("decon_runtime_dir = ''", config_text)
+        self.assertIn("decon_runtime_dir = '-1'", config_text)
         self.assertIn("id: decon_runtime_dir", package_text)
-        self.assertIn("if (params.decon_runtime_dir)", main_text)
-        self.assertIn("file(params.decon_runtime_dir, checkIfExists: true)", main_text)
+        self.assertIn("default: '-1'", package_text)
+        self.assertIn("def isExternalRuntimeSupplied(value)", main_text)
+        self.assertIn("if (isExternalRuntimeSupplied(params.decon_runtime_dir))", main_text)
+        self.assertIn("file(params.decon_runtime_dir.toString(), checkIfExists: true)", main_text)
         self.assertIn("else {\n        BUILD_DECON_CONTAINER()", main_text)
+        self.assertIn("text != 'true'", main_text)
 
     def test_decon_processes_accept_deskew_runtime_layout(self):
         modules_text = (ROOT / "workflow/modules.nf").read_text(encoding="utf-8")

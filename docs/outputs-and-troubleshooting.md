@@ -24,4 +24,5 @@ installed by this package.
 
 For integrated deskew-to-deconvolution runs, pass `decon_runtime_dir` to reuse a
 runtime built by `deskew-gpu`. The deconvolution workflow accepts both
-`decon_env` and `deskew_env` runtime layouts.
+`decon_env` and `deskew_env` runtime layouts. Leave `decon_runtime_dir` at `-1`
+when no external runtime should be reused.

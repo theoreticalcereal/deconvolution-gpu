@@ -48,10 +48,18 @@ def normalizeInputPatterns(input, commandLine = null) {
         .findAll { it }
 }
 
+def isExternalRuntimeSupplied(value) {
+    if (value == null) {
+        return false
+    }
+    def text = value.toString().trim()
+    return text && text != '-1' && text != '-1.0' && text != 'true'
+}
+
 workflow {
-    if (params.decon_runtime_dir) {
+    if (isExternalRuntimeSupplied(params.decon_runtime_dir)) {
         log.info "Using external deconvolution runtime: ${params.decon_runtime_dir}"
-        decon_container_ch = Channel.value(file(params.decon_runtime_dir, checkIfExists: true))
+        decon_container_ch = Channel.value(file(params.decon_runtime_dir.toString(), checkIfExists: true))
     } else {
         BUILD_DECON_CONTAINER()
         decon_container_ch = BUILD_DECON_CONTAINER.out.image
