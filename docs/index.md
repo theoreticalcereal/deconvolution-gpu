@@ -26,3 +26,4 @@ stacks in addition to native OME-Zarr output.
 | [Profiles and Parameters](profiles-and-parameters.md) | BioHPC profiles and Astrocyte parameters. |
 | [Workflow Output](workflow-output.md) | Published output layout. |
 | [Outputs and Troubleshooting](outputs-and-troubleshooting.md) | Common runtime and data issues. |
+| [Creating an Astrocyte Project](astrocyte-project-setup.md) | Project creation and input upload steps. |
