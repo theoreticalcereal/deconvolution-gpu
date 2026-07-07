@@ -35,11 +35,11 @@ from the first sorted input volume and reused for every volume in the same
 
 ## PSF to OTF Conversion
 
-Blind PSF estimation is still TIFF-backed internally because MATLAB
-`deconvblind` and `pycudadecon.TemporaryOTF` consume TIFF files. The wrapper
-materializes the selected OME-Zarr volume or TIFF input into temporary TIFF
-chunks for PSF estimation, writes the merged blind PSF to `estimated_psf.tif`,
-and then builds the OTF from that file.
+Blind PSF estimation is still TIFF-backed at the MATLAB boundary because
+MATLAB `deconvblind` and `pycudadecon.TemporaryOTF` consume TIFF files. OME-Zarr
+inputs are opened directly at level 0 for PSF tiling; only the temporary MATLAB
+tile inputs, seed PSFs, tile PSF outputs, and merged `estimated_psf.tif` are
+written as TIFFs. The wrapper then builds the OTF from the merged PSF file.
 
 The OTF is built with:
 

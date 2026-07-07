@@ -17,9 +17,11 @@ first sorted volume is used for blind PSF estimation.
 
 Package runs normally pass OME-Zarr volumes created by `STAGE_DECON_INPUT`.
 For light-sheet data, run `deskew-gpu` first and select its `Top_shear/`
-outputs here. Compatibility runs can still pass TIFF stacks directly. Channel
-and timepoint filtering is not performed by the wrapper, so select only inputs
-intended for one optical configuration.
+outputs here. OME-Zarr inputs are opened directly at level 0 for PSF tile
+selection, so the full volume is not first materialized as a temporary TIFF.
+Compatibility runs can still pass TIFF stacks directly. Channel and timepoint
+filtering is not performed by the wrapper, so select only inputs intended for
+one optical configuration.
 
 Example normalized names:
 
@@ -105,7 +107,9 @@ reflect padding.
 
 ## MATLAB `deconvblind`
 
-MATLAB still operates on temporary TIFF chunks. For each tile, the Python code:
+MATLAB still operates on temporary TIFF chunks. For OME-Zarr inputs, Python
+reads the selected tile from the level-0 Zarr array before this TIFF handoff.
+For each tile, the Python code:
 
 1. Writes the chunk to a temporary TIFF.
 2. Writes the seed PSF to a temporary TIFF.

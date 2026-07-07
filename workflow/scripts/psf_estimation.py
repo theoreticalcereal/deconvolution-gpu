@@ -2,7 +2,7 @@
 # Blind PSF estimation via chunked MATLAB deconvblind + weighted merge.
 #
 # Workflow:
-#   Memory-map the first deskewed TIFF.
+#   Open the first deskewed TIFF or OME-Zarr volume as an array-like object.
 #   Split it into full-Z XY tiles sized from available VRAM unless overridden.
 #   Tiles are read ahead, written to temp TIFFs, and sent to MATLAB deconvblind.
 #   MATLAB writes back an estimated PSF TIFF per tile.
@@ -10,6 +10,8 @@
 #
 # The returned PSF is float32, normalised to sum=1, and saved as estimated_psf.tif
 # next to the input image so pycudadecon can pick it up via TemporaryOTF.
+
+from __future__ import annotations
 
 import argparse
 import concurrent.futures as futures
@@ -29,6 +31,12 @@ from pathlib import Path
 import numpy as np
 import psfmodels as pm
 from tifffile import TiffFile, imread, imwrite, memmap as tiff_memmap
+
+try:
+    from ome_zarr_io import is_ome_zarr_path, open_ome_zarr_array
+except ModuleNotFoundError:
+    sys.path.append(str(Path(__file__).resolve().parent))
+    from ome_zarr_io import is_ome_zarr_path, open_ome_zarr_array
 
 DEFAULT_CPU_THREADS = 32
 DEFAULT_SNR_WEIGHT_CAP = 100.0
@@ -379,6 +387,22 @@ def open_tiff_memmap(path: str | Path) -> np.ndarray:
     except Exception:
         with TiffFile(str(path)) as tif:
             return ensure_3d_volume(tif.asarray(out="memmap"))
+
+
+def open_psf_source(path: str | Path):
+    """
+    Return a read-only array-like 3-D volume for blind PSF estimation.
+
+    TIFF inputs are memory-mapped. OME-Zarr inputs are opened at level 0 so
+    downstream tile slicing can read only the chunks needed for MATLAB.
+    """
+    path = Path(path)
+    if is_ome_zarr_path(path):
+        print(f"Opening OME-Zarr {path} for PSF estimation...", flush=True)
+        return open_ome_zarr_array(path, mode="r")
+
+    print(f"Memory-mapping {path} for PSF estimation...", flush=True)
+    return open_tiff_memmap(path)
 
 
 def detect_vram_bytes() -> int | None:
@@ -762,11 +786,11 @@ def estimate_psf_from_chunks(
 ) -> np.ndarray:
     """
     Estimate a PSF by running MATLAB deconvblind on spatial XY chunks of the
-    first deskewed TIFF and merging per-chunk estimates by SNR-weighted mean.
+    first deskewed volume and merging per-chunk estimates by SNR-weighted mean.
 
     Parameters
     ----------
-    image_path  : path to the deskewed input TIFF (full Z stack, 3-D).
+    image_path  : path to the deskewed input TIFF or OME-Zarr (full Z stack, 3-D).
     psf_seed    : initial PSF guess, float32 numpy array (nz_psf, ny_psf, nx_psf).
                   Typically the output of generate_theoretical_psf().
     n_iters     : number of deconvblind iterations per chunk.
@@ -784,8 +808,7 @@ def estimate_psf_from_chunks(
     image_path = Path(image_path)
     script_dir = Path(script_dir) if script_dir else Path(__file__).parent
 
-    print(f"Memory-mapping {image_path} for PSF estimation...", flush=True)
-    volume = open_tiff_memmap(image_path)  # (nz, ny, nx)
+    volume = open_psf_source(image_path)  # (nz, ny, nx)
     if volume.ndim != 3:
         raise ValueError(f"Expected a 3-D volume, got shape {volume.shape}")
 
@@ -997,7 +1020,7 @@ def estimate_psf_from_chunks(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Estimate PSF from a deskewed TIFF using chunked deconvblind."
+        description="Estimate PSF from a deskewed TIFF or OME-Zarr using chunked deconvblind."
     )
     parser.add_argument("--image_path",  required=True)
     parser.add_argument("--output_path", required=True,

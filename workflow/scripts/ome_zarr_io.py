@@ -13,6 +13,7 @@ from typing import Iterable
 TIFF_SUFFIXES = {".tif", ".tiff"}
 OME_ZARR_SUFFIX = ".ome.zarr"
 PYRAMID_DOWNSAMPLE_FACTORS = (1, 2, 4, 8, 16)
+SPATIAL_AXES_ZYX = ("z", "y", "x")
 
 
 def log_progress(message: str) -> None:
@@ -85,14 +86,17 @@ def multiscales_metadata(
                 "version": "0.4",
                 "name": layer_name,
                 "axes": [
-                    {"name": "z", "type": "space"},
-                    {"name": "y", "type": "space"},
-                    {"name": "x", "type": "space"},
+                    {"name": axis, "type": "space"}
+                    for axis in SPATIAL_AXES_ZYX
                 ],
                 "datasets": datasets,
             }
         ]
     }
+
+
+def set_zyx_array_dimensions(array) -> None:
+    array.attrs["_ARRAY_DIMENSIONS"] = list(SPATIAL_AXES_ZYX)
 
 
 def downsample_xy(array, factor: int):
@@ -176,7 +180,7 @@ def create_ome_zarr_array(
         f"path={zarr_path}, shape={tuple(int(axis) for axis in shape)}, "
         f"chunks={tuple(int(axis) for axis in chunks)}, dtype={dtype}"
     )
-    return zarr.open(
+    array = zarr.open(
         str(zarr_path / "0"),
         mode="w",
         shape=tuple(int(axis) for axis in shape),
@@ -184,6 +188,8 @@ def create_ome_zarr_array(
         dtype=dtype,
         compressor=None,
     )
+    set_zyx_array_dimensions(array)
+    return array
 
 
 def write_downsampled_pyramid(
@@ -223,6 +229,7 @@ def write_downsampled_pyramid(
             dtype=dtype,
             compressor=None,
         )
+        set_zyx_array_dimensions(target)
         for z_start in range(0, shape[0], chunks[0]):
             z_stop = min(z_start + chunks[0], shape[0])
             target[z_start:z_stop, :, :] = source[z_start:z_stop, ::factor, ::factor]

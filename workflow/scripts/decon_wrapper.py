@@ -637,17 +637,7 @@ def main() -> None:
         f"sum={float(psf_seed.sum()):.6g}"
     )
 
-    psf_tempdir = None
     psf_input_path = image_inputs[0]
-    if is_ome_zarr_path(psf_input_path):
-        psf_tempdir = tempfile.TemporaryDirectory()
-        materialized_psf_input = Path(psf_tempdir.name) / f"{image_stem(psf_input_path)}.tif"
-        log_progress(
-            "Materializing first OME-Zarr input to temporary TIFF for blind PSF estimation: "
-            f"{psf_input_path.name}",
-        )
-        imwrite(str(materialized_psf_input), np.asarray(open_ome_zarr_array(psf_input_path, mode="r")))
-        psf_input_path = materialized_psf_input
 
     log_progress(f"Running blind PSF estimation on first image volume: {psf_input_path}")
     psf_start = time.perf_counter()
@@ -671,9 +661,6 @@ def main() -> None:
         snr_weight_cap=args.snr_weight_cap,
         blind_z_slices=args.blind_z_slices,
     )
-    if psf_tempdir is not None:
-        psf_tempdir.cleanup()
-        log_progress("Removed temporary materialized PSF input directory")
     psf_save_path = image_dir / "estimated_psf.tif"
     psf_save_path = _write_tiff_near_input_or_cwd(psf_save_path, psf)
     published_psf_path = Path.cwd() / "estimated_psf.tif"
