@@ -92,6 +92,7 @@ process DECON {
     tag "decon"
 
     publishDir "${params.output_dir}", mode: 'copy', pattern: 'estimated_psf.tif'
+    publishDir "${params.output_dir}", mode: 'copy', pattern: 'DB2_*'
 
     maxForks 8
     cpus 72

@@ -102,16 +102,20 @@ single-threaded scheduler. The Nextflow process requests one GPU, so increasing
 
 ## Intensity Rescaling
 
-After chunks are merged, the output is linearly mapped back to the original
-input intensity range:
+For native OME-Zarr inputs, deconvolution is streamed through a temporary raw
+Zarr store in the Nextflow work directory. This avoids holding the full
+deconvolved stack in RAM. The raw store is then used to compute global output
+min/max, and the final OME-Zarr is written chunk-by-chunk after linear mapping
+back to the original input intensity range:
 
 ```text
 scaled = (output - output_min) / (output_max - output_min)
 scaled = scaled * (input_max - input_min) + input_min
 ```
 
-The final array is rounded, clipped to `uint16`, and written as OME-Zarr for
-native inputs.
+The final array is rounded, clipped to `uint16`, and written as OME-Zarr.
+Compatibility TIFF inputs still materialize the deconvolved array before TIFF
+writing.
 
 ## Outputs
 
@@ -124,7 +128,7 @@ The merged PSF is published to:
 For each native OME-Zarr input, the process writes:
 
 ```text
-<output_dir>/deconvolved/DB2_<sample>.ome.zarr/
+<output_dir>/DB2_<sample>.ome.zarr/
 ```
 
 Compatibility TIFF runs may still emit `DB2_<input_stem>.tif`, but the package

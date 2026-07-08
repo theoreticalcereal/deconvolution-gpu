@@ -44,8 +44,9 @@ try:
         image_stem,
         is_ome_zarr_path,
         log_progress,
+        create_ome_zarr_array,
         open_ome_zarr_array,
-        write_ome_zarr_array,
+        write_downsampled_pyramid,
     )
 except ModuleNotFoundError:
     sys.path.append(str(Path(__file__).resolve().parent))
@@ -54,8 +55,9 @@ except ModuleNotFoundError:
         image_stem,
         is_ome_zarr_path,
         log_progress,
+        create_ome_zarr_array,
         open_ome_zarr_array,
-        write_ome_zarr_array,
+        write_downsampled_pyramid,
     )
 
 
@@ -245,6 +247,23 @@ def _match_input_intensity_range(output: np.ndarray, input_volume: np.ndarray) -
     return np.clip(np.rint(scaled), 0, dtype_max).astype(np.uint16)
 
 
+def _match_block_intensity_range(
+    block: np.ndarray,
+    input_min: float,
+    input_max: float,
+    output_min: float,
+    output_max: float,
+) -> np.ndarray:
+    dtype_max = float(np.iinfo(np.uint16).max)
+    if output_max > output_min and input_max > input_min:
+        scaled = block.astype(np.float32, copy=False)
+        scaled = (scaled - output_min) / (output_max - output_min)
+        scaled = scaled * (input_max - input_min) + input_min
+    else:
+        scaled = block
+    return np.clip(np.rint(scaled), 0, dtype_max).astype(np.uint16)
+
+
 # ---------------------------------------------------------------------------
 # Per-TIFF deconvolution
 # ---------------------------------------------------------------------------
@@ -281,23 +300,21 @@ def _auto_decon_max_xy(
     return min(max_xy, 1024, image_max_xy)
 
 
-def deconvolve_volume(
+def _build_deconvolution_graph(
     volume,
     image_name: str,
     psf: np.ndarray,
     n_iters: int,
     dz: float,
     dxy: float,
-    wavelength: float,
-    na: float,
-    ni: float,
+    otf_path: str,
     chunk_xy: int = 0,
     vram_gb: float | None = None,
     decon_workers: int = 1,
     overlap_xy: int = 0,
-) -> np.ndarray:
+) -> tuple[da.Array, int]:
     """
-    Deconvolve a single 3-D volume using the supplied PSF.
+    Build a lazy deconvolution graph for a single 3-D volume.
 
     Chunks are full-Z XY tiles with PSF-dependent XY overlap so tile boundaries
     are invisible in the merged output.  Z is never split.  `chunk_xy` is the
@@ -340,6 +357,38 @@ def deconvolve_volume(
         f"iterations_per_chunk={n_iters}, workers={decon_workers}"
     )
 
+    return lazy.map_overlap(
+        _decon_chunk,
+        depth={0: 0, 1: overlap_xy, 2: overlap_xy},
+        boundary="reflect",
+        dtype=np.uint16,
+        otf_path=otf_path,
+        dz=dz,
+        dxy=dxy,
+        n_iters=n_iters,
+        total_chunks=total_chunks,
+    ), decon_workers
+
+
+def _deconvolution_scheduler(decon_workers: int) -> str:
+    return "threads" if decon_workers > 1 else "single-threaded"
+
+
+def deconvolve_volume(
+    volume,
+    image_name: str,
+    psf: np.ndarray,
+    n_iters: int,
+    dz: float,
+    dxy: float,
+    wavelength: float,
+    na: float,
+    ni: float,
+    chunk_xy: int = 0,
+    vram_gb: float | None = None,
+    decon_workers: int = 1,
+    overlap_xy: int = 0,
+) -> np.ndarray:
     temp_psf = tempfile.NamedTemporaryFile(suffix=".tif", delete=False)
     psf_path = Path(temp_psf.name)
     temp_psf.close()
@@ -355,18 +404,20 @@ def deconvolve_volume(
             na=na,
             nimm=ni,
         ) as otf:
-            processed = lazy.map_overlap(
-                _decon_chunk,
-                depth={0: 0, 1: overlap_xy, 2: overlap_xy},
-                boundary="reflect",
-                dtype=np.uint16,
-                otf_path=otf.path,
-                dz=dz,
-                dxy=dxy,
-                n_iters=n_iters,
-                total_chunks=total_chunks,
+            processed, decon_workers = _build_deconvolution_graph(
+                volume,
+                image_name,
+                psf,
+                n_iters,
+                dz,
+                dxy,
+                otf.path,
+                chunk_xy=chunk_xy,
+                vram_gb=vram_gb,
+                decon_workers=decon_workers,
+                overlap_xy=overlap_xy,
             )
-            scheduler = "threads" if decon_workers > 1 else "single-threaded"
+            scheduler = _deconvolution_scheduler(decon_workers)
             log_progress(
                 f"Computing deconvolution graph for {image_name}: "
                 f"scheduler={scheduler}, workers={decon_workers}"
@@ -449,6 +500,139 @@ def deconvolve_ome_zarr(
         decon_workers=decon_workers,
         overlap_xy=overlap_xy,
     )
+
+
+def _zarr_chunks_from_dask(array: da.Array) -> tuple[int, int, int]:
+    return tuple(int(axis_chunks[0]) for axis_chunks in array.chunks)
+
+
+def _default_output_chunks(shape: tuple[int, int, int]) -> tuple[int, int, int]:
+    return (min(16, shape[0]), min(256, shape[1]), min(256, shape[2]))
+
+
+def deconvolve_ome_zarr_to_zarr(
+    image_path: Path,
+    output_path: Path | str,
+    psf: np.ndarray,
+    n_iters: int,
+    dz: float,
+    dxy: float,
+    wavelength: float,
+    na: float,
+    ni: float,
+    chunk_xy: int = 0,
+    vram_gb: float | None = None,
+    decon_workers: int = 1,
+    overlap_xy: int = 0,
+    max_downsample: int = 16,
+) -> Path:
+    log_progress(f"Opening OME-Zarr for streaming deconvolution: {image_path}")
+    volume = open_ome_zarr_array(image_path, mode="r")
+    if volume.ndim != 3:
+        raise ValueError(f"Expected 3-D OME-Zarr volume, got shape {volume.shape}")
+
+    output_path = Path(output_path)
+    temp_psf = tempfile.NamedTemporaryFile(suffix=".tif", delete=False)
+    psf_path = Path(temp_psf.name)
+    temp_psf.close()
+    try:
+        log_progress(f"Writing temporary PSF for OTF creation: {psf_path}")
+        imwrite(str(psf_path), psf.astype(np.float32, copy=False))
+        log_progress("Creating temporary OTF for streaming CUDA deconvolution")
+        with TemporaryOTF(
+            str(psf_path),
+            dzpsf=dz,
+            dxpsf=dxy,
+            wavelength=int(round(wavelength * 1000)),
+            na=na,
+            nimm=ni,
+        ) as otf:
+            processed, decon_workers = _build_deconvolution_graph(
+                volume,
+                image_path.name,
+                psf,
+                n_iters,
+                dz,
+                dxy,
+                otf.path,
+                chunk_xy=chunk_xy,
+                vram_gb=vram_gb,
+                decon_workers=decon_workers,
+                overlap_xy=overlap_xy,
+            )
+            scheduler = _deconvolution_scheduler(decon_workers)
+            try:
+                import zarr
+            except ImportError as exc:
+                raise RuntimeError("Missing required dependency 'zarr' for streaming OME-Zarr deconvolution") from exc
+
+            with tempfile.TemporaryDirectory(prefix=".decon_raw_", dir=Path.cwd()) as temp_dir:
+                raw_path = Path(temp_dir) / "raw.zarr"
+                raw_chunks = _zarr_chunks_from_dask(processed)
+                log_progress(
+                    "Streaming raw deconvolution chunks to temporary Zarr: "
+                    f"path={raw_path}, shape={processed.shape}, chunks={raw_chunks}"
+                )
+                raw_array = zarr.open(
+                    str(raw_path),
+                    mode="w",
+                    shape=tuple(int(axis) for axis in processed.shape),
+                    chunks=raw_chunks,
+                    dtype=np.uint16,
+                    compressor=None,
+                )
+                da.store(processed, raw_array, lock=False, compute=False).compute(
+                    scheduler=scheduler,
+                    num_workers=decon_workers,
+                )
+
+                raw_lazy = da.from_array(raw_array, chunks=processed.chunks, asarray=False, lock=False)
+                input_lazy = da.from_array(volume, chunks=processed.chunks, asarray=False, lock=False)
+                input_min, input_max, output_min, output_max = da.compute(
+                    input_lazy.min(),
+                    input_lazy.max(),
+                    raw_lazy.min(),
+                    raw_lazy.max(),
+                    scheduler="threads",
+                    num_workers=max(1, decon_workers),
+                )
+                input_min = float(input_min)
+                input_max = float(input_max)
+                output_min = float(output_min)
+                output_max = float(output_max)
+                log_progress(
+                    "  Streaming intensity match: "
+                    f"input=({input_min:.6g}, {input_max:.6g}), "
+                    f"raw_output=({output_min:.6g}, {output_max:.6g})"
+                )
+
+                final_array = create_ome_zarr_array(
+                    output_path,
+                    shape=tuple(int(axis) for axis in volume.shape),
+                    dtype=np.uint16,
+                    chunks=_default_output_chunks(tuple(int(axis) for axis in volume.shape)),
+                    layer_name=image_stem(output_path),
+                    max_downsample=int(max_downsample),
+                )
+                scaled = raw_lazy.map_blocks(
+                    _match_block_intensity_range,
+                    dtype=np.uint16,
+                    input_min=input_min,
+                    input_max=input_max,
+                    output_min=output_min,
+                    output_max=output_max,
+                )
+                log_progress(f"Streaming scaled deconvolution output to OME-Zarr: {output_path}")
+                da.store(scaled, final_array, lock=False, compute=False).compute(
+                    scheduler="threads",
+                    num_workers=max(1, decon_workers),
+                )
+        write_downsampled_pyramid(output_path, max_downsample=int(max_downsample))
+        log_progress(f"Finished streaming OME-Zarr deconvolution output: {output_path.resolve()}")
+        return output_path.resolve()
+    finally:
+        psf_path.unlink(missing_ok=True)
+        log_progress(f"Removed temporary PSF: {psf_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -680,8 +864,11 @@ def main() -> None:
         volume_start = time.perf_counter()
         log_progress(f"Starting deconvolution input {index}/{len(image_inputs)}: {image_path.name}")
         if is_ome_zarr_path(image_path):
-            output = deconvolve_ome_zarr(
+            out_name = _decon_ome_zarr_output_name(image_path, original_name_map)
+            log_progress(f"Writing deconvolved OME-Zarr output: {out_name}")
+            deconvolve_ome_zarr_to_zarr(
                 image_path=image_path,
+                output_path=out_name,
                 psf=psf,
                 n_iters=args.iter,
                 dz=dz,
@@ -693,13 +880,6 @@ def main() -> None:
                 vram_gb=args.vram_gb,
                 decon_workers=args.decon_workers,
                 overlap_xy=args.overlap_xy,
-            )
-            out_name = _decon_ome_zarr_output_name(image_path, original_name_map)
-            log_progress(f"Writing deconvolved OME-Zarr output: {out_name}")
-            write_ome_zarr_array(
-                out_name,
-                output,
-                layer_name=image_stem(out_name),
                 max_downsample=args.pyramid_max_downsample,
             )
         else:

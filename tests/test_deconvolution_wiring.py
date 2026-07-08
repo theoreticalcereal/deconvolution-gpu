@@ -1,8 +1,118 @@
 from pathlib import Path
+import importlib.util
+import sys
+import tempfile
+import types
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_PATH = ROOT / "workflow/scripts/decon_wrapper.py"
+PSF_SCRIPT_PATH = ROOT / "workflow/scripts/psf_estimation.py"
+
+
+class FakeArray:
+    dtype = "float32"
+
+    def __init__(self, shape):
+        self.shape = shape
+
+    def sum(self):
+        return 1.0
+
+
+def load_decon_wrapper_with_fakes():
+    fake_np = types.SimpleNamespace(
+        float32="float32",
+        uint16="uint16",
+        ones=lambda shape, dtype=None: FakeArray(shape),
+        zeros=lambda shape, dtype=None: FakeArray(shape),
+        asarray=lambda array: array,
+    )
+    fake_dask_array = types.SimpleNamespace(
+        from_array=lambda array, chunks=None: array,
+        map_overlap=lambda func, array, **kwargs: func(array),
+    )
+    fake_dask = types.SimpleNamespace(array=fake_dask_array)
+    fake_pycudadecon = types.SimpleNamespace(
+        TemporaryOTF=object,
+        RLContext=object,
+        rl_decon=lambda *args, **kwargs: None,
+    )
+    fake_tifffile = types.SimpleNamespace(imwrite=lambda *args, **kwargs: None)
+    fake_psf_estimation = types.SimpleNamespace(
+        DEFAULT_BLIND_CHUNK_XY=256,
+        DEFAULT_BLIND_Z_SLICES=128,
+        DEFAULT_SNR_WEIGHT_CAP=100.0,
+        estimate_psf_from_chunks=lambda **kwargs: FakeArray((3, 3, 3)),
+        detect_vram_bytes=lambda: None,
+        open_tiff_memmap=lambda path: FakeArray((2, 4, 4)),
+        resolve_dxy=lambda *args, **kwargs: 0.168,
+        resolve_chunk_xy=lambda *args, **kwargs: 64,
+    )
+    fake_psf_modes = types.SimpleNamespace(
+        generate_psf_seed=lambda **kwargs: FakeArray((3, 3, 3)),
+    )
+
+    spec = importlib.util.spec_from_file_location("decon_wrapper", SCRIPT_PATH)
+    module = importlib.util.module_from_spec(spec)
+    with mock.patch.dict(
+        sys.modules,
+        {
+            "numpy": fake_np,
+            "dask": fake_dask,
+            "dask.array": fake_dask_array,
+            "pycudadecon": fake_pycudadecon,
+            "tifffile": fake_tifffile,
+            "psf_estimation": fake_psf_estimation,
+            "psf_modes": fake_psf_modes,
+        },
+    ):
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+    return module
+
+
+def load_psf_estimation_with_fakes(zarr_calls, zarr_volume):
+    class FakeNdarray:
+        pass
+
+    fake_np = types.SimpleNamespace(
+        ndarray=FakeNdarray,
+        dtype=lambda value: types.SimpleNamespace(itemsize=2),
+    )
+    fake_psfmodels = types.SimpleNamespace()
+    fake_tifffile = types.SimpleNamespace(
+        TiffFile=object,
+        imread=lambda *args, **kwargs: None,
+        imwrite=lambda *args, **kwargs: None,
+        memmap=lambda *args, **kwargs: None,
+    )
+
+    def fake_open_ome_zarr_array(path, mode="r"):
+        zarr_calls.append((Path(path), mode))
+        return zarr_volume
+
+    fake_ome_zarr_io = types.SimpleNamespace(
+        is_ome_zarr_path=lambda path: str(path).lower().endswith(".ome.zarr"),
+        open_ome_zarr_array=fake_open_ome_zarr_array,
+    )
+
+    spec = importlib.util.spec_from_file_location("psf_estimation", PSF_SCRIPT_PATH)
+    module = importlib.util.module_from_spec(spec)
+    with mock.patch.dict(
+        sys.modules,
+        {
+            "numpy": fake_np,
+            "psfmodels": fake_psfmodels,
+            "tifffile": fake_tifffile,
+            "ome_zarr_io": fake_ome_zarr_io,
+        },
+    ):
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+    return module
 
 
 class DeconvolutionWiringTest(unittest.TestCase):
@@ -61,6 +171,20 @@ class DeconvolutionWiringTest(unittest.TestCase):
         self.assertIn('runtime_env="${decon_runtime}/\\${candidate}"', modules_text)
         self.assertIn('export CONDA_PREFIX="\\${runtime_env}"', modules_text)
 
+    def test_decon_process_publishes_native_db2_outputs(self):
+        modules_text = (ROOT / "workflow/modules.nf").read_text(encoding="utf-8")
+
+        self.assertIn('publishDir "${params.output_dir}", mode: \'copy\', pattern: \'DB2_*\'', modules_text)
+        self.assertIn('path "DB2_*", emit: decon_output', modules_text)
+
+    def test_ome_zarr_deconvolution_streams_directly_to_zarr_output(self):
+        script_text = (ROOT / "workflow/scripts/decon_wrapper.py").read_text(encoding="utf-8")
+
+        self.assertIn("def deconvolve_ome_zarr_to_zarr(", script_text)
+        self.assertIn("deconvolve_ome_zarr_to_zarr(", script_text)
+        self.assertNotIn("output = deconvolve_ome_zarr(\n", script_text)
+        self.assertNotIn("write_ome_zarr_array(\n                out_name,", script_text)
+
     def test_downsampling_parameter_is_exposed_and_forwarded(self):
         config_text = (ROOT / "workflow/configs/nextflow.config").read_text(encoding="utf-8")
         package_text = (ROOT / "astrocyte_pkg.yml").read_text(encoding="utf-8")
@@ -76,6 +200,60 @@ class DeconvolutionWiringTest(unittest.TestCase):
         self.assertIn("${pyramid_max_downsample_flag}", modules_text)
         self.assertIn('parser.add_argument("--pyramid_max_downsample"', script_text)
         self.assertIn("max_downsample=args.pyramid_max_downsample", script_text)
+
+    def test_ome_zarr_psf_estimation_does_not_materialize_full_volume_to_tiff(self):
+        module = load_decon_wrapper_with_fakes()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            image_dir = Path(tmpdir)
+            zarr_path = image_dir / "sample.ome.zarr"
+            zarr_path.mkdir()
+            psf_calls = []
+
+            def fake_estimate_psf_from_chunks(**kwargs):
+                psf_calls.append(kwargs)
+                return FakeArray((3, 3, 3))
+
+            def fake_imwrite(path, data):
+                path = Path(path)
+                if path.name != "estimated_psf.tif":
+                    raise AssertionError(f"unexpected full-volume TIFF materialization: {path}")
+
+            argv = [
+                "decon_wrapper.py",
+                "--image_path", str(image_dir),
+                "--dxy", "0.168",
+                "--dz", "0.2",
+                "--wavelength", "0.595",
+                "--detection_na", "0.7",
+                "--ni", "1.33333",
+                "--ns", "1.33333",
+                "--psf_size_z", "3",
+                "--psf_size_xy", "3",
+            ]
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.object(module, "discover_image_volumes", return_value=[zarr_path]),
+                mock.patch.object(module, "open_ome_zarr_array", return_value=FakeArray((2, 4, 4))),
+                mock.patch.object(module, "estimate_psf_from_chunks", side_effect=fake_estimate_psf_from_chunks),
+                mock.patch.object(module, "deconvolve_ome_zarr_to_zarr"),
+                mock.patch.object(module, "imwrite", side_effect=fake_imwrite),
+            ):
+                module.main()
+
+        self.assertEqual(psf_calls[0]["image_path"], str(zarr_path))
+
+    def test_psf_estimation_opens_ome_zarr_source_without_tiff_memmap(self):
+        zarr_volume = FakeArray((2, 4, 4))
+        zarr_calls = []
+        module = load_psf_estimation_with_fakes(zarr_calls, zarr_volume)
+
+        with mock.patch.object(module, "open_tiff_memmap") as open_tiff_memmap:
+            volume = module.open_psf_source(Path("sample.ome.zarr"))
+
+        self.assertIs(volume, zarr_volume)
+        self.assertEqual(zarr_calls, [(Path("sample.ome.zarr"), "r")])
+        open_tiff_memmap.assert_not_called()
 
 
 if __name__ == "__main__":

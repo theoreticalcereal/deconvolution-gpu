@@ -1,3 +1,4 @@
+antspyx
 dask
 distributed
 dask-jobqueue

@@ -48,11 +48,12 @@ class OmeZarrNativeIoTests(unittest.TestCase):
 
     def test_create_ome_zarr_array_writes_group_and_multiscales_metadata(self):
         calls = {}
+        array_attrs = {}
 
         def fake_open(path, **kwargs):
             calls["path"] = path
             calls["kwargs"] = kwargs
-            return types.SimpleNamespace()
+            return types.SimpleNamespace(attrs=array_attrs)
 
         fake_zarr = types.SimpleNamespace(open=fake_open)
         output = self.root / "deskewed" / "CH00_000000.ome.zarr"
@@ -92,6 +93,7 @@ class OmeZarrNativeIoTests(unittest.TestCase):
                 {"name": "x", "type": "space"},
             ],
         )
+        self.assertEqual(array_attrs["_ARRAY_DIMENSIONS"], ["z", "y", "x"])
 
     def test_downsample_xy_uses_row_and_column_stride_slicing(self):
         fake_array = mock.MagicMock()
