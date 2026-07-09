@@ -3,9 +3,10 @@
 `DECON` runs chunkwise Richardson-Lucy deconvolution on GPU with
 `pycudadecon`. It is orchestrated by `workflow/scripts/decon_wrapper.py`.
 
-The current workflow is OME-Zarr-first. Deconvolution reads normalized
-OME-Zarr volumes from the staging step or deskewed OME-Zarr volumes from
-`Top_shear`. TIFF input remains supported for manual and compatibility runs.
+The current workflow uses OME-Zarr internally and OZX for published native
+outputs. Deconvolution reads normalized OME-Zarr volumes from the staging step
+or deskewed OME-Zarr volumes from `Top_shear`. TIFF input remains supported for
+manual and compatibility runs.
 
 ## Input Discovery
 
@@ -22,8 +23,9 @@ Top_shear/<sample>.ome.zarr/
 ```
 
 Decon-only runs use the normalized selected input directly. Existing OME-Zarr
-inputs are copied into the normalized input directory. TIFF, CZI, ND2, LIF, and
-HDF5 inputs are converted there before any GPU work starts.
+inputs are copied into the normalized input directory, and OZX inputs are
+unzipped there. TIFF, CZI, ND2, LIF, and HDF5 inputs are converted there before
+any GPU work starts.
 
 For compatibility, `decon_wrapper.py` can also scan a directory containing
 `*.tif` or `*.tiff` stacks. Use that path only when intentionally bypassing the
@@ -113,7 +115,9 @@ scaled = (output - output_min) / (output_max - output_min)
 scaled = scaled * (input_max - input_min) + input_min
 ```
 
-The final array is rounded, clipped to `uint16`, and written as OME-Zarr.
+The final array is rounded, clipped to `uint16`, and written as an internal
+OME-Zarr directory. The `DECON` task then zips each `DB2_*.ome.zarr` directory
+to `DB2_*.ozx` and removes the expanded directory from task scratch space.
 Compatibility TIFF inputs still materialize the deconvolved array before TIFF
 writing.
 
@@ -125,13 +129,12 @@ The merged PSF is published to:
 <output_dir>/estimated_psf.tif
 ```
 
-For each native OME-Zarr input, the process writes:
+For each native OME-Zarr or OZX input, the process publishes:
 
 ```text
-<output_dir>/DB2_<sample>.ome.zarr/
+<output_dir>/DB2_<sample>.ozx
 ```
 
 Compatibility TIFF runs may still emit `DB2_<input_stem>.tif`, but the package
-workflow treats OME-Zarr as the primary deconvolution output. Set
-`output_formats` to `tiff` to publish TIFF stack exports under
-`<output_dir>/deconvolved_tiff/`.
+workflow treats OZX as the primary deconvolution output. Set `output_formats`
+to `tiff` to publish TIFF stack exports under `<output_dir>/deconvolved_tiff/`.

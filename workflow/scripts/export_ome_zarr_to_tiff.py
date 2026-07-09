@@ -6,10 +6,19 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import shutil
+import tempfile
 
 import tifffile
 
-from ome_zarr_io import OME_ZARR_SUFFIX, image_stem, is_ome_zarr_path, log_progress, open_ome_zarr_array
+from ome_zarr_io import (
+    OME_ZARR_SUFFIX,
+    image_stem,
+    is_ome_zarr_path,
+    is_ozx_path,
+    log_progress,
+    open_ome_zarr_array,
+    unzip_ozx_to_ome_zarr,
+)
 
 
 TIFF_SUFFIXES = {".tif", ".tiff"}
@@ -21,7 +30,9 @@ def discover_decon_outputs(input_dir: Path | str) -> list[Path]:
     outputs = [
         path
         for path in root.iterdir()
-        if path.is_file() and path.name.startswith("DB2_") and path.suffix.lower() in TIFF_SUFFIXES
+        if path.is_file()
+        and path.name.startswith("DB2_")
+        and (path.suffix.lower() in TIFF_SUFFIXES or is_ozx_path(path))
     ]
     outputs.extend(
         path
@@ -34,6 +45,8 @@ def discover_decon_outputs(input_dir: Path | str) -> list[Path]:
 def tiff_output_name(path: Path) -> str:
     if is_ome_zarr_path(path):
         return f"{path.name[:-len(OME_ZARR_SUFFIX)]}.tif"
+    if is_ozx_path(path):
+        return f"{image_stem(path)}.tif"
     return f"{image_stem(path)}.tif"
 
 
@@ -49,9 +62,18 @@ def export_directory(input_dir: Path | str, output_dir: Path | str, output_forma
     outputs = []
     for source in discover_decon_outputs(input_root):
         destination = output_root / tiff_output_name(source)
-        if source.is_file():
+        if source.is_file() and source.suffix.lower() in TIFF_SUFFIXES:
             log_progress(f"Copying deconvolved TIFF output: {source.name} -> {destination}")
             shutil.copy2(source, destination)
+        elif source.is_file() and is_ozx_path(source):
+            log_progress(f"Exporting OZX output to TIFF: {source.name} -> {destination}")
+            with tempfile.TemporaryDirectory(prefix=".ozx_export_", dir=Path.cwd()) as temp_dir:
+                extracted = unzip_ozx_to_ome_zarr(
+                    source,
+                    Path(temp_dir) / f"{image_stem(source)}{OME_ZARR_SUFFIX}",
+                )
+                volume = open_ome_zarr_array(extracted, mode="r")
+                tifffile.imwrite(str(destination), volume, bigtiff=True)
         else:
             log_progress(f"Exporting OME-Zarr output to TIFF: {source.name} -> {destination}")
             volume = open_ome_zarr_array(source, mode="r")

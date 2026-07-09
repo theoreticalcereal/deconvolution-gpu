@@ -6,12 +6,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import shutil
+import zipfile
 from datetime import datetime
 from typing import Iterable
 
 
 TIFF_SUFFIXES = {".tif", ".tiff"}
 OME_ZARR_SUFFIX = ".ome.zarr"
+OZX_SUFFIX = ".ozx"
 PYRAMID_DOWNSAMPLE_FACTORS = (1, 2, 4, 8, 16)
 SPATIAL_AXES_ZYX = ("z", "y", "x")
 
@@ -25,10 +27,16 @@ def is_ome_zarr_path(path: Path | str) -> bool:
     return Path(path).name.lower().endswith(OME_ZARR_SUFFIX)
 
 
+def is_ozx_path(path: Path | str) -> bool:
+    return Path(path).name.lower().endswith(OZX_SUFFIX)
+
+
 def image_stem(path: Path | str) -> str:
     path = Path(path)
     if is_ome_zarr_path(path):
         return path.name[: -len(OME_ZARR_SUFFIX)]
+    if is_ozx_path(path):
+        return path.name[: -len(OZX_SUFFIX)]
     if path.suffix.lower() in TIFF_SUFFIXES:
         return path.name[: -len(path.suffix)]
     return path.stem
@@ -37,6 +45,8 @@ def image_stem(path: Path | str) -> str:
 def discover_image_volumes(input_dir: Path | str) -> list[Path]:
     root = Path(input_dir)
     if root.is_dir() and is_ome_zarr_path(root):
+        return [root]
+    if root.is_file() and is_ozx_path(root):
         return [root]
     paths = [
         path
@@ -48,7 +58,77 @@ def discover_image_volumes(input_dir: Path | str) -> list[Path]:
         for path in root.iterdir()
         if path.is_file() and path.suffix.lower() in TIFF_SUFFIXES
     )
+    paths.extend(
+        path
+        for path in root.iterdir()
+        if path.is_file() and is_ozx_path(path)
+    )
     return sorted(paths, key=lambda path: path.name)
+
+
+def _validate_ozx_member(name: str) -> tuple[str, ...]:
+    path = Path(name)
+    parts = path.parts
+    if path.is_absolute() or ".." in parts:
+        raise ValueError(f"Unsafe OZX archive member: {name}")
+    return tuple(part for part in parts if part not in {"", "."})
+
+
+def zip_ome_zarr_to_ozx(zarr_path: Path | str, archive_path: Path | str) -> Path:
+    source = Path(zarr_path)
+    archive = Path(archive_path)
+    if not source.is_dir() or not is_ome_zarr_path(source):
+        raise ValueError(f"OZX export requires an OME-Zarr directory, got {source}")
+
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    if archive.exists():
+        archive.unlink()
+    log_progress(f"Zipping OME-Zarr output: {source} -> {archive}")
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as handle:
+        for file_path in sorted(path for path in source.rglob("*") if path.is_file()):
+            handle.write(file_path, file_path.relative_to(source).as_posix())
+    return archive.resolve()
+
+
+def unzip_ozx_to_ome_zarr(archive_path: Path | str, zarr_path: Path | str) -> Path:
+    archive = Path(archive_path)
+    target = Path(zarr_path)
+    if not is_ozx_path(archive):
+        raise ValueError(f"OZX input must end with {OZX_SUFFIX}: {archive}")
+
+    with zipfile.ZipFile(archive, "r") as handle:
+        members = [info for info in handle.infolist() if not info.is_dir()]
+        member_parts = [_validate_ozx_member(info.filename) for info in members]
+        top_levels = {parts[0] for parts in member_parts if parts}
+        has_root_zgroup = any(parts == (".zgroup",) for parts in member_parts)
+        strip_prefix = None
+        if not has_root_zgroup and len(top_levels) == 1:
+            candidate = next(iter(top_levels))
+            if candidate.lower().endswith(OME_ZARR_SUFFIX):
+                strip_prefix = candidate
+
+        if target.is_dir():
+            shutil.rmtree(target)
+        elif target.exists():
+            target.unlink()
+        target.mkdir(parents=True, exist_ok=True)
+        log_progress(f"Unzipping OZX input: {archive} -> {target}")
+
+        for info, parts in zip(members, member_parts):
+            if strip_prefix is not None:
+                if not parts or parts[0] != strip_prefix:
+                    raise ValueError(f"Unsafe OZX archive member: {info.filename}")
+                parts = parts[1:]
+            if not parts:
+                continue
+            destination = target.joinpath(*parts)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with handle.open(info, "r") as source_handle, destination.open("wb") as destination_handle:
+                shutil.copyfileobj(source_handle, destination_handle)
+
+    if not (target / ".zgroup").exists():
+        raise ValueError(f"OZX archive does not contain an OME-Zarr root .zgroup: {archive}")
+    return target.resolve()
 
 
 def _selected_downsample_factors(

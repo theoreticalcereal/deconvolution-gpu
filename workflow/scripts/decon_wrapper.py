@@ -43,9 +43,11 @@ try:
         discover_image_volumes,
         image_stem,
         is_ome_zarr_path,
+        is_ozx_path,
         log_progress,
         create_ome_zarr_array,
         open_ome_zarr_array,
+        unzip_ozx_to_ome_zarr,
         write_downsampled_pyramid,
     )
 except ModuleNotFoundError:
@@ -54,9 +56,11 @@ except ModuleNotFoundError:
         discover_image_volumes,
         image_stem,
         is_ome_zarr_path,
+        is_ozx_path,
         log_progress,
         create_ome_zarr_array,
         open_ome_zarr_array,
+        unzip_ozx_to_ome_zarr,
         write_downsampled_pyramid,
     )
 
@@ -539,6 +543,17 @@ def _default_output_chunks(shape: tuple[int, int, int]) -> tuple[int, int, int]:
     return (min(16, shape[0]), min(256, shape[1]), min(256, shape[2]))
 
 
+def _expand_ozx_inputs_for_processing(image_inputs: list[Path], temp_dir: Path) -> list[Path]:
+    expanded = []
+    for image_input in image_inputs:
+        if is_ozx_path(image_input):
+            target = temp_dir / f"{image_stem(image_input)}.ome.zarr"
+            expanded.append(unzip_ozx_to_ome_zarr(image_input, target))
+        else:
+            expanded.append(image_input)
+    return expanded
+
+
 def deconvolve_ome_zarr_to_zarr(
     image_path: Path,
     output_path: Path | str,
@@ -783,10 +798,15 @@ def main() -> None:
     # selection is handled by the workflow before this wrapper runs.
     image_inputs = discover_image_volumes(image_dir)
     if not image_inputs:
-        print(f"Error: no TIFF or OME-Zarr image volumes found in {image_dir}")
+        print(f"Error: no TIFF, OME-Zarr, or OZX image volumes found in {image_dir}")
         raise SystemExit(1)
 
     original_name_map = _load_original_name_map(image_dir)
+    ozx_temp_context = None
+    if any(is_ozx_path(path) for path in image_inputs):
+        ozx_temp_context = tempfile.TemporaryDirectory(prefix=".ozx_input_", dir=Path.cwd())
+        image_inputs = _expand_ozx_inputs_for_processing(image_inputs, Path(ozx_temp_context.name))
+
     log_progress(f"Found {len(image_inputs)} selected image volume(s) to process")
     for index, image_input in enumerate(image_inputs, start=1):
         log_progress(f"  Input {index}/{len(image_inputs)}: {image_input.name}")
@@ -934,6 +954,8 @@ def main() -> None:
         )
 
     log_progress(f"All image volumes deconvolved in {time.perf_counter() - run_start:.2f}s")
+    if ozx_temp_context is not None:
+        ozx_temp_context.cleanup()
 
 
 if __name__ == "__main__":

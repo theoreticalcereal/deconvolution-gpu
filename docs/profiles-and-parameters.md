@@ -26,9 +26,10 @@ wrapper can derive X/Y pixel size.
 
 ## Optional Outputs
 
-`output_formats = ome_zarr` writes native OME-Zarr outputs. Set
+`output_formats = ozx` writes native zipped OME-Zarr outputs. Set
 `output_formats = tiff` to also publish TIFF stacks under `deconvolved_tiff/`.
 
 `pyramid_max_downsample` controls the maximum XY pyramid level written for
-OME-Zarr outputs. Lower values reduce pyramid generation time and disk usage;
-Z is preserved at full resolution for every level.
+the OME-Zarr data inside each OZX archive. Lower values reduce pyramid
+generation time and disk usage; Z is preserved at full resolution for every
+level.

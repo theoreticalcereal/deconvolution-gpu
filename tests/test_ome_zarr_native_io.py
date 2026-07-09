@@ -31,6 +31,7 @@ class OmeZarrNativeIoTests(unittest.TestCase):
 
     def test_discovers_tiffs_and_ome_zarr_directories_as_image_volumes(self):
         (self.root / "CH00_000002.ome.zarr").mkdir()
+        (self.root / "CH00_000003.ozx").write_bytes(b"archive")
         (self.root / "CH00_000001.tif").write_bytes(b"placeholder")
         (self.root / "notes.txt").write_text("ignore")
 
@@ -38,13 +39,40 @@ class OmeZarrNativeIoTests(unittest.TestCase):
 
         self.assertEqual(
             [path.name for path in paths],
-            ["CH00_000001.tif", "CH00_000002.ome.zarr"],
+            ["CH00_000001.tif", "CH00_000002.ome.zarr", "CH00_000003.ozx"],
         )
 
-    def test_image_stem_strips_tiff_and_ome_zarr_suffixes(self):
+    def test_image_stem_strips_tiff_ome_zarr_and_ozx_suffixes(self):
         self.assertEqual(self.module.image_stem(pathlib.Path("sample.tiff")), "sample")
         self.assertEqual(self.module.image_stem(pathlib.Path("sample.ome.zarr")), "sample")
         self.assertEqual(self.module.image_stem(pathlib.Path("sample.OME.ZARR")), "sample")
+        self.assertEqual(self.module.image_stem(pathlib.Path("sample.ozx")), "sample")
+        self.assertEqual(self.module.image_stem(pathlib.Path("sample.OZX")), "sample")
+
+    def test_zip_and_unzip_ozx_round_trip_ome_zarr_contents(self):
+        source = self.root / "sample.ome.zarr"
+        (source / "0").mkdir(parents=True)
+        (source / ".zgroup").write_text('{"zarr_format": 2}\n')
+        (source / "0" / ".zarray").write_text("{}\n")
+        archive = self.root / "sample.ozx"
+        target = self.root / "out" / "sample.ome.zarr"
+
+        self.module.zip_ome_zarr_to_ozx(source, archive)
+        extracted = self.module.unzip_ozx_to_ome_zarr(archive, target)
+
+        self.assertEqual(extracted, target)
+        self.assertEqual((target / ".zgroup").read_text(), '{"zarr_format": 2}\n')
+        self.assertEqual((target / "0" / ".zarray").read_text(), "{}\n")
+
+    def test_unzip_ozx_rejects_archive_members_outside_target(self):
+        import zipfile
+
+        archive = self.root / "bad.ozx"
+        with zipfile.ZipFile(archive, "w") as handle:
+            handle.writestr("../escape.txt", "bad")
+
+        with self.assertRaisesRegex(ValueError, "Unsafe OZX archive member"):
+            self.module.unzip_ozx_to_ome_zarr(archive, self.root / "out" / "bad.ome.zarr")
 
     def test_create_ome_zarr_array_writes_group_and_multiscales_metadata(self):
         calls = {}

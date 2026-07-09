@@ -98,6 +98,27 @@ class NormalizeInputToOmeZarrTests(unittest.TestCase):
         self.assertEqual(outputs, [self.output_dir / "native.ome.zarr"])
         self.assertTrue((self.output_dir / "native.ome.zarr" / ".zattrs").exists())
 
+    def test_ozx_input_is_unzipped_to_ome_zarr_without_conversion(self):
+        ozx_input = self.input_dir / "native.ozx"
+        ozx_input.write_bytes(b"archive")
+        calls = []
+
+        def fake_unzip(source, target):
+            calls.append((source, target))
+            target.mkdir(parents=True)
+            (target / ".zgroup").write_text("{}")
+            return target
+
+        with (
+            mock.patch.object(self.module, "unzip_ozx_to_ome_zarr", side_effect=fake_unzip),
+            mock.patch.object(self.module, "write_ome_zarr_array") as write_ome_zarr_array,
+        ):
+            outputs = self.module.normalize_directory(self.input_dir, self.output_dir)
+
+        self.assertEqual(outputs, [self.output_dir / "native.ome.zarr"])
+        self.assertEqual(calls, [(ozx_input, self.output_dir / "native.ome.zarr")])
+        write_ome_zarr_array.assert_not_called()
+
     def test_rejects_unsupported_input_with_clear_error(self):
         (self.input_dir / "sample.txt").write_text("unsupported")
 

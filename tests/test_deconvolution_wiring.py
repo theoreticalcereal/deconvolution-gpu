@@ -238,8 +238,26 @@ class DeconvolutionWiringTest(unittest.TestCase):
     def test_decon_process_publishes_native_db2_outputs(self):
         modules_text = (ROOT / "workflow/modules.nf").read_text(encoding="utf-8")
 
-        self.assertIn('publishDir "${params.output_dir}", mode: \'copy\', pattern: \'DB2_*\'', modules_text)
-        self.assertIn('path "DB2_*", emit: decon_output', modules_text)
+        self.assertIn('publishDir "${params.output_dir}", mode: \'copy\', pattern: \'DB2_*.ozx\'', modules_text)
+        self.assertIn('path "DB2_*.ozx", emit: decon_output', modules_text)
+        self.assertIn("zip_ome_zarr_to_ozx", modules_text)
+        self.assertIn("rm -rf DB2_*.ome.zarr", modules_text)
+
+    def test_nextflow_storage_cleanup_is_enabled(self):
+        config_text = (ROOT / "workflow/configs/nextflow.config").read_text(encoding="utf-8")
+        modules_text = (ROOT / "workflow/modules.nf").read_text(encoding="utf-8")
+
+        self.assertIn("cleanup = true", config_text)
+        self.assertIn("scratch true", modules_text)
+
+    def test_ozx_is_native_input_and_output_format(self):
+        config_text = (ROOT / "workflow/configs/nextflow.config").read_text(encoding="utf-8")
+        package_text = (ROOT / "astrocyte_pkg.yml").read_text(encoding="utf-8")
+
+        self.assertIn("output_formats = 'ozx'", config_text)
+        self.assertIn("\\.ozx", package_text)
+        self.assertIn("default: 'ozx'", package_text)
+        self.assertIn("[ 'ozx', 'OZX zipped OME-Zarr output' ]", package_text)
 
     def test_ome_zarr_deconvolution_streams_directly_to_zarr_output(self):
         script_text = (ROOT / "workflow/scripts/decon_wrapper.py").read_text(encoding="utf-8")

@@ -8,7 +8,15 @@ from pathlib import Path
 import shutil
 import sys
 
-from ome_zarr_io import image_stem, is_ome_zarr_path, log_progress, write_ome_zarr_array
+from ome_zarr_io import (
+    OZX_SUFFIX,
+    image_stem,
+    is_ome_zarr_path,
+    is_ozx_path,
+    log_progress,
+    unzip_ozx_to_ome_zarr,
+    write_ome_zarr_array,
+)
 
 
 TIFF_SUFFIXES = {".tif", ".tiff"}
@@ -157,6 +165,8 @@ def supported_input_paths(input_dir: Path) -> list[Path]:
     for path in sorted(input_dir.iterdir(), key=lambda item: item.name):
         if path.is_dir() and is_ome_zarr_path(path):
             paths.append(path)
+        elif path.is_file() and is_ozx_path(path):
+            paths.append(path)
         elif path.is_file() and path.suffix.lower() in SUPPORTED_FILE_SUFFIXES:
             paths.append(path)
     return paths
@@ -164,6 +174,12 @@ def supported_input_paths(input_dir: Path) -> list[Path]:
 
 def normalize_one(path: Path, output_dir: Path) -> Path:
     output_path = output_dir / f"{image_stem(path)}.ome.zarr"
+    if path.is_file() and is_ozx_path(path):
+        log_progress(f"Unzipping OZX input: {path.name} -> {output_path.name}")
+        unzip_ozx_to_ome_zarr(path, output_path)
+        log_progress(f"Finished {output_path.name}")
+        return output_path
+
     if path.is_dir() and is_ome_zarr_path(path):
         log_progress(f"Copying existing OME-Zarr input: {path.name} -> {output_path.name}")
         if output_path.exists():
@@ -203,7 +219,7 @@ def normalize_directory(input_dir: Path, output_dir: Path) -> list[Path]:
         log_progress(f"Starting input {index}/{len(input_paths)}: {path.name}")
         outputs.append(normalize_one(path, output_dir))
     if not outputs:
-        suffixes = ", ".join(sorted([*SUPPORTED_FILE_SUFFIXES, ".ome.zarr"]))
+        suffixes = ", ".join(sorted([*SUPPORTED_FILE_SUFFIXES, ".ome.zarr", OZX_SUFFIX]))
         raise FileNotFoundError(f"No supported image inputs found in {input_dir}; expected one of: {suffixes}")
     log_progress(f"Input normalization complete: wrote {len(outputs)} OME-Zarr volume(s)")
     return outputs

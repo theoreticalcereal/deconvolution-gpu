@@ -42,17 +42,18 @@ workflow_parameters:
     min: 1
     description: |
       Select deskewed or otherwise ready-to-deconvolve image volumes.
-    regex: ".*(\\.tif|\\.tiff|\\.czi|\\.nd2|\\.lif|\\.h5|\\.hdf5|\\.ome\\.zarr|\\.TIF|\\.TIFF|\\.CZI|\\.ND2|\\.LIF|\\.H5|\\.HDF5|\\.OME\\.ZARR)$"
+    regex: ".*(\\.tif|\\.tiff|\\.czi|\\.nd2|\\.lif|\\.h5|\\.hdf5|\\.ome\\.zarr|\\.ozx|\\.TIF|\\.TIFF|\\.CZI|\\.ND2|\\.LIF|\\.H5|\\.HDF5|\\.OME\\.ZARR|\\.OZX)$"
 
   - id: output_formats
     type: select
     required: false
-    default: 'ome_zarr'
+    default: 'ozx'
     description: |
-      Final image output format to publish. OME-Zarr is the native workflow
-      output. Choose TIFF to also export final deconvolved volumes as TIFF stacks.
+      Final image output format to publish. OZX is the native zipped OME-Zarr
+      workflow output. Choose TIFF to also export final deconvolved volumes as
+      TIFF stacks.
     choices:
-      - [ 'ome_zarr', 'OME-Zarr output' ]
+      - [ 'ozx', 'OZX zipped OME-Zarr output' ]
       - [ 'tiff', 'TIFF stack export' ]
 
   - id: pyramid_max_downsample

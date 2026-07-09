@@ -36,6 +36,7 @@ process BUILD_DECON_CONTAINER {
 
 process STAGE_DECON_INPUT {
     tag "decon_input"
+    scratch true
 
     input:
     path input_tiffs
@@ -92,12 +93,13 @@ process DECON {
     tag "decon"
 
     publishDir "${params.output_dir}", mode: 'copy', pattern: 'estimated_psf.tif'
-    publishDir "${params.output_dir}", mode: 'copy', pattern: 'DB2_*'
+    publishDir "${params.output_dir}", mode: 'copy', pattern: 'DB2_*.ozx'
 
     maxForks 8
     cpus 72
     memory '256 GB'
     clusterOptions '--gres=gpu:1'
+    scratch true
 
     input:
     path deskewed_dir
@@ -107,7 +109,7 @@ process DECON {
     path decon_runtime
 
     output:
-    path "DB2_*", emit: decon_output
+    path "DB2_*.ozx", emit: decon_output
     path "estimated_psf.tif", emit: psf_output
 
     script:
@@ -260,11 +262,15 @@ process DECON {
         ${pyramid_max_downsample_flag} \\
         ${cache_dir_flag} \\
         ${no_psf_cache_flag}
+
+    PYTHONPATH="${projectDir}/scripts:\${PYTHONPATH:-}" python3 -c "from pathlib import Path; from ome_zarr_io import zip_ome_zarr_to_ozx; [zip_ome_zarr_to_ozx(path, path.with_suffix('').with_suffix('.ozx')) for path in sorted(Path('.').glob('DB2_*.ome.zarr'))]"
+    rm -rf DB2_*.ome.zarr
     """
 }
 
 process EXPORT_OUTPUT_FORMAT {
     tag "${output_format}"
+    scratch true
 
     input:
     path decon_outputs

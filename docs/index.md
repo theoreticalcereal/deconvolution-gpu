@@ -13,8 +13,9 @@ Then run this package on the deskewed `Top_shear/` output.
 selected images -> STAGE_DECON_INPUT -> DECON -> optional TIFF export
 ```
 
-The native output is OME-Zarr. Set `output_formats = tiff` to publish TIFF
-stacks in addition to native OME-Zarr output.
+The native output is OZX, a zipped OME-Zarr archive. Set
+`output_formats = tiff` to publish TIFF stacks in addition to native OZX
+output.
 
 ## Documentation
 
