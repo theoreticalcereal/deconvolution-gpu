@@ -181,6 +181,34 @@ def _chunk_progress(block_info: dict | None, total_chunks: int) -> tuple[int, st
     return chunk_index, f"{chunk_index}/{total_chunks}"
 
 
+def _center_crop_or_pad_to_shape(array: np.ndarray, shape: tuple[int, ...]) -> np.ndarray:
+    """Return an array with exactly `shape`, preserving the centered content."""
+    target_shape = tuple(int(axis) for axis in shape)
+    current_shape = tuple(int(axis) for axis in array.shape)
+    if len(current_shape) != len(target_shape):
+        raise ValueError(f"Cannot reshape {current_shape} to {target_shape}")
+    if current_shape == target_shape:
+        return array
+
+    slices = []
+    pad_width = []
+    for current_axis, target_axis in zip(current_shape, target_shape):
+        if current_axis > target_axis:
+            start = (current_axis - target_axis) // 2
+            slices.append(slice(start, start + target_axis))
+            pad_width.append((0, 0))
+        else:
+            slices.append(slice(None))
+            missing = target_axis - current_axis
+            before = missing // 2
+            pad_width.append((before, missing - before))
+
+    adjusted = array[tuple(slices)]
+    if any(before or after for before, after in pad_width):
+        adjusted = np.pad(adjusted, pad_width, mode="edge")
+    return adjusted
+
+
 def _decon_chunk(
     chunk: np.ndarray,
     otf_path: str,
@@ -223,7 +251,8 @@ def _decon_chunk(
         f"avg_iteration_time={_format_seconds(avg_iter)}",
         flush=True,
     )
-    return np.clip(result, 0, 65535).astype(np.uint16)
+    output = np.clip(result, 0, 65535).astype(np.uint16)
+    return _center_crop_or_pad_to_shape(output, chunk.shape)
 
 
 def _match_input_intensity_range(output: np.ndarray, input_volume: np.ndarray) -> np.ndarray:

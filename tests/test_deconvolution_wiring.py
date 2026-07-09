@@ -17,18 +17,50 @@ class FakeArray:
 
     def __init__(self, shape):
         self.shape = shape
+        self.size = 1
+
+    def __getitem__(self, selection):
+        if not isinstance(selection, tuple):
+            selection = (selection,)
+
+        new_shape = []
+        for axis_size, axis_selection in zip(self.shape, selection):
+            if isinstance(axis_selection, slice):
+                start, stop, step = axis_selection.indices(axis_size)
+                if step != 1:
+                    raise AssertionError("FakeArray only supports unit-step slices")
+                new_shape.append(max(0, stop - start))
+            else:
+                raise AssertionError(f"unsupported FakeArray selection: {axis_selection!r}")
+
+        new_shape.extend(self.shape[len(selection):])
+        return FakeArray(tuple(new_shape))
 
     def sum(self):
         return 1.0
 
+    def astype(self, *args, **kwargs):
+        return self
+
 
 def load_decon_wrapper_with_fakes():
+    def fake_pad(array, pad_width, mode=None):
+        if mode != "edge":
+            raise AssertionError(f"unexpected pad mode: {mode}")
+        padded_shape = tuple(
+            axis + before + after
+            for axis, (before, after) in zip(array.shape, pad_width)
+        )
+        return FakeArray(padded_shape)
+
     fake_np = types.SimpleNamespace(
         float32="float32",
         uint16="uint16",
         ones=lambda shape, dtype=None: FakeArray(shape),
         zeros=lambda shape, dtype=None: FakeArray(shape),
         asarray=lambda array: array,
+        clip=lambda array, *args, **kwargs: array,
+        pad=fake_pad,
     )
     fake_dask_array = types.SimpleNamespace(
         from_array=lambda array, chunks=None: array,
@@ -116,6 +148,38 @@ def load_psf_estimation_with_fakes(zarr_calls, zarr_volume):
 
 
 class DeconvolutionWiringTest(unittest.TestCase):
+    def test_decon_chunk_returns_original_chunk_shape_when_rl_context_shrinks_output(self):
+        module = load_decon_wrapper_with_fakes()
+
+        class FakeRLContext:
+            def __init__(self, shape, *args, **kwargs):
+                self.out_shape = (shape[0] - 10, shape[1] - 11, shape[2] - 11)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        with (
+            mock.patch.object(module, "RLContext", FakeRLContext),
+            mock.patch.object(
+                module,
+                "rl_decon",
+                side_effect=lambda *args, **kwargs: FakeArray(kwargs["output_shape"]),
+            ),
+        ):
+            result = module._decon_chunk(
+                FakeArray((550, 384, 384)),
+                otf_path="fake.otf",
+                dz=0.2,
+                dxy=0.168,
+                n_iters=10,
+                total_chunks=1,
+            )
+
+        self.assertEqual(result.shape, (550, 384, 384))
+
     def test_main_wires_deconvolution_without_deskew_or_visualization(self):
         main_text = (ROOT / "workflow/main.nf").read_text(encoding="utf-8")
 
