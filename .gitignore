@@ -10,7 +10,8 @@ workflow/images/*.tar.gz
 astrocyte_danuser_first_file.yml
 
 # Nextflow/Astrocyte run artifacts
-workflow/output/
+workflow/output/*
+!workflow/output/.keep
 workflow/workflow/
 workflow/report.html
 workflow/timeline.html

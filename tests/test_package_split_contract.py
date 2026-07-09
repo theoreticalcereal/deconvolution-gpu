@@ -58,6 +58,13 @@ class PackageSplitContractTest(unittest.TestCase):
         self.assertNotIn("decon_only", config_text)
         self.assertNotIn("decon_only", package_text)
 
+    def test_deconvolution_package_preserves_empty_output_directory(self):
+        gitignore_text = read(DECON / ".gitignore")
+
+        self.assertTrue((DECON / "workflow/output/.keep").is_file())
+        self.assertIn("workflow/output/*", gitignore_text)
+        self.assertIn("!workflow/output/.keep", gitignore_text)
+
     def test_deconvolution_package_has_no_vizapp_or_neuroglancer_functionality(self):
         checked_paths = [
             DECON / "astrocyte_pkg.yml",
