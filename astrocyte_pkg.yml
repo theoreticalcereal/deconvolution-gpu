@@ -32,7 +32,6 @@ documentation_files:
 
 workflow_modules:
   - 'singularity/3.9.9'
-  - 'cuda/11.8.0'
   - 'matlab/2024a'
 
 workflow_containers:

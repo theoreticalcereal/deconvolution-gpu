@@ -41,7 +41,7 @@ process STAGE_DECON_INPUT {
 
 process DECON {
     tag "decon"
-    module 'singularity/3.9.9:cuda/11.8.0:matlab/2024a'
+    module 'singularity/3.9.9:matlab/2024a'
     container WORKFLOW_CONTAINER_IMAGE
     containerOptions = '--nv'
 

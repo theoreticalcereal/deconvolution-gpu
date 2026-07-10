@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly REGISTRY=${REGISTRY:-git.biohpc.swmed.edu:5050/dean-lab}
+readonly IMAGE_NAME=${IMAGE_NAME:-ctaslm2-deconvolution}
+readonly TAG=${TAG:-0.1.0}
+readonly REGISTRY_HOST=${REGISTRY%%/*}
+readonly IMAGE_ROOT=$(cd -P "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)
+readonly -a PODMAN_GLOBAL_ARGS=(--cgroup-manager=cgroupfs --events-backend=file)
+readonly IMAGE=${REGISTRY}/${IMAGE_NAME}:${TAG}
+BUILD_ARGS=(--tag "${IMAGE}")
+
+if [[ ${NO_CACHE:-0} == 1 || ${NO_CACHE:-false} == true ]]; then
+  BUILD_ARGS=(--no-cache "${BUILD_ARGS[@]}")
+fi
+
+# Default published image: git.biohpc.swmed.edu:5050/dean-lab/ctaslm2-deconvolution:0.1.0
+
+if [[ -z ${REGISTRY_USERNAME:-} || -z ${REGISTRY_PASSWORD:-} ]]; then
+  echo "REGISTRY_USERNAME and REGISTRY_PASSWORD are required to publish ${IMAGE}" >&2
+  exit 2
+fi
+
+if command -v module >/dev/null 2>&1; then
+  module load singularity/3.9.9 || true
+fi
+
+printf '%s' "${REGISTRY_PASSWORD}" \
+  | podman "${PODMAN_GLOBAL_ARGS[@]}" login "${REGISTRY_HOST}" \
+      --username "${REGISTRY_USERNAME}" \
+      --password-stdin
+
+podman "${PODMAN_GLOBAL_ARGS[@]}" build "${BUILD_ARGS[@]}" "${IMAGE_ROOT}"
+podman "${PODMAN_GLOBAL_ARGS[@]}" push "${IMAGE}"
+
+export SINGULARITY_DOCKER_USERNAME="${REGISTRY_USERNAME}"
+export SINGULARITY_DOCKER_PASSWORD="${REGISTRY_PASSWORD}"
+
+if id -un >/dev/null 2>&1; then
+  singularity exec --nv "docker://${IMAGE}" sh -lc '
+    export PATH=/opt/conda/envs/app/bin:$PATH
+    python -c "import numpy, numba, zarr, tifffile, dask, pycudadecon, psfmodels; print(\"deconvolution image imports ok\")"
+  '
+else
+  echo "WARNING: pushed ${IMAGE}, but skipped local Singularity verification because the current UID is not resolvable." >&2
+  echo "Run check-deployment-container.sh from the deployment environment before deploying in Astrocyte." >&2
+fi
+
+echo "Pushed ${IMAGE}"
+echo "Astrocyte container URI: docker://${IMAGE}"
