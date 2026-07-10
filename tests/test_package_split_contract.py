@@ -73,7 +73,6 @@ class PackageSplitContractTest(unittest.TestCase):
             DECON / "workflow/main.nf",
             DECON / "workflow/modules.nf",
             DECON / "workflow/configs/nextflow.config",
-            DECON / "workflow/envs/decon-pip-requirements.txt",
         ]
         combined = "\n".join(read(path) for path in checked_paths)
 

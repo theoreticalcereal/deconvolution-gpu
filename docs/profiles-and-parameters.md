@@ -6,14 +6,12 @@
 | --- | --- |
 | `wide_frame` | Uses a single-detection PSF seed. |
 | `light_sheet` | Uses light-sheet PSF seed settings for already deskewed light-sheet data. |
-| `conda_runtime` | Builds the workflow conda runtime inside the run directory. |
 
 ## Required Inputs
 
 | Parameter | Description |
 | --- | --- |
 | `input` | Selected ready-to-deconvolve image volumes. |
-| `decon_runtime_dir` | Optional existing decon/deskew runtime. Use `-1` to build the default runtime. |
 | `pyramid_max_downsample` | Required OME-Zarr pyramid depth selection. Default `16` preserves the full `1x, 2x, 4x, 8x, 16x` multiscale output. |
 | `wavelength` | Emission wavelength in microns. |
 | `na` | Detection numerical aperture fallback. |

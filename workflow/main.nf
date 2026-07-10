@@ -1,7 +1,6 @@
 #!/usr/bin/env nextflow
 nextflow.enable.dsl=2
 
-include { BUILD_DECON_CONTAINER } from './modules'
 include { STAGE_DECON_INPUT } from './modules'
 include { DECON } from './modules'
 include { EXPORT_OUTPUT_FORMAT } from './modules'
@@ -48,23 +47,7 @@ def normalizeInputPatterns(input, commandLine = null) {
         .findAll { it }
 }
 
-def isExternalRuntimeSupplied(value) {
-    if (value == null) {
-        return false
-    }
-    def text = value.toString().trim()
-    return text && text != '-1' && text != '-1.0' && text != 'true'
-}
-
 workflow {
-    if (isExternalRuntimeSupplied(params.decon_runtime_dir)) {
-        log.info "Using external deconvolution runtime: ${params.decon_runtime_dir}"
-        decon_container_ch = Channel.value(file(params.decon_runtime_dir.toString(), checkIfExists: true))
-    } else {
-        BUILD_DECON_CONTAINER()
-        decon_container_ch = BUILD_DECON_CONTAINER.out.image
-    }
-
     input_patterns = normalizeInputPatterns(params.input, workflow.commandLine)
     if (input_patterns) {
         log.info "Selected ${input_patterns.size()} input image(s): ${input_patterns.join(', ')}"
@@ -72,7 +55,7 @@ workflow {
             .fromList(input_patterns)
             .map { input_pattern -> file(input_pattern, checkIfExists: true) }
             .collect()
-        STAGE_DECON_INPUT(input_files_ch, decon_container_ch)
+        STAGE_DECON_INPUT(input_files_ch)
         decon_input_ch = STAGE_DECON_INPUT.out.decon_input_dir
     } else {
         decon_input_ch = Channel.value(params.image_path)
@@ -82,11 +65,10 @@ workflow {
         decon_input_ch,
         params.background,
         params.iter,
-        params.output_dir,
-        decon_container_ch
+        params.output_dir
     )
 
     if (params.output_formats == 'tiff') {
-        EXPORT_OUTPUT_FORMAT(DECON.out.decon_output, params.output_formats, decon_container_ch)
+        EXPORT_OUTPUT_FORMAT(DECON.out.decon_output, params.output_formats)
     }
 }

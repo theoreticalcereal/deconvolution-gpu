@@ -4,7 +4,6 @@ The deconvolution package contains only the deconvolution half of the original
 combined workflow.
 
 ```text
-BUILD_DECON_CONTAINER  # skipped when decon_runtime_dir is supplied
 STAGE_DECON_INPUT
 DECON
 EXPORT_OUTPUT_FORMAT  # only when output_formats = tiff
@@ -24,7 +23,7 @@ Level `0` is full resolution; levels `1` through `4` are generated with
 Use profile `light_sheet` to preserve light-sheet PSF behavior for data that has
 already been deskewed by `deskew-gpu`.
 
-Set `decon_runtime_dir` to reuse a runtime built upstream by `deskew-gpu`. The
-workflow accepts a path containing `decon_env/` or `deskew_env/`, or a direct
-conda environment path. The sentinel value `-1` means no external runtime was
-supplied and the workflow should build its own runtime.
+All processes run in the prebuilt
+`git.biohpc.swmed.edu:5050/dean-lab/ctaslm2-deconvolution:0.1.0` container.
+Astrocyte lists the image with a `docker://` prefix for prefetching; Nextflow
+processes use the registry image without that prefix.

@@ -18,11 +18,7 @@ MATLAB module and passes the resolved executable into the deconvolution process.
 
 ## Runtime Environment
 
-The workflow builds its conda runtime from `workflow/envs/decon-conda.txt` and
-`workflow/envs/decon-pip-requirements.txt`. Visualization dependencies are not
-installed by this package.
-
-For integrated deskew-to-deconvolution runs, pass `decon_runtime_dir` to reuse a
-runtime built by `deskew-gpu`. The deconvolution workflow accepts both
-`decon_env` and `deskew_env` runtime layouts. Leave `decon_runtime_dir` at `-1`
-when no external runtime should be reused.
+The workflow runs in the prebuilt
+`git.biohpc.swmed.edu:5050/dean-lab/ctaslm2-deconvolution:0.1.0` Singularity
+container. If Python dependencies are missing at runtime, rebuild and republish
+that image rather than adding per-run conda build steps back to the workflow.

@@ -31,9 +31,12 @@ documentation_files:
   - [ 'astrocyte-project-setup.md', 'Creating an Astrocyte Project' ]
 
 workflow_modules:
-  - 'lmod/8.4'
+  - 'singularity/3.9.9'
+  - 'cuda/11.8.0'
   - 'matlab/2024a'
-  - 'anaconda3/2023.09-0'
+
+workflow_containers:
+  - docker://git.biohpc.swmed.edu:5050/dean-lab/ctaslm2-deconvolution:0.1.0
 
 workflow_parameters:
   - id: input
@@ -70,16 +73,6 @@ workflow_parameters:
       - [ '4', 'Build up to 4x pyramid levels' ]
       - [ '8', 'Build up to 8x pyramid levels' ]
       - [ '16', 'Build up to 16x pyramid levels' ]
-
-  - id: decon_runtime_dir
-    type: string
-    required: false
-    default: '-1'
-    description: |
-      Optional existing runtime directory to reuse instead of building a new
-      conda environment. This can point to a deconvolution runtime, a deskew
-      runtime, or directly to the conda environment directory. Use -1 to build
-      the default deconvolution runtime.
 
   - id: iter
     type: integer

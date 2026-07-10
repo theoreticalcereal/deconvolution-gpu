@@ -10,6 +10,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = ROOT / "workflow/scripts/decon_wrapper.py"
 PSF_SCRIPT_PATH = ROOT / "workflow/scripts/psf_estimation.py"
+WORKFLOW_CONTAINER_IMAGE = "git.biohpc.swmed.edu:5050/dean-lab/ctaslm2-deconvolution:0.1.0"
 
 
 class FakeArray:
@@ -183,20 +184,20 @@ class DeconvolutionWiringTest(unittest.TestCase):
     def test_main_wires_deconvolution_without_deskew_or_visualization(self):
         main_text = (ROOT / "workflow/main.nf").read_text(encoding="utf-8")
 
-        self.assertIn("include { BUILD_DECON_CONTAINER } from './modules'", main_text)
         self.assertIn("include { STAGE_DECON_INPUT } from './modules'", main_text)
         self.assertIn("include { DECON } from './modules'", main_text)
         self.assertIn("include { EXPORT_OUTPUT_FORMAT } from './modules'", main_text)
+        self.assertNotIn("BUILD_DECON_CONTAINER", main_text)
         self.assertNotIn("DESKEW", main_text)
         self.assertNotIn("CONVERT_TIFFS_TO_NEUROGLANCER", main_text)
 
     def test_modules_keep_decon_and_export_processes(self):
         modules_text = (ROOT / "workflow/modules.nf").read_text(encoding="utf-8")
 
-        self.assertIn("process BUILD_DECON_CONTAINER", modules_text)
         self.assertIn("process STAGE_DECON_INPUT", modules_text)
         self.assertIn("process DECON", modules_text)
         self.assertIn("process EXPORT_OUTPUT_FORMAT", modules_text)
+        self.assertNotIn("process BUILD_DECON_CONTAINER", modules_text)
         self.assertNotIn("process DESKEW", modules_text)
         self.assertNotIn("process CONVERT_TIFFS_TO_NEUROGLANCER", modules_text)
 
@@ -214,26 +215,37 @@ class DeconvolutionWiringTest(unittest.TestCase):
         self.assertNotIn("decon_only", config_text)
         self.assertNotIn("deskew_backend", config_text)
 
-    def test_external_runtime_skips_decon_container_build(self):
+    def test_workflow_uses_prebuilt_singularity_container(self):
         main_text = (ROOT / "workflow/main.nf").read_text(encoding="utf-8")
+        modules_text = (ROOT / "workflow/modules.nf").read_text(encoding="utf-8")
         config_text = (ROOT / "workflow/configs/nextflow.config").read_text(encoding="utf-8")
         package_text = (ROOT / "astrocyte_pkg.yml").read_text(encoding="utf-8")
 
-        self.assertIn("decon_runtime_dir = '-1'", config_text)
-        self.assertIn("id: decon_runtime_dir", package_text)
-        self.assertIn("default: '-1'", package_text)
-        self.assertIn("def isExternalRuntimeSupplied(value)", main_text)
-        self.assertIn("if (isExternalRuntimeSupplied(params.decon_runtime_dir))", main_text)
-        self.assertIn("file(params.decon_runtime_dir.toString(), checkIfExists: true)", main_text)
-        self.assertIn("else {\n        BUILD_DECON_CONTAINER()", main_text)
-        self.assertIn("text != 'true'", main_text)
+        self.assertIn(f"docker://{WORKFLOW_CONTAINER_IMAGE}", package_text)
+        self.assertIn("workflow_containers:", package_text)
+        self.assertIn("'singularity/3.9.9'", package_text)
+        self.assertIn("'cuda/11.8.0'", package_text)
+        self.assertNotIn("id: decon_runtime_dir", package_text)
+        self.assertNotIn("decon_runtime_dir", config_text)
+        self.assertNotIn("build_decon_container", config_text)
+        self.assertNotIn("isExternalRuntimeSupplied", main_text)
+        self.assertNotIn("decon_container_ch", main_text)
+        self.assertIn(f"def WORKFLOW_CONTAINER_IMAGE = '{WORKFLOW_CONTAINER_IMAGE}'", modules_text)
+        self.assertIn("def CONTAINER_ENV_PREFIX = '/opt/conda/envs/app'", modules_text)
+        self.assertIn("container WORKFLOW_CONTAINER_IMAGE", modules_text)
+        self.assertNotIn(f"docker://{WORKFLOW_CONTAINER_IMAGE}", modules_text)
 
-    def test_decon_processes_accept_deskew_runtime_layout(self):
+    def test_decon_processes_use_container_environment(self):
         modules_text = (ROOT / "workflow/modules.nf").read_text(encoding="utf-8")
 
-        self.assertIn('for candidate in decon_env deskew_env; do', modules_text)
-        self.assertIn('runtime_env="${decon_runtime}/\\${candidate}"', modules_text)
-        self.assertIn('export CONDA_PREFIX="\\${runtime_env}"', modules_text)
+        self.assertIn("module 'singularity/3.9.9'", modules_text)
+        self.assertIn("module 'singularity/3.9.9:cuda/11.8.0:matlab/2024a'", modules_text)
+        self.assertIn("containerOptions = '--nv'", modules_text)
+        self.assertIn('export CONDA_PREFIX="${CONTAINER_ENV_PREFIX}"', modules_text)
+        self.assertIn('export PATH="${CONTAINER_ENV_PREFIX}/bin:\\${PATH}"', modules_text)
+        self.assertIn('export LD_LIBRARY_PATH="${CONTAINER_ENV_PREFIX}/lib:\\${LD_LIBRARY_PATH:-}"', modules_text)
+        self.assertNotIn("path decon_runtime", modules_text)
+        self.assertNotIn("runtime_env=", modules_text)
 
     def test_decon_process_publishes_native_db2_outputs(self):
         modules_text = (ROOT / "workflow/modules.nf").read_text(encoding="utf-8")
