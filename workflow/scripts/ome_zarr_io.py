@@ -84,7 +84,7 @@ def zip_ome_zarr_to_ozx(zarr_path: Path | str, archive_path: Path | str) -> Path
     if archive.exists():
         archive.unlink()
     log_progress(f"Zipping OME-Zarr output: {source} -> {archive}")
-    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as handle:
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as handle:
         for file_path in sorted(path for path in source.rglob("*") if path.is_file()):
             handle.write(file_path, file_path.relative_to(source).as_posix())
     return archive.resolve()
@@ -191,8 +191,11 @@ def downsample_xy(array, factor: int):
 def _normalise_chunks(chunks, shape: tuple[int, int, int]) -> tuple[int, int, int]:
     if chunks is None:
         return (min(16, shape[0]), min(256, shape[1]), min(256, shape[2]))
+    chunk_axes = tuple(chunks)
+    if len(chunk_axes) != len(shape):
+        raise ValueError(f"chunks must have {len(shape)} axes, got {len(chunk_axes)}")
     normalised = []
-    for axis_chunks, axis_size in zip(chunks, shape, strict=True):
+    for axis_chunks, axis_size in zip(chunk_axes, shape):
         if isinstance(axis_chunks, (tuple, list)):
             chunk_size = int(axis_chunks[0])
         else:
@@ -224,6 +227,15 @@ def open_ome_zarr_array(path: Path | str, mode: str = "r"):
         raise RuntimeError("Missing required dependency 'zarr' for OME-Zarr volume access") from exc
 
     return zarr.open(str(Path(path) / "0"), mode=mode)
+
+
+def zarr_chunk_compressor():
+    try:
+        from numcodecs import Blosc
+    except ImportError as exc:
+        raise RuntimeError("Missing required dependency 'numcodecs' for compressed OME-Zarr chunk writing") from exc
+
+    return Blosc(cname="zstd", clevel=3, shuffle=Blosc.BITSHUFFLE)
 
 
 def create_ome_zarr_array(
@@ -266,7 +278,7 @@ def create_ome_zarr_array(
         shape=tuple(int(axis) for axis in shape),
         chunks=tuple(int(axis) for axis in chunks),
         dtype=dtype,
-        compressor=None,
+        compressor=zarr_chunk_compressor(),
     )
     set_zyx_array_dimensions(array)
     return array
@@ -307,7 +319,7 @@ def write_downsampled_pyramid(
             shape=shape,
             chunks=chunks,
             dtype=dtype,
-            compressor=None,
+            compressor=zarr_chunk_compressor(),
         )
         set_zyx_array_dimensions(target)
         for z_start in range(0, shape[0], chunks[0]):
