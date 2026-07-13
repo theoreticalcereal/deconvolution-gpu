@@ -249,6 +249,14 @@ class DeconvolutionWiringTest(unittest.TestCase):
         self.assertNotIn("path decon_runtime", modules_text)
         self.assertNotIn("runtime_env=", modules_text)
 
+    def test_biohpc_config_binds_host_matlab_into_singularity(self):
+        config_text = (ROOT / "workflow/configs/biohpc.config").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "runOptions = '--bind /home1/apps/MATLAB:/home1/apps/MATLAB'",
+            config_text,
+        )
+
     def test_decon_process_publishes_native_db2_outputs(self):
         modules_text = (ROOT / "workflow/modules.nf").read_text(encoding="utf-8")
 

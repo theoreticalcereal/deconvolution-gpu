@@ -51,6 +51,11 @@ class DeconvolutionContainerImageTests(unittest.TestCase):
         self.assertIn("id -un", check_script)
         self.assertIn("SINGULARITY_DOCKER_USERNAME", check_script)
         self.assertIn("singularity inspect", check_script)
+        self.assertIn("MATLAB_BIND=${MATLAB_BIND:-/home1/apps/MATLAB:/home1/apps/MATLAB}", check_script)
+        self.assertIn('--bind "${MATLAB_BIND}"', check_script)
+        self.assertIn("command -v matlab", check_script)
+        self.assertIn("/home1/apps/MATLAB/R2024a/bin/matlab", check_script)
+        self.assertIn("matlab -batch", check_script)
 
 
 if __name__ == "__main__":

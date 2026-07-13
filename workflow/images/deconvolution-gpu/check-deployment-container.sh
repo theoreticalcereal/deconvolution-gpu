@@ -6,6 +6,8 @@ readonly IMAGE_NAME=${IMAGE_NAME:-ctaslm2-deconvolution}
 readonly TAG=${TAG:-0.1.0}
 readonly IMAGE=${REGISTRY}/${IMAGE_NAME}:${TAG}
 readonly CONTAINER_URI="docker://${IMAGE}"
+readonly MATLAB_BIND=${MATLAB_BIND:-/home1/apps/MATLAB:/home1/apps/MATLAB}
+readonly MATLAB_FALLBACK=${MATLAB_FALLBACK:-/home1/apps/MATLAB/R2024a/bin/matlab}
 
 # Default Astrocyte workflow_containers URI:
 # docker://git.biohpc.swmed.edu:5050/dean-lab/ctaslm2-deconvolution:0.1.0
@@ -18,6 +20,7 @@ fi
 
 if command -v module >/dev/null 2>&1; then
   module load singularity/3.9.9 || true
+  module load matlab/2024a || true
 fi
 
 if ! command -v singularity >/dev/null 2>&1; then
@@ -36,3 +39,26 @@ fi
 echo "Checking ${CONTAINER_URI}"
 singularity inspect "${CONTAINER_URI}"
 echo "Singularity can inspect ${CONTAINER_URI}"
+
+echo "Checking MATLAB visibility inside ${CONTAINER_URI}"
+singularity exec --bind "${MATLAB_BIND}" "${CONTAINER_URI}" sh -lc "
+  set -e
+  resolved_matlab_bin=''
+  for candidate in matlab '${MATLAB_FALLBACK}'; do
+    if [ -n \"\${candidate}\" ] && command -v \"\${candidate}\" >/dev/null 2>&1; then
+      resolved_matlab_bin=\"\$(command -v \"\${candidate}\")\"
+      break
+    elif [ -n \"\${candidate}\" ] && [ -x \"\${candidate}\" ]; then
+      resolved_matlab_bin=\"\${candidate}\"
+      break
+    fi
+  done
+  if [ -z \"\${resolved_matlab_bin}\" ]; then
+    echo 'ERROR: MATLAB executable not visible inside container.' >&2
+    echo 'Checked command -v matlab and ${MATLAB_FALLBACK}.' >&2
+    exit 5
+  fi
+  echo \"MATLAB resolved inside container: \${resolved_matlab_bin}\"
+  \"\${resolved_matlab_bin}\" -batch \"disp('matlab -batch container check ok')\"
+"
+echo "MATLAB is visible inside ${CONTAINER_URI}"
