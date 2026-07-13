@@ -263,7 +263,13 @@ class DeconvolutionWiringTest(unittest.TestCase):
         self.assertIn('publishDir "${params.output_dir}", mode: \'copy\', pattern: \'DB2_*.ozx\'', modules_text)
         self.assertIn('path "DB2_*.ozx", emit: decon_output', modules_text)
         self.assertIn("zip_ome_zarr_to_ozx", modules_text)
-        self.assertIn("rm -rf DB2_*.ome.zarr", modules_text)
+        self.assertIn("mkdir -p ${shell_quote(publishRoot)}", modules_text)
+        self.assertIn('cp -f "estimated_psf.tif" ${shell_quote(publishRoot)}/', modules_text)
+        self.assertIn('cp -f "\\$output_archive" ${shell_quote(publishRoot)}/', modules_text)
+        self.assertLess(
+            modules_text.index('cp -f "\\$output_archive" ${shell_quote(publishRoot)}/'),
+            modules_text.index("rm -rf DB2_*.ome.zarr"),
+        )
 
     def test_nextflow_storage_cleanup_is_enabled(self):
         config_text = (ROOT / "workflow/configs/nextflow.config").read_text(encoding="utf-8")
@@ -277,6 +283,7 @@ class DeconvolutionWiringTest(unittest.TestCase):
         package_text = (ROOT / "astrocyte_pkg.yml").read_text(encoding="utf-8")
 
         self.assertIn("output_formats = 'ozx'", config_text)
+        self.assertIn("output_dir = './output'", config_text)
         self.assertIn("\\.ozx", package_text)
         self.assertIn("default: 'ozx'", package_text)
         self.assertIn("[ 'ozx', 'OZX zipped OME-Zarr output' ]", package_text)

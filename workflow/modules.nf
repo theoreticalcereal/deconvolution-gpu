@@ -118,8 +118,13 @@ process DECON {
     def pyramid_max_downsample_flag = flag('pyramid_max_downsample', params.pyramid_max_downsample)
     def cache_dir_flag   = flag('cache_dir', params.psf_cache_dir)
     def no_psf_cache_flag = params.no_psf_cache ? "--no_psf_cache"                    : ""
+    def shell_quote = { value -> "'${value.toString().replace("'", "'\\''")}'" }
+    def outputRoot = output_dir.toString()
+    def publishRoot = outputRoot.startsWith('/') ? outputRoot : "${workflow.launchDir}/${outputRoot}"
 
     """
+    mkdir -p ${shell_quote(publishRoot)}
+
     export CONDA_PREFIX="${CONTAINER_ENV_PREFIX}"
     export CONDA_DEFAULT_ENV="app"
     export PATH="${CONTAINER_ENV_PREFIX}/bin:\${PATH}"
@@ -198,6 +203,13 @@ process DECON {
         ${no_psf_cache_flag}
 
     PYTHONPATH="${projectDir}/scripts:\${PYTHONPATH:-}" python3 -c "from pathlib import Path; from ome_zarr_io import zip_ome_zarr_to_ozx; [zip_ome_zarr_to_ozx(path, path.with_suffix('').with_suffix('.ozx')) for path in sorted(Path('.').glob('DB2_*.ome.zarr'))]"
+    if [ -f "estimated_psf.tif" ]; then
+        cp -f "estimated_psf.tif" ${shell_quote(publishRoot)}/
+    fi
+    for output_archive in DB2_*.ozx; do
+        [ -e "\$output_archive" ] || continue
+        cp -f "\$output_archive" ${shell_quote(publishRoot)}/
+    done
     rm -rf DB2_*.ome.zarr
     """
 }
