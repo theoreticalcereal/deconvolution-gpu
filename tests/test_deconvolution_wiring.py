@@ -242,7 +242,7 @@ class DeconvolutionWiringTest(unittest.TestCase):
         self.assertIn("module 'singularity/3.9.9'", modules_text)
         self.assertIn("module 'singularity/3.9.9:matlab/2024a'", modules_text)
         self.assertNotIn("module 'singularity/3.9.9:cuda/11.8.0:matlab/2024a'", modules_text)
-        self.assertIn("containerOptions = '--nv'", modules_text)
+        self.assertIn("containerOptions = '--nv -B /home1/apps/MATLAB:/home1/apps/MATLAB'", modules_text)
         self.assertIn('export CONDA_PREFIX="${CONTAINER_ENV_PREFIX}"', modules_text)
         self.assertIn('export PATH="${CONTAINER_ENV_PREFIX}/bin:\\${PATH}"', modules_text)
         self.assertIn('export LD_LIBRARY_PATH="${CONTAINER_ENV_PREFIX}/lib:\\${LD_LIBRARY_PATH:-}"', modules_text)

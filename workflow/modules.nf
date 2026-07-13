@@ -43,7 +43,7 @@ process DECON {
     tag "decon"
     module 'singularity/3.9.9:matlab/2024a'
     container WORKFLOW_CONTAINER_IMAGE
-    containerOptions = '--nv'
+    containerOptions = '--nv -B /home1/apps/MATLAB:/home1/apps/MATLAB'
 
     publishDir "${params.output_dir}", mode: 'copy', pattern: 'estimated_psf.tif'
     publishDir "${params.output_dir}", mode: 'copy', pattern: 'DB2_*.ozx'
