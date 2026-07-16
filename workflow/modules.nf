@@ -39,6 +39,33 @@ process STAGE_DECON_INPUT {
     """
 }
 
+process STAGE_DECON_TIFF_INPUT {
+    tag "decon_tiff_input"
+    scratch true
+
+    input:
+    path input_tiffs
+
+    output:
+    path "input_tiff", emit: decon_input_dir
+
+    script:
+    def shell_quote = { value -> "'${value.toString().replace("'", "'\\''")}'" }
+    def link_commands = input_tiffs.collect { tiff ->
+        "ln -s \"\$PWD/${tiff}\" ${shell_quote("input_tiff/${tiff.name}")}"
+    }.join('\n')
+    def metadata_commands = input_tiffs.collect { tiff ->
+        "printf '%s\\t%s\\n' ${shell_quote(tiff.name)} ${shell_quote(tiff.name)} >> input_tiff/original_filenames.tsv"
+    }.join('\n')
+
+    """
+    mkdir -p input_tiff
+    : > input_tiff/original_filenames.tsv
+    ${link_commands}
+    ${metadata_commands}
+    """
+}
+
 process DECON {
     tag "decon"
     module 'singularity/3.9.9:matlab/2024a'

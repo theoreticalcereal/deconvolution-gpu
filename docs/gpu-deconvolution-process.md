@@ -4,13 +4,18 @@
 `pycudadecon`. It is orchestrated by `workflow/scripts/decon_wrapper.py`.
 
 The current workflow uses OME-Zarr internally and OZX for published native
-outputs. Deconvolution reads normalized OME-Zarr volumes from the staging step
-or deskewed OME-Zarr volumes from `Top_shear`. TIFF input remains supported for
-manual and compatibility runs.
+outputs. Deconvolution reads selected TIFF inputs directly, normalized OME-Zarr
+volumes from the staging step, or deskewed OME-Zarr volumes from `Top_shear`.
 
 ## Input Discovery
 
-Package runs normalize selected files before deconvolution:
+Package runs link selected TIFF files directly before deconvolution:
+
+```text
+input_tiff/<sample>.tif
+```
+
+Non-TIFF package runs normalize selected files before deconvolution:
 
 ```text
 input_zarr/<sample>.ome.zarr/
@@ -22,14 +27,10 @@ Full light-sheet runs pass the deskewed output into `DECON`:
 Top_shear/<sample>.ome.zarr/
 ```
 
-Decon-only runs use the normalized selected input directly. Existing OME-Zarr
-inputs are copied into the normalized input directory, and OZX inputs are
-unzipped there. TIFF, CZI, ND2, LIF, and HDF5 inputs are converted there before
-any GPU work starts.
-
-For compatibility, `decon_wrapper.py` can also scan a directory containing
-`*.tif` or `*.tiff` stacks. Use that path only when intentionally bypassing the
-normalization process.
+Decon-only runs use the staged selected input directly. Existing OME-Zarr inputs
+are copied into the normalized input directory, and OZX inputs are unzipped
+there. CZI, ND2, LIF, and HDF5 inputs are converted there before any GPU work
+starts. Mixed TIFF and non-TIFF selections also use the normalization path.
 
 Select inputs from one optical configuration at a time. The PSF is estimated
 from the first sorted input volume and reused for every volume in the same

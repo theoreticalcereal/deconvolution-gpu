@@ -185,6 +185,7 @@ class DeconvolutionWiringTest(unittest.TestCase):
         main_text = (ROOT / "workflow/main.nf").read_text(encoding="utf-8")
 
         self.assertIn("include { STAGE_DECON_INPUT } from './modules'", main_text)
+        self.assertIn("include { STAGE_DECON_TIFF_INPUT } from './modules'", main_text)
         self.assertIn("include { DECON } from './modules'", main_text)
         self.assertIn("include { EXPORT_OUTPUT_FORMAT } from './modules'", main_text)
         self.assertNotIn("BUILD_DECON_CONTAINER", main_text)
@@ -195,11 +196,25 @@ class DeconvolutionWiringTest(unittest.TestCase):
         modules_text = (ROOT / "workflow/modules.nf").read_text(encoding="utf-8")
 
         self.assertIn("process STAGE_DECON_INPUT", modules_text)
+        self.assertIn("process STAGE_DECON_TIFF_INPUT", modules_text)
         self.assertIn("process DECON", modules_text)
         self.assertIn("process EXPORT_OUTPUT_FORMAT", modules_text)
         self.assertNotIn("process BUILD_DECON_CONTAINER", modules_text)
         self.assertNotIn("process DESKEW", modules_text)
         self.assertNotIn("process CONVERT_TIFFS_TO_NEUROGLANCER", modules_text)
+
+    def test_tiff_inputs_bypass_ome_zarr_normalization(self):
+        main_text = (ROOT / "workflow/main.nf").read_text(encoding="utf-8")
+        modules_text = (ROOT / "workflow/modules.nf").read_text(encoding="utf-8")
+
+        self.assertIn("def isTiffInputPattern(inputPattern)", main_text)
+        self.assertIn("input_patterns.every { input_pattern -> isTiffInputPattern(input_pattern) }", main_text)
+        self.assertIn("STAGE_DECON_TIFF_INPUT(input_files_ch)", main_text)
+        self.assertIn("STAGE_DECON_INPUT(input_files_ch)", main_text)
+        self.assertIn("process STAGE_DECON_TIFF_INPUT", modules_text)
+        self.assertIn("ln -s", modules_text)
+        self.assertIn("input_tiff", modules_text)
+        self.assertNotIn("normalize_input_to_ome_zarr.py \\\n        --input input_tiff", modules_text)
 
     def test_matlab_stack_helpers_are_packaged_for_blind_psf_estimation(self):
         script_dir = ROOT / "workflow/scripts"

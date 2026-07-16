@@ -10,7 +10,7 @@ Then run this package on the deskewed `Top_shear/` output.
 ## Workflow
 
 ```text
-selected images -> STAGE_DECON_INPUT -> DECON -> optional TIFF export
+selected images -> STAGE_DECON_TIFF_INPUT or STAGE_DECON_INPUT -> DECON -> optional TIFF export
 ```
 
 The native output is OZX, a zipped OME-Zarr archive. Set

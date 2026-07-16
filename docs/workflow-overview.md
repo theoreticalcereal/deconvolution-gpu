@@ -4,16 +4,18 @@ The deconvolution package contains only the deconvolution half of the original
 combined workflow.
 
 ```text
-STAGE_DECON_INPUT
+STAGE_DECON_TIFF_INPUT or STAGE_DECON_INPUT
 DECON
 EXPORT_OUTPUT_FORMAT  # only when output_formats = tiff
 ```
 
-`STAGE_DECON_INPUT` normalizes selected input files to OME-Zarr and preserves
-original filenames in `original_filenames.tsv`. OZX inputs are unzipped into
-the same internal OME-Zarr layout. `DECON` reads those volumes, estimates one
-blind PSF from the first selected volume, and applies the resulting PSF to all
-selected volumes in the run.
+`STAGE_DECON_TIFF_INPUT` links selected TIFF inputs directly for deconvolution
+and preserves original filenames in `original_filenames.tsv`. For non-TIFF
+inputs, `STAGE_DECON_INPUT` normalizes selected input files to OME-Zarr and
+preserves the same filename map. OZX inputs are unzipped into that internal
+OME-Zarr layout. `DECON` reads the staged volumes, estimates one blind PSF from
+the first selected volume, and applies the resulting PSF to all selected volumes
+in the run.
 
 OME-Zarr outputs are written as multiscale pyramids in task scratch space, then
 zipped to `DB2_*.ozx` for publication and removed from the task directory.

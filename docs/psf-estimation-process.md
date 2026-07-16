@@ -15,13 +15,13 @@ The implementation is split across:
 `decon_wrapper.py` sorts the selected deconvolution input volumes first. The
 first sorted volume is used for blind PSF estimation.
 
-Package runs normally pass OME-Zarr volumes created by `STAGE_DECON_INPUT`.
-For light-sheet data, run `deskew-gpu` first and select its `Top_shear/`
-outputs here. OME-Zarr inputs are opened directly at level 0 for PSF tile
-selection, so the full volume is not first materialized as a temporary TIFF.
-Compatibility runs can still pass TIFF stacks directly. Channel and timepoint
-filtering is not performed by the wrapper, so select only inputs intended for
-one optical configuration.
+Package runs pass TIFF volumes linked by `STAGE_DECON_TIFF_INPUT` or OME-Zarr
+volumes created by `STAGE_DECON_INPUT`. For light-sheet data, run `deskew-gpu`
+first and select its `Top_shear/` outputs here. OME-Zarr inputs are opened
+directly at level 0 for PSF tile selection, so the full volume is not first
+materialized as a temporary TIFF. Channel and timepoint filtering is not
+performed by the wrapper, so select only inputs intended for one optical
+configuration.
 
 Example normalized names:
 

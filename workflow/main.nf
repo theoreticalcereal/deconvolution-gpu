@@ -2,6 +2,7 @@
 nextflow.enable.dsl=2
 
 include { STAGE_DECON_INPUT } from './modules'
+include { STAGE_DECON_TIFF_INPUT } from './modules'
 include { DECON } from './modules'
 include { EXPORT_OUTPUT_FORMAT } from './modules'
 
@@ -47,6 +48,11 @@ def normalizeInputPatterns(input, commandLine = null) {
         .findAll { it }
 }
 
+def isTiffInputPattern(inputPattern) {
+    def text = inputPattern.toString().trim().toLowerCase()
+    return text.endsWith('.tif') || text.endsWith('.tiff')
+}
+
 workflow {
     input_patterns = normalizeInputPatterns(params.input, workflow.commandLine)
     if (input_patterns) {
@@ -55,8 +61,14 @@ workflow {
             .fromList(input_patterns)
             .map { input_pattern -> file(input_pattern, checkIfExists: true) }
             .collect()
-        STAGE_DECON_INPUT(input_files_ch)
-        decon_input_ch = STAGE_DECON_INPUT.out.decon_input_dir
+        if (input_patterns.every { input_pattern -> isTiffInputPattern(input_pattern) }) {
+            log.info "Bypassing OME-Zarr input normalization for TIFF input(s)."
+            STAGE_DECON_TIFF_INPUT(input_files_ch)
+            decon_input_ch = STAGE_DECON_TIFF_INPUT.out.decon_input_dir
+        } else {
+            STAGE_DECON_INPUT(input_files_ch)
+            decon_input_ch = STAGE_DECON_INPUT.out.decon_input_dir
+        }
     } else {
         decon_input_ch = Channel.value(params.image_path)
     }

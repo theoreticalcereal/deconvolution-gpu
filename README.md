@@ -7,9 +7,10 @@ geometric correction.
 
 ## Pipeline
 
-1. `STAGE_DECON_INPUT` links selected files, preserves original filenames, and
-   normalizes supported images to `input_zarr/*.ome.zarr`. OZX inputs are
-   unzipped directly into that internal OME-Zarr layout.
+1. `STAGE_DECON_TIFF_INPUT` links selected TIFF files directly into the decon
+   task input. For non-TIFF inputs, `STAGE_DECON_INPUT` preserves original
+   filenames and normalizes supported images to `input_zarr/*.ome.zarr`. OZX
+   inputs are unzipped directly into that internal OME-Zarr layout.
 2. `DECON` estimates one blind PSF from the first selected volume and applies
    GPU deconvolution to all selected volumes.
 3. `EXPORT_OUTPUT_FORMAT` runs only when `output_formats = 'tiff'`.
