@@ -1,5 +1,44 @@
 # PSF Estimation Process
 
+## Backend Selection
+
+`blind_backend = cupy` is the default workflow path. It is a native blind
+Richardson-Lucy implementation and no longer routes through MATLAB. Set
+`blind_backend = matlab` only for a MATLAB `deconvblind` comparison or
+compatibility run.
+
+Each CuPy XY tile runs in an isolated spawned worker process. CUDA initializes
+inside the child and inherits the Slurm allocation through
+`CUDA_VISIBLE_DEVICES`; device `0` is the first logical GPU visible inside
+the job. Use `blind_workers = 1` for a normal one-GPU allocation.
+
+## Native CuPy Calculation
+
+The CuPy implementation and SciPy CPU reference use the same linear convolution
+operator and exact adjoints. Each iteration performs:
+
+1. Forward convolution of the current image and PSF.
+2. A dampable observed/model likelihood ratio.
+3. Image back-projection through the flipped PSF with boundary sensitivity.
+4. A second forward model using the updated image.
+5. A fixed-support PSF adjoint update with boundary sensitivity.
+6. Non-negativity enforcement and PSF sum normalization.
+
+Z padding is symmetric. FFT convolution remains linear rather than circular,
+and centered adjoint cropping handles odd and even PSF dimensions. Damping uses
+the MATLAB-compatible default of zero and is not yet a workflow parameter.
+
+`blind_peak_normalization = none` most closely matches unscaled MATLAB input.
+`unit` scales the observed tile to `[0, 1]`; `gamma` additionally applies
+the positive `blind_peak_gamma_max` transform.
+
+The cache key includes the backend, normalization mode, gamma setting, and Z
+window, so native CuPy results cannot reuse former MATLAB-fallback entries.
+
+The runtime image contains SciPy, CuPy, cupyx FFT convolution, and cuCIM. The
+blind-RL module exposes a cuCIM adapter using the normalized PSF with clipping
+disabled, and full-volume production restoration uses that same adapter.
+
 The deconvolution process always resolves a blind PSF before running CUDA
 deconvolution. The theoretical PSF is only the starting seed for MATLAB
 `deconvblind`; it is not used directly as the final deconvolution PSF.
@@ -98,12 +137,32 @@ and uses that window for chunked blind estimation.
 The first selected volume is opened as a Dask-backed image when possible. It is
 tiled into XY chunks with full Z from the selected Z window.
 
-Positive `chunk_xy` is used directly. A non-positive value triggers
-VRAM-aware sizing through `resolve_chunk_xy`.
+For the CuPy backend, positive `chunk_xy` is an upper bound. The workflow
+models the padded 3-D FFT dimensions, reads free VRAM from the allocated visible
+GPU, and chooses the largest 32-pixel-aligned core that fits its safety budget.
+A 24 GB GPU can retain the configured 256-pixel core while smaller GPUs select
+smaller tiles automatically.
+
+If cuFFT still raises an out-of-memory error, the partial estimation pass is
+discarded and every tile is restarted at the next smaller aligned core size.
+This preserves complete image coverage instead of cropping the failed tile.
+CuPy blind estimation is limited to one spawned worker per allocated GPU.
 
 Tiles smaller than half the requested tile size on either edge are skipped.
 Each tile is read with an XY halo of `pad_xy`. Border halos are filled with
 reflect padding.
+
+By default, `blind_max_tiles = 16` limits blind RL to a representative subset
+of the candidate grid. Every candidate core is scored with the same SNR weight
+used by the final merge. The grid is divided into balanced spatial regions,
+the strongest candidate in each region is retained, and any remaining slots
+are filled by the strongest unselected candidates. Coordinate ordering makes
+selection deterministic when scores are equal.
+
+The log records the candidate and selected counts, estimated work reduction,
+coordinates, and SNR weights. Set `blind_max_tiles = 0` to process the complete
+grid for comparison runs. Tile selection does not change the selected tiles'
+halos, Z window, blind iterations, or merge weights.
 
 ## MATLAB `deconvblind`
 
@@ -162,8 +221,10 @@ The cache root is resolved in this order:
 3. `.psf_cache` in the process working directory.
 
 The cache key includes the input path, size, modification time, seed content
-hash, iteration count, chunking, padding, script path, merge mode, SNR cap, and
-Z window. Use `--no_psf_cache` to force re-estimation.
+hash, iteration count, chunking, padding, script path, merge mode, SNR cap, Z
+window, tile limit, and tile-selection strategy. Representative and full-grid
+PSFs therefore cannot reuse one another's cache entries. Use `--no_psf_cache`
+to force re-estimation.
 
 The active PSF is saved as:
 

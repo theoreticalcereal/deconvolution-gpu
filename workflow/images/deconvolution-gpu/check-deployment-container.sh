@@ -3,14 +3,14 @@ set -euo pipefail
 
 readonly REGISTRY=${REGISTRY:-git.biohpc.swmed.edu:5050/dean-lab}
 readonly IMAGE_NAME=${IMAGE_NAME:-ctaslm2-deconvolution}
-readonly TAG=${TAG:-0.1.0}
+readonly TAG=${TAG:-0.1.2}
 readonly IMAGE=${REGISTRY}/${IMAGE_NAME}:${TAG}
 readonly CONTAINER_URI="docker://${IMAGE}"
 readonly MATLAB_BIND=${MATLAB_BIND:-/home1/apps/MATLAB:/home1/apps/MATLAB}
 readonly MATLAB_FALLBACK=${MATLAB_FALLBACK:-/home1/apps/MATLAB/R2024a/bin/matlab}
 
 # Default Astrocyte workflow_containers URI:
-# docker://git.biohpc.swmed.edu:5050/dean-lab/ctaslm2-deconvolution:0.1.0
+# docker://git.biohpc.swmed.edu:5050/dean-lab/ctaslm2-deconvolution:0.1.2
 
 if ! id -un >/dev/null 2>&1; then
   echo "ERROR: current UID is not resolvable by id -un." >&2
@@ -39,6 +39,13 @@ fi
 echo "Checking ${CONTAINER_URI}"
 singularity inspect "${CONTAINER_URI}"
 echo "Singularity can inspect ${CONTAINER_URI}"
+
+echo "Checking Python deconvolution dependencies inside ${CONTAINER_URI}"
+singularity exec --nv "${CONTAINER_URI}" sh -lc '
+  export PATH=/opt/conda/envs/app/bin:$PATH
+  python -c "import numpy, scipy, pandas, cupy, cucim; from cupyx.scipy.signal import fftconvolve; from cucim.skimage.restoration import richardson_lucy; assert numpy.__version__ == \"1.26.4\", numpy.__version__; print(\"GPU deconvolution dependencies available\", \"numpy=\" + numpy.__version__, \"cupy=\" + cupy.__version__, \"cucim=\" + cucim.__version__)"
+'
+echo "Python deconvolution dependencies are visible inside ${CONTAINER_URI}"
 
 echo "Checking MATLAB visibility inside ${CONTAINER_URI}"
 singularity exec --bind "${MATLAB_BIND}" "${CONTAINER_URI}" sh -lc "

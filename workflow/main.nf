@@ -77,7 +77,8 @@ workflow {
         decon_input_ch,
         params.background,
         params.iter,
-        params.output_dir
+        params.output_dir,
+        params.output_formats
     )
 
     if (params.output_formats == 'tiff') {

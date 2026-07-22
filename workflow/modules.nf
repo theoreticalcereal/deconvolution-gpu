@@ -1,4 +1,4 @@
-def WORKFLOW_CONTAINER_IMAGE = 'git.biohpc.swmed.edu:5050/dean-lab/ctaslm2-deconvolution:0.1.0'
+def WORKFLOW_CONTAINER_IMAGE = 'git.biohpc.swmed.edu:5050/dean-lab/ctaslm2-deconvolution:0.1.2'
 def CONTAINER_ENV_PREFIX = '/opt/conda/envs/app'
 
 process STAGE_DECON_INPUT {
@@ -86,9 +86,10 @@ process DECON {
     val  background
     val  iter
     val  output_dir
+    val  output_format
 
     output:
-    path "DB2_*.ozx", emit: decon_output
+    path "DB2_*.{ozx,tif,tiff}", emit: decon_output
     path "estimated_psf.tif", emit: psf_output
 
     script:
@@ -105,6 +106,7 @@ process DECON {
 
     def background_flag  = flag('background', background)
     def iter_flag        = flag('iter', iter)
+    def output_format_flag = flag('output_format', output_format)
     def na_flag          = flag('na', params.na)
     def detection_na_flag = flag('detection_na', params.detection_na)
     def illumination_na_flag = flag('illumination_na', params.illumination_na)
@@ -128,10 +130,15 @@ process DECON {
     def psf_size_z_flag  = flag('psf_size_z', params.psf_size_z)
     def psf_size_xy_flag = flag('psf_size_xy', params.psf_size_xy)
     def blind_iters_flag = flag('blind_iters', params.blind_iters)
+    def blind_backend_flag = flag('blind_backend', params.blind_backend)
     def chunk_xy_flag    = flag('chunk_xy', params.chunk_xy)
+    def blind_max_tiles_flag = flag('blind_max_tiles', params.blind_max_tiles)
     def decon_chunk_xy_flag = flag('decon_chunk_xy', params.decon_chunk_xy)
     def pad_xy_flag      = flag('pad_xy', params.pad_xy)
     def pad_z_flag       = flag('pad_z', params.pad_z)
+    def blind_peak_normalization_flag = flag('blind_peak_normalization', params.blind_peak_normalization)
+    def blind_peak_gamma_max_flag = flag('blind_peak_gamma_max', params.blind_peak_gamma_max)
+    def blind_latent_update_period_flag = flag('blind_latent_update_period', params.blind_latent_update_period)
     def blind_workers_flag = flag('blind_workers', params.blind_workers)
     def matlab_workers_flag = flag('matlab_workers', params.matlab_workers)
     def matlab_threads_flag = flag('matlab_threads', params.matlab_threads)
@@ -185,6 +192,7 @@ process DECON {
     python3 ${projectDir}/scripts/decon_wrapper.py \\
         --image_path "${deskewed_dir}" \\
         --script_dir "${projectDir}/scripts" \\
+        ${output_format_flag} \\
         ${background_flag} \\
         ${iter_flag} \\
         ${na_flag} \\
@@ -210,10 +218,15 @@ process DECON {
         ${psf_size_z_flag} \\
         ${psf_size_xy_flag} \\
         ${blind_iters_flag} \\
+        ${blind_backend_flag} \\
         ${chunk_xy_flag} \\
+        ${blind_max_tiles_flag} \\
         ${decon_chunk_xy_flag} \\
         ${pad_xy_flag} \\
         ${pad_z_flag} \\
+        ${blind_peak_normalization_flag} \\
+        ${blind_peak_gamma_max_flag} \\
+        ${blind_latent_update_period_flag} \\
         ${blind_workers_flag} \\
         ${matlab_workers_flag} \\
         ${matlab_threads_flag} \\

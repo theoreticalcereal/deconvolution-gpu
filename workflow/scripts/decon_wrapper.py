@@ -7,7 +7,7 @@
 #   recovered per-chunk blind PSFs with SNR weighting and save estimated_psf.tif.
 #
 # Deconvolution:
-#   pycudadecon (TemporaryOTF + RLContext) processes each volume as full-Z
+#   cuCIM Richardson-Lucy processes each volume as full-Z
 #   XY chunks using map_overlap.  The requested chunk_xy is treated as the
 #   core tile size; <=0 auto-sizes from available VRAM.
 
@@ -23,11 +23,14 @@ from pathlib import Path
 
 import dask.array as da
 import numpy as np
-from pycudadecon import TemporaryOTF, RLContext, rl_decon
 from tifffile import imwrite
+
+from blind_rl import deconvolve_with_cucim
 
 from psf_estimation import (
     DEFAULT_BLIND_CHUNK_XY,
+    DEFAULT_BLIND_LATENT_UPDATE_PERIOD,
+    DEFAULT_BLIND_MAX_TILES,
     DEFAULT_BLIND_Z_SLICES,
     DEFAULT_SNR_WEIGHT_CAP,
     estimate_psf_from_chunks,
@@ -49,6 +52,7 @@ try:
         open_ome_zarr_array,
         unzip_ozx_to_ome_zarr,
         write_downsampled_pyramid,
+        write_ome_zarr_array,
     )
 except ModuleNotFoundError:
     sys.path.append(str(Path(__file__).resolve().parent))
@@ -62,6 +66,7 @@ except ModuleNotFoundError:
         open_ome_zarr_array,
         unzip_ozx_to_ome_zarr,
         write_downsampled_pyramid,
+        write_ome_zarr_array,
     )
 
 
@@ -116,6 +121,36 @@ def _decon_output_name(tiff_path: Path, original_name_map: dict[str, str]) -> st
 def _decon_ome_zarr_output_name(image_path: Path, original_name_map: dict[str, str]) -> str:
     original_name = original_name_map.get(image_path.name, image_path.name)
     return f"DB2_{image_stem(original_name)}.ome.zarr"
+
+
+def _write_materialized_decon_output(
+    restored: np.ndarray,
+    image_path: Path,
+    original_name_map: dict[str, str],
+    output_format: str,
+    max_downsample: int,
+) -> Path:
+    """Write a TIFF-input result in the requested final representation."""
+    if output_format == "tiff":
+        output_path = Path(_decon_output_name(image_path, original_name_map))
+        log_progress(f"Writing deconvolved TIFF output: {output_path}")
+        imwrite(output_path, restored)
+        return output_path
+    if output_format == "ozx":
+        output_path = Path(
+            _decon_ome_zarr_output_name(image_path, original_name_map)
+        )
+        log_progress(
+            f"Writing deconvolved OME-Zarr for OZX output: {output_path}"
+        )
+        write_ome_zarr_array(
+            output_path,
+            restored,
+            layer_name=image_stem(output_path),
+            max_downsample=max_downsample,
+        )
+        return output_path
+    raise ValueError(f"Unsupported output format: {output_format}")
 
 
 def _write_tiff_near_input_or_cwd(path: Path, data: np.ndarray) -> Path:
@@ -215,17 +250,13 @@ def _center_crop_or_pad_to_shape(array: np.ndarray, shape: tuple[int, ...]) -> n
 
 def _decon_chunk(
     chunk: np.ndarray,
-    otf_path: str,
-    dz: float,
-    dxy: float,
+    psf: np.ndarray,
     n_iters: int,
     total_chunks: int,
     block_info: dict | None = None,
 ) -> np.ndarray:
     """
-    Process one spatial chunk with pycudadecon.
-    Each call opens and closes its own RLContext so chunks can be dispatched
-    sequentially without GPU context leakage.
+    Process one spatial chunk with cuCIM Richardson-Lucy.
     """
     _, chunk_label = _chunk_progress(block_info, total_chunks)
     if chunk.size == 0:
@@ -237,15 +268,7 @@ def _decon_chunk(
     )
 
     start = time.perf_counter()
-    with RLContext(
-        chunk.shape,
-        otf_path,
-        dzdata=dz,
-        dxdata=dxy,
-        dzpsf=dz,
-        dxpsf=dxy,
-    ) as ctx:
-        result = rl_decon(chunk, output_shape=ctx.out_shape, n_iters=n_iters)
+    result = deconvolve_with_cucim(chunk, psf, n_iters)
     elapsed = time.perf_counter() - start
     avg_iter = elapsed / n_iters if n_iters > 0 else elapsed
 
@@ -338,9 +361,6 @@ def _build_deconvolution_graph(
     image_name: str,
     psf: np.ndarray,
     n_iters: int,
-    dz: float,
-    dxy: float,
-    otf_path: str,
     chunk_xy: int = 0,
     vram_gb: float | None = None,
     decon_workers: int = 1,
@@ -359,7 +379,12 @@ def _build_deconvolution_graph(
     original_shape = volume.shape
     overlap_xy = overlap_xy if overlap_xy > 0 else _psf_overlap_xy(psf)
     overlap_xy = min(overlap_xy, max(1, (min(volume.shape[1:]) - 1) // 2))
-    decon_workers = max(1, decon_workers)
+    if decon_workers != 1:
+        log_progress(
+            f"  cuCIM uses one GPU worker per allocation; "
+            f"clamping decon_workers={decon_workers} to 1"
+        )
+    decon_workers = 1
     core_chunk_xy = resolve_chunk_xy(
         chunk_xy,
         volume.shape,
@@ -395,9 +420,7 @@ def _build_deconvolution_graph(
         depth={0: 0, 1: overlap_xy, 2: overlap_xy},
         boundary="reflect",
         dtype=np.uint16,
-        otf_path=otf_path,
-        dz=dz,
-        dxy=dxy,
+        psf=psf,
         n_iters=n_iters,
         total_chunks=total_chunks,
     ), decon_workers
@@ -422,43 +445,23 @@ def deconvolve_volume(
     decon_workers: int = 1,
     overlap_xy: int = 0,
 ) -> np.ndarray:
-    temp_psf = tempfile.NamedTemporaryFile(suffix=".tif", delete=False)
-    psf_path = Path(temp_psf.name)
-    temp_psf.close()
-    try:
-        log_progress(f"Writing temporary PSF for OTF creation: {psf_path}")
-        imwrite(str(psf_path), psf.astype(np.float32, copy=False))
-        log_progress("Creating temporary OTF for CUDA deconvolution")
-        with TemporaryOTF(
-            str(psf_path),
-            dzpsf=dz,
-            dxpsf=dxy,
-            wavelength=int(round(wavelength * 1000)),
-            na=na,
-            nimm=ni,
-        ) as otf:
-            processed, decon_workers = _build_deconvolution_graph(
-                volume,
-                image_name,
-                psf,
-                n_iters,
-                dz,
-                dxy,
-                otf.path,
-                chunk_xy=chunk_xy,
-                vram_gb=vram_gb,
-                decon_workers=decon_workers,
-                overlap_xy=overlap_xy,
-            )
-            scheduler = _deconvolution_scheduler(decon_workers)
-            log_progress(
-                f"Computing deconvolution graph for {image_name}: "
-                f"scheduler={scheduler}, workers={decon_workers}"
-            )
-            output = processed.compute(scheduler=scheduler, num_workers=decon_workers)
-    finally:
-        psf_path.unlink(missing_ok=True)
-        log_progress(f"Removed temporary PSF: {psf_path}")
+    del dz, dxy, wavelength, na, ni
+    processed, decon_workers = _build_deconvolution_graph(
+        volume,
+        image_name,
+        psf,
+        n_iters,
+        chunk_xy=chunk_xy,
+        vram_gb=vram_gb,
+        decon_workers=decon_workers,
+        overlap_xy=overlap_xy,
+    )
+    scheduler = _deconvolution_scheduler(decon_workers)
+    log_progress(
+        f"Computing cuCIM deconvolution graph for {image_name}: "
+        f"scheduler={scheduler}, workers={decon_workers}"
+    )
+    output = processed.compute(scheduler=scheduler, num_workers=decon_workers)
 
     output = _match_input_intensity_range(output, volume)
     log_progress(
@@ -576,107 +579,94 @@ def deconvolve_ome_zarr_to_zarr(
         raise ValueError(f"Expected 3-D OME-Zarr volume, got shape {volume.shape}")
 
     output_path = Path(output_path)
-    temp_psf = tempfile.NamedTemporaryFile(suffix=".tif", delete=False)
-    psf_path = Path(temp_psf.name)
-    temp_psf.close()
+    del dz, dxy, wavelength, na, ni
+    processed, decon_workers = _build_deconvolution_graph(
+        volume,
+        image_path.name,
+        psf,
+        n_iters,
+        chunk_xy=chunk_xy,
+        vram_gb=vram_gb,
+        decon_workers=decon_workers,
+        overlap_xy=overlap_xy,
+    )
+    scheduler = _deconvolution_scheduler(decon_workers)
     try:
-        log_progress(f"Writing temporary PSF for OTF creation: {psf_path}")
-        imwrite(str(psf_path), psf.astype(np.float32, copy=False))
-        log_progress("Creating temporary OTF for streaming CUDA deconvolution")
-        with TemporaryOTF(
-            str(psf_path),
-            dzpsf=dz,
-            dxpsf=dxy,
-            wavelength=int(round(wavelength * 1000)),
-            na=na,
-            nimm=ni,
-        ) as otf:
-            processed, decon_workers = _build_deconvolution_graph(
-                volume,
-                image_path.name,
-                psf,
-                n_iters,
-                dz,
-                dxy,
-                otf.path,
-                chunk_xy=chunk_xy,
-                vram_gb=vram_gb,
-                decon_workers=decon_workers,
-                overlap_xy=overlap_xy,
-            )
-            scheduler = _deconvolution_scheduler(decon_workers)
-            try:
-                import zarr
-            except ImportError as exc:
-                raise RuntimeError("Missing required dependency 'zarr' for streaming OME-Zarr deconvolution") from exc
+        import zarr
+    except ImportError as exc:
+        raise RuntimeError(
+            "Missing required dependency 'zarr' for streaming OME-Zarr deconvolution"
+        ) from exc
 
-            with tempfile.TemporaryDirectory(prefix=".decon_raw_", dir=Path.cwd()) as temp_dir:
-                raw_path = Path(temp_dir) / "raw.zarr"
-                raw_chunks = _zarr_chunks_from_dask(processed)
-                log_progress(
-                    "Streaming raw deconvolution chunks to temporary Zarr: "
-                    f"path={raw_path}, shape={processed.shape}, chunks={raw_chunks}"
-                )
-                raw_array = zarr.open(
-                    str(raw_path),
-                    mode="w",
-                    shape=tuple(int(axis) for axis in processed.shape),
-                    chunks=raw_chunks,
-                    dtype=np.uint16,
-                    compressor=None,
-                )
-                da.store(processed, raw_array, lock=False, compute=False).compute(
-                    scheduler=scheduler,
-                    num_workers=decon_workers,
-                )
+    with tempfile.TemporaryDirectory(prefix=".decon_raw_", dir=Path.cwd()) as temp_dir:
+        raw_path = Path(temp_dir) / "raw.zarr"
+        raw_chunks = _zarr_chunks_from_dask(processed)
+        log_progress(
+            "Streaming raw cuCIM deconvolution chunks to temporary Zarr: "
+            f"path={raw_path}, shape={processed.shape}, chunks={raw_chunks}"
+        )
+        raw_array = zarr.open(
+            str(raw_path),
+            mode="w",
+            shape=tuple(int(axis) for axis in processed.shape),
+            chunks=raw_chunks,
+            dtype=np.uint16,
+            compressor=None,
+        )
+        da.store(processed, raw_array, lock=False, compute=False).compute(
+            scheduler=scheduler,
+            num_workers=decon_workers,
+        )
 
-                raw_lazy = da.from_array(raw_array, chunks=processed.chunks, asarray=False, lock=False)
-                input_lazy = da.from_array(volume, chunks=processed.chunks, asarray=False, lock=False)
-                input_min, input_max, output_min, output_max = da.compute(
-                    input_lazy.min(),
-                    input_lazy.max(),
-                    raw_lazy.min(),
-                    raw_lazy.max(),
-                    scheduler="threads",
-                    num_workers=max(1, decon_workers),
-                )
-                input_min = float(input_min)
-                input_max = float(input_max)
-                output_min = float(output_min)
-                output_max = float(output_max)
-                log_progress(
-                    "  Streaming intensity match: "
-                    f"input=({input_min:.6g}, {input_max:.6g}), "
-                    f"raw_output=({output_min:.6g}, {output_max:.6g})"
-                )
+        raw_lazy = da.from_array(
+            raw_array, chunks=processed.chunks, asarray=False, lock=False
+        )
+        input_lazy = da.from_array(
+            volume, chunks=processed.chunks, asarray=False, lock=False
+        )
+        input_min, input_max, output_min, output_max = da.compute(
+            input_lazy.min(),
+            input_lazy.max(),
+            raw_lazy.min(),
+            raw_lazy.max(),
+            scheduler="threads",
+            num_workers=max(1, decon_workers),
+        )
+        input_min = float(input_min)
+        input_max = float(input_max)
+        output_min = float(output_min)
+        output_max = float(output_max)
+        log_progress(
+            "  Streaming intensity match: "
+            f"input=({input_min:.6g}, {input_max:.6g}), "
+            f"raw_output=({output_min:.6g}, {output_max:.6g})"
+        )
 
-                final_array = create_ome_zarr_array(
-                    output_path,
-                    shape=tuple(int(axis) for axis in volume.shape),
-                    dtype=np.uint16,
-                    chunks=_default_output_chunks(tuple(int(axis) for axis in volume.shape)),
-                    layer_name=image_stem(output_path),
-                    max_downsample=int(max_downsample),
-                )
-                scaled = raw_lazy.map_blocks(
-                    _match_block_intensity_range,
-                    dtype=np.uint16,
-                    input_min=input_min,
-                    input_max=input_max,
-                    output_min=output_min,
-                    output_max=output_max,
-                )
-                log_progress(f"Streaming scaled deconvolution output to OME-Zarr: {output_path}")
-                da.store(scaled, final_array, lock=False, compute=False).compute(
-                    scheduler="threads",
-                    num_workers=max(1, decon_workers),
-                )
-        write_downsampled_pyramid(output_path, max_downsample=int(max_downsample))
-        log_progress(f"Finished streaming OME-Zarr deconvolution output: {output_path.resolve()}")
-        return output_path.resolve()
-    finally:
-        psf_path.unlink(missing_ok=True)
-        log_progress(f"Removed temporary PSF: {psf_path}")
+        final_array = create_ome_zarr_array(
+            output_path,
+            shape=tuple(int(axis) for axis in volume.shape),
+            dtype=np.uint16,
+            chunks=_default_output_chunks(tuple(int(axis) for axis in volume.shape)),
+            layer_name=image_stem(output_path),
+            max_downsample=int(max_downsample),
+        )
+        scaled = raw_lazy.map_blocks(
+            _match_block_intensity_range,
+            dtype=np.uint16,
+            input_min=input_min,
+            input_max=input_max,
+            output_min=output_min,
+            output_max=output_max,
+        )
+        log_progress(f"Streaming scaled deconvolution output to OME-Zarr: {output_path}")
+        da.store(scaled, final_array, lock=False, compute=False).compute(
+            scheduler="threads",
+            num_workers=max(1, decon_workers),
+        )
+
+    write_downsampled_pyramid(output_path, max_downsample=int(max_downsample))
+    log_progress(f"Finished streaming OME-Zarr deconvolution output: {output_path.resolve()}")
+    return output_path.resolve()
 
 
 # ---------------------------------------------------------------------------
@@ -692,18 +682,31 @@ def main() -> None:
     # Required options
     parser.add_argument("--image_path", required=True,
                         help="Directory containing normalized OME-Zarr or TIFF image volumes.")
+    parser.add_argument("--output_format", choices=("ozx", "tiff"), default="ozx",
+                        help="Final output representation requested by the workflow.")
 
     # Blind estimation options
     parser.add_argument("--blind_iters", type=int, default=10,
                         help="deconvblind iterations per chunk during PSF estimation.")
+    parser.add_argument("--blind_backend", default="matlab", choices=("matlab", "cupy"),
+                        help="Backend for blind PSF estimation: 'matlab' or 'cupy'.")
     parser.add_argument("--chunk_xy",    type=int, default=DEFAULT_BLIND_CHUNK_XY,
                         help="XY tile size for blind PSF estimation. <=0 auto-sizes from VRAM.")
+    parser.add_argument("--blind_max_tiles", type=int, default=DEFAULT_BLIND_MAX_TILES,
+                        help="Maximum representative PSF tiles; 0 processes the full grid.")
     parser.add_argument("--decon_chunk_xy", type=int, default=0,
                         help="Core XY tile size for CUDA deconvolution. <=0 auto-sizes from VRAM.")
     parser.add_argument("--pad_xy",      type=int, default=32,
                         help="XY halo per edge added to each blind PSF chunk (pixels).")
     parser.add_argument("--pad_z",       type=int, default=20,
                         help="Z halo per edge added before MATLAB deconvblind (pixels).")
+    parser.add_argument("--blind_peak_normalization", default="none",
+                        choices=("none", "gamma", "unit"),
+                        help="Optional peak normalization behavior for CuPy backend.")
+    parser.add_argument("--blind_peak_gamma_max", type=float, default=2.5,
+                        help="Maximum gamma scaling when blind_peak_normalization='gamma'.")
+    parser.add_argument("--blind_latent_update_period", type=int, default=DEFAULT_BLIND_LATENT_UPDATE_PERIOD,
+                        help="Update latent image every N blind iterations; 1 preserves full alternating updates.")
     parser.add_argument("--blind_workers", type=int, default=1,
                         help="Concurrent MATLAB deconvblind chunks. <=0 uses CPU affinity, falling back to 32.")
     parser.add_argument("--matlab_threads", type=int, default=1,
@@ -878,6 +881,7 @@ def main() -> None:
         image_path=str(psf_input_path),
         psf_seed=psf_seed,
         n_iters=args.blind_iters,
+        blind_backend=args.blind_backend,
         chunk_xy=args.chunk_xy,
         pad_xy=args.pad_xy,
         pad_z=args.pad_z,
@@ -892,7 +896,11 @@ def main() -> None:
         matlab_bin=args.matlab_bin,
         matlab_timeout=args.matlab_timeout,
         snr_weight_cap=args.snr_weight_cap,
+        blind_peak_normalization=args.blind_peak_normalization,
+        blind_peak_gamma_max=args.blind_peak_gamma_max,
+        blind_latent_update_period=args.blind_latent_update_period,
         blind_z_slices=args.blind_z_slices,
+        blind_max_tiles=args.blind_max_tiles,
     )
     psf_save_path = image_dir / "estimated_psf.tif"
     psf_save_path = _write_tiff_near_input_or_cwd(psf_save_path, psf)
@@ -946,9 +954,13 @@ def main() -> None:
                 decon_workers=args.decon_workers,
                 overlap_xy=args.overlap_xy,
             )
-            out_name = _decon_output_name(image_path, original_name_map)
-            log_progress(f"Writing deconvolved TIFF output: {out_name}")
-            imwrite(out_name, output)
+            out_name = _write_materialized_decon_output(
+                output,
+                image_path,
+                original_name_map,
+                output_format=args.output_format,
+                max_downsample=args.pyramid_max_downsample,
+            )
         log_progress(
             f"Saved {out_name}; elapsed={time.perf_counter() - volume_start:.2f}s"
         )

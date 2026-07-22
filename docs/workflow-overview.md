@@ -17,6 +17,11 @@ OME-Zarr layout. `DECON` reads the staged volumes, estimates one blind PSF from
 the first selected volume, and applies the resulting PSF to all selected volumes
 in the run.
 
+The default `cupy` blind backend performs alternating Richardson-Lucy image and
+PSF updates with SciPy-compatible CuPy FFT operators. Every PSF tile executes
+in a spawned process inside the Slurm GPU allocation. The `matlab` backend
+remains available for comparison and compatibility runs.
+
 OME-Zarr outputs are written as multiscale pyramids in task scratch space, then
 zipped to `DB2_*.ozx` for publication and removed from the task directory.
 Level `0` is full resolution; levels `1` through `4` are generated with
@@ -26,6 +31,8 @@ Use profile `light_sheet` to preserve light-sheet PSF behavior for data that has
 already been deskewed by `deskew-gpu`.
 
 All processes run in the prebuilt
-`git.biohpc.swmed.edu:5050/dean-lab/ctaslm2-deconvolution:0.1.0` container.
+`git.biohpc.swmed.edu:5050/dean-lab/ctaslm2-deconvolution:0.1.2` container.
 Astrocyte lists the image with a `docker://` prefix for prefetching; Nextflow
 processes use the registry image without that prefix.
+The image contains CUDA 11.8 builds of CuPy and cuCIM as well as SciPy. cuCIM
+consumes the estimated normalized PSF directly.

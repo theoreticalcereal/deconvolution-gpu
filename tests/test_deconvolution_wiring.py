@@ -6,11 +6,13 @@ import types
 import unittest
 from unittest import mock
 
+import numpy as np
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = ROOT / "workflow/scripts/decon_wrapper.py"
 PSF_SCRIPT_PATH = ROOT / "workflow/scripts/psf_estimation.py"
-WORKFLOW_CONTAINER_IMAGE = "git.biohpc.swmed.edu:5050/dean-lab/ctaslm2-deconvolution:0.1.0"
+WORKFLOW_CONTAINER_IMAGE = "git.biohpc.swmed.edu:5050/dean-lab/ctaslm2-deconvolution:0.1.2"
 
 
 class FakeArray:
@@ -68,14 +70,14 @@ def load_decon_wrapper_with_fakes():
         map_overlap=lambda func, array, **kwargs: func(array),
     )
     fake_dask = types.SimpleNamespace(array=fake_dask_array)
-    fake_pycudadecon = types.SimpleNamespace(
-        TemporaryOTF=object,
-        RLContext=object,
-        rl_decon=lambda *args, **kwargs: None,
+    fake_blind_rl = types.SimpleNamespace(
+        deconvolve_with_cucim=lambda chunk, psf, n_iters: chunk,
     )
     fake_tifffile = types.SimpleNamespace(imwrite=lambda *args, **kwargs: None)
     fake_psf_estimation = types.SimpleNamespace(
         DEFAULT_BLIND_CHUNK_XY=256,
+        DEFAULT_BLIND_LATENT_UPDATE_PERIOD=2,
+        DEFAULT_BLIND_MAX_TILES=16,
         DEFAULT_BLIND_Z_SLICES=128,
         DEFAULT_SNR_WEIGHT_CAP=100.0,
         estimate_psf_from_chunks=lambda **kwargs: FakeArray((3, 3, 3)),
@@ -96,7 +98,7 @@ def load_decon_wrapper_with_fakes():
             "numpy": fake_np,
             "dask": fake_dask,
             "dask.array": fake_dask_array,
-            "pycudadecon": fake_pycudadecon,
+            "blind_rl": fake_blind_rl,
             "tifffile": fake_tifffile,
             "psf_estimation": fake_psf_estimation,
             "psf_modes": fake_psf_modes,
@@ -148,33 +150,261 @@ def load_psf_estimation_with_fakes(zarr_calls, zarr_volume):
     return module
 
 
+def load_psf_estimation():
+    spec = importlib.util.spec_from_file_location(
+        "psf_estimation_selection_test", PSF_SCRIPT_PATH
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 class DeconvolutionWiringTest(unittest.TestCase):
-    def test_decon_chunk_returns_original_chunk_shape_when_rl_context_shrinks_output(self):
+    def test_decon_output_contract_accepts_direct_tiff_or_ozx(self):
+        main_text = (ROOT / "workflow/main.nf").read_text(encoding="utf-8")
+        modules_text = (ROOT / "workflow/modules.nf").read_text(encoding="utf-8")
+        wrapper_text = SCRIPT_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("params.output_formats", main_text)
+        self.assertIn('val  output_format', modules_text)
+        self.assertIn('path "DB2_*.{ozx,tif,tiff}", emit: decon_output', modules_text)
+        self.assertIn("output_format_flag = flag('output_format', output_format)", modules_text)
+        self.assertIn("${output_format_flag}", modules_text)
+        self.assertIn('parser.add_argument("--output_format"', wrapper_text)
+
+    def test_materialized_tiff_result_writes_direct_tiff_when_requested(self):
         module = load_decon_wrapper_with_fakes()
-
-        class FakeRLContext:
-            def __init__(self, shape, *args, **kwargs):
-                self.out_shape = (shape[0] - 10, shape[1] - 11, shape[2] - 11)
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc, tb):
-                return False
+        restored = FakeArray((2, 4, 4))
 
         with (
-            mock.patch.object(module, "RLContext", FakeRLContext),
-            mock.patch.object(
-                module,
-                "rl_decon",
-                side_effect=lambda *args, **kwargs: FakeArray(kwargs["output_shape"]),
+            mock.patch.object(module, "imwrite") as imwrite,
+            mock.patch.object(module, "write_ome_zarr_array") as write_zarr,
+        ):
+            output_path = module._write_materialized_decon_output(
+                restored,
+                Path("sample.tiff"),
+                {},
+                output_format="tiff",
+                max_downsample=1,
+            )
+
+        self.assertEqual(output_path, Path("DB2_sample.tif"))
+        imwrite.assert_called_once_with(Path("DB2_sample.tif"), restored)
+        write_zarr.assert_not_called()
+
+    def test_materialized_tiff_result_writes_ome_zarr_for_ozx_when_requested(self):
+        module = load_decon_wrapper_with_fakes()
+        restored = FakeArray((2, 4, 4))
+
+        with (
+            mock.patch.object(module, "imwrite") as imwrite,
+            mock.patch.object(module, "write_ome_zarr_array") as write_zarr,
+        ):
+            output_path = module._write_materialized_decon_output(
+                restored,
+                Path("sample.tiff"),
+                {},
+                output_format="ozx",
+                max_downsample=4,
+            )
+
+        self.assertEqual(output_path, Path("DB2_sample.ome.zarr"))
+        imwrite.assert_not_called()
+        write_zarr.assert_called_once_with(
+            Path("DB2_sample.ome.zarr"),
+            restored,
+            layer_name="DB2_sample",
+            max_downsample=4,
+        )
+
+    def test_blind_max_tiles_parameter_is_exposed_and_forwarded(self):
+        config_text = (
+            ROOT / "workflow/configs/nextflow.config"
+        ).read_text(encoding="utf-8")
+        package_text = (ROOT / "astrocyte_pkg.yml").read_text(encoding="utf-8")
+        modules_text = (ROOT / "workflow/modules.nf").read_text(encoding="utf-8")
+        wrapper_text = SCRIPT_PATH.read_text(encoding="utf-8")
+        psf_text = PSF_SCRIPT_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("blind_max_tiles = 16", config_text)
+        self.assertIn("id: blind_max_tiles", package_text)
+        self.assertIn("default: 16", package_text)
+        self.assertIn("min: 0", package_text)
+        self.assertIn(
+            "blind_max_tiles_flag = flag('blind_max_tiles', params.blind_max_tiles)",
+            modules_text,
+        )
+        self.assertIn("${blind_max_tiles_flag}", modules_text)
+        self.assertIn('parser.add_argument("--blind_max_tiles"', wrapper_text)
+        self.assertIn("blind_max_tiles=args.blind_max_tiles", wrapper_text)
+        self.assertIn('parser.add_argument("--blind_max_tiles"', psf_text)
+        self.assertIn("blind_max_tiles=args.blind_max_tiles", psf_text)
+
+    def test_blind_latent_update_period_parameter_is_exposed_and_forwarded(self):
+        config_text = (
+            ROOT / "workflow/configs/nextflow.config"
+        ).read_text(encoding="utf-8")
+        package_text = (ROOT / "astrocyte_pkg.yml").read_text(encoding="utf-8")
+        modules_text = (ROOT / "workflow/modules.nf").read_text(encoding="utf-8")
+        wrapper_text = SCRIPT_PATH.read_text(encoding="utf-8")
+        psf_text = PSF_SCRIPT_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("blind_latent_update_period = 2", config_text)
+        self.assertIn("id: blind_latent_update_period", package_text)
+        self.assertIn(
+            "blind_latent_update_period_flag = flag('blind_latent_update_period', params.blind_latent_update_period)",
+            modules_text,
+        )
+        self.assertIn("${blind_latent_update_period_flag}", modules_text)
+        self.assertIn('parser.add_argument("--blind_latent_update_period"', wrapper_text)
+        self.assertIn("blind_latent_update_period=args.blind_latent_update_period", wrapper_text)
+        self.assertIn('parser.add_argument("--blind_latent_update_period"', psf_text)
+        self.assertIn("blind_latent_update_period=args.blind_latent_update_period", psf_text)
+        self.assertIn('"blind_latent_update_period": blind_latent_update_period', psf_text)
+
+    def test_cache_key_separates_representative_and_full_grid_psfs(self):
+        module = load_psf_estimation()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            image_path = Path(tmpdir) / "image.tiff"
+            image_path.write_bytes(b"image")
+            common = {
+                "image_path": image_path,
+                "psf_seed": np.ones((3, 3, 3), dtype=np.float32),
+                "n_iters": 20,
+                "chunk_xy": 160,
+                "pad_xy": 32,
+                "pad_z": 20,
+                "script_dir": ROOT / "workflow/scripts",
+                "merge_mode": "snr_weighted_mean",
+                "snr_weight_cap": 100.0,
+                "z_window": (0, 128),
+                "blind_backend": "cupy",
+                "blind_peak_normalization": "none",
+                "blind_peak_gamma_max": 2.5,
+                "tile_selection_strategy": "spatial_snr_v1",
+                "blind_latent_update_period": 2,
+            }
+
+            representative = module._psf_cache_key(
+                **common, blind_max_tiles=16
+            )
+            full_grid = module._psf_cache_key(**common, blind_max_tiles=0)
+
+        self.assertNotEqual(representative, full_grid)
+
+    def test_backend_executor_workers_honor_matlab_parallelism(self):
+        module = load_psf_estimation()
+
+        self.assertEqual(
+            module.resolve_backend_executor_workers(
+                "matlab", blind_workers=1, matlab_workers=24
             ),
+            24,
+        )
+        self.assertEqual(
+            module.resolve_backend_executor_workers(
+                "matlab", blind_workers=8, matlab_workers=2
+            ),
+            8,
+        )
+        self.assertEqual(
+            module.resolve_backend_executor_workers(
+                "cupy", blind_workers=24, matlab_workers=24
+            ),
+            1,
+        )
+
+    def test_representative_tiles_choose_best_candidate_per_spatial_region(self):
+        module = load_psf_estimation()
+        scores = np.array(
+            [
+                [1, 2, 3, 9],
+                [4, 8, 7, 6],
+                [3, 2, 8, 1],
+                [9, 4, 2, 7],
+            ],
+            dtype=np.float32,
+        )
+        volume = scores[np.newaxis, :, :]
+        tiles = [
+            (row, column, row + 1, column + 1)
+            for row in range(4)
+            for column in range(4)
+        ]
+
+        with mock.patch.object(
+            module,
+            "_snr_weight",
+            side_effect=lambda core, weight_cap: float(core[0, 0, 0]),
+        ):
+            selected = module._select_representative_tiles(
+                volume, tiles, max_tiles=4, snr_weight_cap=100.0
+            )
+
+        self.assertEqual(
+            selected,
+            [(0, 3, 1, 4), (1, 1, 2, 2), (2, 2, 3, 3), (3, 0, 4, 1)],
+        )
+
+    def test_representative_tiles_resolve_equal_scores_by_coordinate(self):
+        module = load_psf_estimation()
+        volume = np.ones((1, 4, 4), dtype=np.float32)
+        tiles = [
+            (row, column, row + 1, column + 1)
+            for row in range(4)
+            for column in range(4)
+        ]
+
+        with mock.patch.object(module, "_snr_weight", return_value=1.0):
+            selected = module._select_representative_tiles(
+                volume, tiles, max_tiles=4, snr_weight_cap=100.0
+            )
+
+        self.assertEqual(
+            selected,
+            [(0, 0, 1, 1), (0, 2, 1, 3), (2, 0, 3, 1), (2, 2, 3, 3)],
+        )
+
+    def test_representative_tiles_respect_limit_on_tall_candidate_grid(self):
+        module = load_psf_estimation()
+        volume = np.ones((1, 8, 1), dtype=np.float32)
+        tiles = [(row, 0, row + 1, 1) for row in range(8)]
+
+        with mock.patch.object(module, "_snr_weight", return_value=1.0):
+            selected = module._select_representative_tiles(
+                volume, tiles, max_tiles=4, snr_weight_cap=100.0
+            )
+
+        self.assertEqual(len(selected), 4)
+        self.assertEqual(selected, [(0, 0, 1, 1), (2, 0, 3, 1),
+                                    (4, 0, 5, 1), (6, 0, 7, 1)])
+
+    def test_representative_tiles_keep_full_grid_without_scoring_when_limit_is_zero(self):
+        module = load_psf_estimation()
+        tiles = [(0, 0, 1, 1), (0, 1, 1, 2)]
+
+        with mock.patch.object(module, "_snr_weight") as snr_weight:
+            selected = module._select_representative_tiles(
+                np.ones((1, 1, 2), dtype=np.float32),
+                tiles,
+                max_tiles=0,
+                snr_weight_cap=100.0,
+            )
+
+        self.assertEqual(selected, tiles)
+        snr_weight.assert_not_called()
+
+    def test_decon_chunk_returns_original_shape_when_cucim_output_is_smaller(self):
+        module = load_decon_wrapper_with_fakes()
+        with mock.patch.object(
+            module,
+            "deconvolve_with_cucim",
+            side_effect=lambda *args, **kwargs: FakeArray((540, 373, 373)),
         ):
             result = module._decon_chunk(
                 FakeArray((550, 384, 384)),
-                otf_path="fake.otf",
-                dz=0.2,
-                dxy=0.168,
+                psf=FakeArray((31, 31, 31)),
                 n_iters=10,
                 total_chunks=1,
             )
@@ -221,6 +451,117 @@ class DeconvolutionWiringTest(unittest.TestCase):
 
         self.assertTrue((script_dir / "readtiffstack.m").is_file())
         self.assertTrue((script_dir / "writetiffstack.m").is_file())
+
+    def test_cupy_backend_persists_float_seed_before_spawning_worker(self):
+        source = PSF_SCRIPT_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("str(psf_seed_path)", source)
+        self.assertIn("np.asarray(psf_seed, dtype=np.float32)", source)
+        self.assertIn('photometric="minisblack"', source)
+
+    def test_cupy_blind_backend_uses_direct_array_estimation(self):
+        psf_source = PSF_SCRIPT_PATH.read_text(encoding="utf-8")
+        blind_source = (ROOT / "workflow/scripts/blind_rl.py").read_text(encoding="utf-8")
+
+        self.assertIn("def estimate_psf_array_cupy(", blind_source)
+        self.assertIn("def clear_cupy_memory(", blind_source)
+        self.assertIn("def trim_cupy_memory_pool(", blind_source)
+        self.assertIn("def _run_cupy_deconvblind_array(", psf_source)
+        self.assertIn("estimate_psf_array_cupy(", psf_source)
+        self.assertIn("clear_plan_cache=False", psf_source)
+        self.assertIn("free_memory_pool=False", psf_source)
+        self.assertIn("trim_cupy_memory_pool", psf_source)
+        self.assertNotIn(
+            "isolated spawned GPU process",
+            psf_source,
+        )
+
+    def test_cupy_tile_estimation_skips_chunk_tiff_roundtrip(self):
+        module = load_psf_estimation()
+        volume = np.ones((3, 8, 8), dtype=np.float32)
+        psf_seed = np.ones((3, 3, 3), dtype=np.float32)
+        psf_seed /= psf_seed.sum()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with (
+                mock.patch.object(
+                    module,
+                    "_write_chunk",
+                    side_effect=AssertionError("CuPy path should not write chunk TIFFs"),
+                ) as write_chunk,
+                mock.patch.object(
+                    module,
+                    "_run_cupy_deconvblind_array",
+                    return_value=psf_seed.copy(),
+                ) as run_cupy,
+            ):
+                idx, psf_chunk, weight, error = module._estimate_one_tile(
+                    0,
+                    1,
+                    volume,
+                    (0, 0, 8, 8),
+                    psf_seed,
+                    pad_xy=0,
+                    pad_z=0,
+                    n_iters=2,
+                    script_dir=ROOT / "workflow/scripts",
+                    tmpdir=Path(tmpdir),
+                    backend="cupy",
+                    backend_lock=None,
+                    matlab_threads=1,
+                    matlab_bin="matlab",
+                    matlab_timeout=1,
+                    blind_peak_normalization="none",
+                    blind_peak_gamma_max=2.5,
+                    blind_latent_update_period=2,
+                    snr_weight_cap=100.0,
+                )
+
+        self.assertEqual(idx, 0)
+        self.assertIsNone(error)
+        self.assertGreater(weight, 0)
+        np.testing.assert_allclose(psf_chunk, psf_seed, rtol=1e-6, atol=1e-8)
+        write_chunk.assert_not_called()
+        run_cupy.assert_called_once()
+
+    def test_cupy_array_estimation_reuses_pool_between_tiles(self):
+        module = load_psf_estimation()
+        psf_seed = np.ones((3, 3, 3), dtype=np.float32)
+        psf_seed /= psf_seed.sum()
+        fake_blind_rl = types.SimpleNamespace(
+            estimate_psf_array_cupy=mock.Mock(return_value=psf_seed.copy()),
+            trim_cupy_memory_pool=mock.Mock(return_value=False),
+        )
+
+        with mock.patch.dict(sys.modules, {"blind_rl": fake_blind_rl}):
+            result = module._run_cupy_deconvblind_array(
+                np.ones((3, 8, 8), dtype=np.float32),
+                psf_seed,
+                n_iters=2,
+                pad_z=0,
+                blind_peak_normalization="none",
+                blind_peak_gamma_max=2.5,
+                blind_latent_update_period=2,
+                cupy_pool_trim_bytes=1234,
+            )
+
+        np.testing.assert_allclose(result, psf_seed)
+        fake_blind_rl.estimate_psf_array_cupy.assert_called_once()
+        _, kwargs = fake_blind_rl.estimate_psf_array_cupy.call_args
+        self.assertFalse(kwargs["clear_plan_cache"])
+        self.assertFalse(kwargs["free_memory_pool"])
+        self.assertEqual(kwargs["latent_update_period"], 2)
+        fake_blind_rl.trim_cupy_memory_pool.assert_called_once_with(1234)
+
+    def test_cupy_blind_sizing_models_fft_workspace_and_restarts_after_oom(self):
+        source = PSF_SCRIPT_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("def resolve_cupy_blind_chunk_xy(", source)
+        self.assertIn("DEFAULT_CUPY_FFT_BYTES_PER_VOXEL", source)
+        self.assertIn("from scipy.fft import next_fast_len", source)
+        self.assertIn("def _is_cupy_out_of_memory(", source)
+        self.assertIn("discarding the partial pass and retrying all tiles", source)
+        self.assertIn("cupy_gpu_cap=1", source)
 
     def test_light_sheet_profile_preserves_psf_mode(self):
         config_text = (ROOT / "workflow/configs/nextflow.config").read_text(encoding="utf-8")
@@ -276,7 +617,10 @@ class DeconvolutionWiringTest(unittest.TestCase):
         modules_text = (ROOT / "workflow/modules.nf").read_text(encoding="utf-8")
 
         self.assertIn('publishDir "${params.output_dir}", mode: \'copy\', pattern: \'DB2_*.ozx\'', modules_text)
-        self.assertIn('path "DB2_*.ozx", emit: decon_output', modules_text)
+        self.assertIn(
+            'path "DB2_*.{ozx,tif,tiff}", emit: decon_output',
+            modules_text,
+        )
         self.assertIn("zip_ome_zarr_to_ozx", modules_text)
         self.assertIn("mkdir -p ${shell_quote(publishRoot)}", modules_text)
         self.assertIn('cp -f "estimated_psf.tif" ${shell_quote(publishRoot)}/', modules_text)

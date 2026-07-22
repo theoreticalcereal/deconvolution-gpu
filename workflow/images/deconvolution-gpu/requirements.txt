@@ -1,0 +1,6 @@
+antspyx
+psfmodels
+aicsimageio
+nd2
+readlif
+tifffile==2025.5.10

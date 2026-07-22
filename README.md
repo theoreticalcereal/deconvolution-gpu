@@ -25,9 +25,15 @@ stride slicing.
 ## Runtime
 
 Astrocyte prefetches the Singularity image from
-`docker://git.biohpc.swmed.edu:5050/dean-lab/ctaslm2-deconvolution:0.1.0`.
+`docker://git.biohpc.swmed.edu:5050/dean-lab/ctaslm2-deconvolution:0.1.2`.
 Nextflow processes use the same registry image without the `docker://` prefix
-and run Python from `/opt/conda/envs/app`.
+and run Python from `/opt/conda/envs/app`. The image pins CUDA 11.8,
+CuPy 13.6, cuCIM 23.06, and SciPy for the native blind-PSF backend.
+
+`blind_backend = cupy` is the default. Each blind PSF tile runs in an isolated
+spawned process and inherits the GPU assigned by Slurm through
+`CUDA_VISIBLE_DEVICES`. Keep `blind_workers = 1` for a one-GPU allocation.
+Set `blind_backend = matlab` to use the compatibility implementation.
 
 ## Inputs
 
@@ -49,7 +55,9 @@ nextflow run main.nf \
   --ni 1.33 \
   --ns 1.33 \
   --dxy 0.108 \
-  --dz 0.3
+  --dz 0.3 \
+  --blind_backend cupy \
+  --blind_workers 1
 ```
 
 ## Output

@@ -1,0 +1,9 @@
+name: app
+channels:
+  - rapidsai
+  - conda-forge
+  - nodefaults
+dependencies:
+  - cuda-version=11.8
+  - cupy=13.6.0
+  - cucim=23.06.00

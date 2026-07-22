@@ -35,7 +35,7 @@ workflow_modules:
   - 'matlab/2024a'
 
 workflow_containers:
-  - docker://git.biohpc.swmed.edu:5050/dean-lab/ctaslm2-deconvolution:0.1.0
+  - docker://git.biohpc.swmed.edu:5050/dean-lab/ctaslm2-deconvolution:0.1.2
 
 workflow_parameters:
   - id: input
@@ -182,13 +182,102 @@ workflow_parameters:
     required: false
     default: 20
     min: 1
-    description: MATLAB deconvblind iteration count per blind PSF chunk.
+    description: Alternating Richardson-Lucy iteration count per blind PSF chunk for either backend.
+
+  - id: blind_backend
+    type: select
+    required: false
+    default: 'cupy'
+    description: Backend for blind PSF estimation.
+    choices:
+      - [ 'cupy', 'Native CuPy blind RL in isolated GPU processes (default)' ]
+      - [ 'matlab', 'MATLAB deconvblind compatibility backend' ]
 
   - id: chunk_xy
     type: integer
     required: false
     default: 256
-    description: XY tile size for blind PSF estimation; values <= 0 auto-size.
+    description: Maximum XY tile size for CuPy blind PSF estimation; FFT-aware VRAM sizing may reduce it and OOM retries reduce it further. Values <= 0 remove the requested cap.
+
+  - id: blind_max_tiles
+    type: integer
+    required: false
+    default: 16
+    min: 0
+    description: Maximum spatially distributed high-SNR tiles used for blind PSF estimation; 0 processes the full tile grid for comparison runs.
+
+  - id: blind_peak_normalization
+    type: select
+    required: false
+    default: 'none'
+    description: Optional observed-intensity normalization used by the native CuPy blind backend.
+    choices:
+      - [ 'none', 'No extra peak normalization' ]
+      - [ 'gamma', 'Apply gamma-based peak normalization' ]
+      - [ 'unit', 'Unit-norm peak normalization' ]
+
+  - id: blind_peak_gamma_max
+    type: real
+    required: false
+    default: 2.5
+    min: 0.000001
+    description: Positive gamma exponent limit used when blind_peak_normalization='gamma'.
+
+  - id: blind_latent_update_period
+    type: integer
+    required: false
+    default: 2
+    min: 1
+    description: Update the latent image every N blind-RL iterations during native CuPy PSF estimation; 1 preserves full alternating updates.
+
+  - id: blind_workers
+    type: integer
+    required: false
+    default: 1
+    min: 1
+    description: Concurrent blind PSF chunk tasks. For CuPy, use one worker per allocated GPU to avoid competing CUDA processes.
+
+  - id: matlab_workers
+    type: integer
+    required: false
+    default: -1
+    min: -1
+    description: Concurrent MATLAB processes for blind PSF estimation. -1 uses auto-detection.
+
+  - id: matlab_threads
+    type: integer
+    required: false
+    default: 1
+    min: 1
+    description: MATLAB thread count used by each deconvblind process; values above 2 are usually unsafe.
+
+  - id: matlab_timeout
+    type: integer
+    required: false
+    default: 1800
+    min: 1
+    description: Per-chunk timeout (seconds) for MATLAB deconvblind calls.
+
+  - id: prefetch_chunks
+    type: integer
+    required: false
+    default: 0
+    min: 0
+    description: Additional blind PSF chunks to keep submitted/read ahead; 0 minimizes host and GPU memory pressure.
+
+  - id: blind_z_slices
+    type: integer
+    required: false
+    default: 128
+    min: -1
+    description: Number of centered Z planes used for PSF estimation; <= 0 uses the full volume.
+
+  - id: snr_weight_cap
+    type: real
+    required: false
+    default: 100
+    min: 0
+    description: Cap on each tile's SNR weight when normalized PSF estimates are merged.
 
   - id: decon_chunk_xy
     type: integer

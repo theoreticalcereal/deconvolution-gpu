@@ -1,7 +1,7 @@
 # GPU Deconvolution Process
 
-`DECON` runs chunkwise Richardson-Lucy deconvolution on GPU with
-`pycudadecon`. It is orchestrated by `workflow/scripts/decon_wrapper.py`.
+`DECON` runs chunkwise Richardson-Lucy deconvolution on GPU with cuCIM. It is
+orchestrated by `workflow/scripts/decon_wrapper.py`.
 
 The current workflow uses OME-Zarr internally and OZX for published native
 outputs. Deconvolution reads selected TIFF inputs directly, normalized OME-Zarr
@@ -36,23 +36,16 @@ Select inputs from one optical configuration at a time. The PSF is estimated
 from the first sorted input volume and reused for every volume in the same
 `DECON` call, so mixing wavelengths or acquisition modes can skew the result.
 
-## PSF to OTF Conversion
+## PSF Handoff
 
-Blind PSF estimation is still TIFF-backed at the MATLAB boundary because
-MATLAB `deconvblind` and `pycudadecon.TemporaryOTF` consume TIFF files. OME-Zarr
-inputs are opened directly at level 0 for PSF tiling; only the temporary MATLAB
+Blind PSF estimation uses TIFF files as the process boundary for both backends.
+OME-Zarr inputs are opened directly at level 0 for PSF tiling; only temporary
 tile inputs, seed PSFs, tile PSF outputs, and merged `estimated_psf.tif` are
-written as TIFFs. The wrapper then builds the OTF from the merged PSF file.
-
-The OTF is built with:
-
-| Value | Source |
-|---|---|
-| `dzpsf` | `dz` |
-| `dxpsf` | `dxy` |
-| `wavelength` | `round(wavelength * 1000)` nanometers |
-| `na` | `detection_na`, or backward-compatible `na` |
-| `nimm` | `ni` |
+written as TIFFs. Native CuPy workers read and write those files in isolated
+spawned processes. MATLAB mode passes the same files to `deconvblind`. The
+wrapper normalizes the merged PSF and passes it directly to
+`cucim.skimage.restoration.richardson_lucy`. No temporary OTF or legacy CUDA
+Decon conversion is required.
 
 Temporary PSF files are removed after processing. The published
 `estimated_psf.tif` is retained as the reproducible PSF artifact for the run.
@@ -94,14 +87,26 @@ dimension.
 
 For each overlapped chunk, `_decon_chunk`:
 
-1. Opens a `pycudadecon.RLContext`.
-2. Runs `rl_decon` with `n_iters = iter`.
-3. Clips values to the `uint16` range.
-4. Returns a `uint16` block to Dask.
+1. Transfers the chunk and normalized PSF to CuPy.
+2. Runs cuCIM Richardson-Lucy with `n_iters = iter` and `clip=False`.
+3. Copies the restored chunk back to host memory.
+4. Synchronizes the device, clears the cuFFT plan cache, and releases all
+   cached blocks from CuPy's default device-memory pool, including on errors.
+5. Crops or pads the result to preserve the input chunk shape.
+6. Clips values to the `uint16` range and returns the block to Dask.
 
-If `decon_workers > 1`, Dask uses the threaded scheduler. Otherwise it uses the
-single-threaded scheduler. The Nextflow process requests one GPU, so increasing
-`decon_workers` should be tested on the target GPU.
+Releasing cached allocations adds a small allocation and FFT-planning cost to
+each chunk, but prevents completed chunks from reserving most of an 8 GiB GPU
+and starving the next FFT allocation.
+
+The deconvolution worker count is clamped to one because the Nextflow process
+owns one GPU. Dask sequences chunks through that GPU without concurrent cuCIM
+contexts competing for device memory.
+
+This is independent of `blind_workers`, which controls PSF tile tasks and
+launches one spawned process per active CuPy tile. For a one-GPU Slurm
+allocation, keep both values at `1` unless memory and throughput have been
+measured on the target GPU.
 
 ## Intensity Rescaling
 
@@ -119,8 +124,10 @@ scaled = scaled * (input_max - input_min) + input_min
 The final array is rounded, clipped to `uint16`, and written as an internal
 OME-Zarr directory. The `DECON` task then zips each `DB2_*.ome.zarr` directory
 to `DB2_*.ozx` and removes the expanded directory from task scratch space.
-Compatibility TIFF inputs still materialize the deconvolved array before TIFF
-writing.
+TIFF inputs still materialize the deconvolved array. A TIFF request writes that
+array directly; an OZX request writes it to OME-Zarr before the process archive
+step. Inputs of every other supported type are normalized to OME-Zarr before
+deconvolution and retain the streaming output path.
 
 ## Outputs
 
@@ -130,12 +137,11 @@ The merged PSF is published to:
 <output_dir>/estimated_psf.tif
 ```
 
-For each native OME-Zarr or OZX input, the process publishes:
+For each non-TIFF input, or a TIFF input requesting OZX, the process publishes:
 
 ```text
 <output_dir>/DB2_<sample>.ozx
 ```
 
-Compatibility TIFF runs may still emit `DB2_<input_stem>.tif`, but the package
-workflow treats OZX as the primary deconvolution output. Set `output_formats`
-to `tiff` to publish TIFF stack exports under `<output_dir>/deconvolved_tiff/`.
+Set `output_formats` to `tiff` to publish direct or converted TIFF stacks under
+`<output_dir>/deconvolved_tiff/`.

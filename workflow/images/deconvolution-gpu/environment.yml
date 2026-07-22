@@ -1,13 +1,11 @@
 name: app
 channels:
   - conda-forge
-  - bioconda
+  - nodefaults
 dependencies:
   - python=3.10
   - pip
   - cudatoolkit=11.8
-  - cudadecon=0.7.0
-  - pycudadecon=0.5.1
   - numpy
   - numba
   - tifffile=2025.5.10
@@ -22,9 +20,3 @@ dependencies:
   - dask-jobqueue
   - scipy
   - psutil
-  - pip:
-      - antspyx
-      - psfmodels
-      - aicsimageio
-      - nd2
-      - readlif

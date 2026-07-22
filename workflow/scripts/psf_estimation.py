@@ -1,15 +1,16 @@
 # psf_estimation.py
-# Blind PSF estimation via chunked MATLAB deconvblind + weighted merge.
+# Blind PSF estimation via chunked deconvblind + weighted merge.
 #
 # Workflow:
 #   Open the first deskewed TIFF or OME-Zarr volume as an array-like object.
 #   Split it into full-Z XY tiles sized from available VRAM unless overridden.
-#   Tiles are read ahead, written to temp TIFFs, and sent to MATLAB deconvblind.
-#   MATLAB writes back an estimated PSF TIFF per tile.
+#   MATLAB tiles are written to temporary TIFFs for deconvblind compatibility.
+#   CuPy tiles are estimated directly from in-memory arrays to avoid per-tile
+#   process startup and TIFF roundtrips.
 #   Python collects all per-tile PSFs and returns an SNR-weighted PSF merge.
 #
 # The returned PSF is float32, normalised to sum=1, and saved as estimated_psf.tif
-# next to the input image so pycudadecon can pick it up via TemporaryOTF.
+# next to the input image for direct use by cuCIM.
 
 from __future__ import annotations
 
@@ -44,6 +45,15 @@ DEFAULT_BLIND_MEMORY_MULTIPLIER = 28.0
 DEFAULT_BLIND_MEMORY_OVERHEAD_GB = 1.0
 DEFAULT_BLIND_Z_SLICES = 128
 DEFAULT_BLIND_CHUNK_XY = 256
+DEFAULT_BLIND_MAX_TILES = 16
+DEFAULT_BLIND_LATENT_UPDATE_PERIOD = 2
+DEFAULT_BLIND_BACKEND = "matlab"
+DEFAULT_BLIND_PEAK_NORMALIZATION = "none"
+DEFAULT_BLIND_PEAK_GAMMA_MAX = 2.5
+DEFAULT_CUPY_VRAM_FRACTION = 0.72
+DEFAULT_CUPY_FFT_BYTES_PER_VOXEL = 208
+BLIND_CHUNK_ALIGNMENT = 32
+BLIND_TILE_SELECTION_STRATEGY = "spatial_snr_v1"
 
 
 def _ensure_writable_dir(path: Path) -> None:
@@ -247,6 +257,21 @@ def resolve_blind_worker_count(
     return resolved, detail
 
 
+def resolve_backend_executor_workers(
+    blind_backend: str,
+    blind_workers: int,
+    matlab_workers: int,
+) -> int:
+    """Resolve the thread-pool size needed to feed the selected backend."""
+    blind_workers = max(1, int(blind_workers))
+    matlab_workers = max(1, int(matlab_workers))
+    if blind_backend == "cupy":
+        return 1
+    if blind_backend == "matlab":
+        return max(blind_workers, matlab_workers)
+    raise ValueError(f"Unsupported blind backend '{blind_backend}'")
+
+
 def generate_theoretical_psf(
     na: float | None = None,
     detection_na: float | None = None,
@@ -407,13 +432,19 @@ def open_psf_source(path: str | Path):
 
 def detect_vram_bytes() -> int | None:
     """Best-effort free VRAM query using nvidia-smi."""
+    visible_device = os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",", 1)[0].strip()
+    command = ["nvidia-smi"]
+    if visible_device and visible_device not in ("NoDevFiles", "-1"):
+        command.extend(["--id", visible_device])
+    command.extend(
+        [
+            "--query-gpu=memory.free",
+            "--format=csv,noheader,nounits",
+        ]
+    )
     try:
         result = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=memory.free",
-                "--format=csv,noheader,nounits",
-            ],
+            command,
             capture_output=True,
             text=True,
             check=False,
@@ -433,6 +464,113 @@ def detect_vram_bytes() -> int | None:
     if not free_mb:
         return None
     return min(free_mb) * 1024 * 1024
+
+
+def _cupy_blind_fft_bytes(
+    core_xy: int,
+    volume_z: int,
+    halo_xy: int,
+    pad_z: int,
+    psf_shape: tuple[int, int, int],
+) -> int:
+    """Estimate peak alternating-RL storage from the padded FFT domain."""
+    from scipy.fft import next_fast_len
+
+    image_shape = (
+        int(volume_z) + 2 * int(pad_z),
+        int(core_xy) + 2 * int(halo_xy),
+        int(core_xy) + 2 * int(halo_xy),
+    )
+    fft_shape = tuple(
+        next_fast_len(image_size + int(kernel_size) - 1)
+        for image_size, kernel_size in zip(image_shape, psf_shape)
+    )
+    return int(math.prod(fft_shape) * DEFAULT_CUPY_FFT_BYTES_PER_VOXEL)
+
+
+def resolve_cupy_blind_chunk_xy(
+    requested_xy: int,
+    volume_shape: tuple[int, int, int],
+    psf_shape: tuple[int, int, int],
+    halo_xy: int,
+    pad_z: int,
+    vram_gb: float | None = None,
+) -> tuple[int, str]:
+    """Clamp a requested CuPy core size to the available FFT workspace."""
+    _, ny, nx = volume_shape
+    maximum = min(ny, nx, requested_xy if requested_xy > 0 else min(ny, nx))
+    minimum = min(
+        maximum,
+        max(
+            64,
+            int(
+                math.ceil(max(int(psf_shape[-2]), int(psf_shape[-1])) /
+                          BLIND_CHUNK_ALIGNMENT)
+            ) * BLIND_CHUNK_ALIGNMENT,
+        ),
+    )
+    candidate = max(
+        minimum,
+        (maximum // BLIND_CHUNK_ALIGNMENT) * BLIND_CHUNK_ALIGNMENT,
+    )
+    vram_bytes = (
+        int(vram_gb * (1024 ** 3))
+        if vram_gb and vram_gb > 0
+        else detect_vram_bytes()
+    )
+    if not vram_bytes:
+        return candidate, "VRAM unavailable; OOM retry enabled"
+
+    budget = int(vram_bytes * DEFAULT_CUPY_VRAM_FRACTION)
+    while candidate > minimum:
+        estimated = _cupy_blind_fft_bytes(
+            candidate,
+            volume_shape[0],
+            halo_xy,
+            pad_z,
+            psf_shape,
+        )
+        if estimated <= budget:
+            break
+        candidate = max(minimum, candidate - BLIND_CHUNK_ALIGNMENT)
+
+    estimated = _cupy_blind_fft_bytes(
+        candidate,
+        volume_shape[0],
+        halo_xy,
+        pad_z,
+        psf_shape,
+    )
+    detail = (
+        f"free_vram={vram_bytes / (1024 ** 3):.1f}GiB, "
+        f"budget={budget / (1024 ** 3):.1f}GiB, "
+        f"estimated_peak={estimated / (1024 ** 3):.1f}GiB"
+    )
+    return candidate, detail
+
+
+def _is_cupy_out_of_memory(exc: BaseException) -> bool:
+    current: BaseException | None = exc
+    visited: set[int] = set()
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        name = f"{type(current).__module__}.{type(current).__name__}"
+        message = f"{name}: {current}"
+        if "cupy.cuda.memory.OutOfMemoryError" in message or (
+            type(current).__name__ == "OutOfMemoryError" and "cupy" in name
+        ):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _next_smaller_blind_chunk_xy(current: int, minimum: int) -> int:
+    if current <= minimum:
+        return current
+    return max(
+        minimum,
+        ((current - 1) // BLIND_CHUNK_ALIGNMENT) * BLIND_CHUNK_ALIGNMENT,
+    )
 
 
 def resolve_chunk_xy(
@@ -482,6 +620,12 @@ def _psf_cache_key(
     merge_mode: str,
     snr_weight_cap: float,
     z_window: tuple[int | None, int | None],
+    blind_backend: str,
+    blind_peak_normalization: str,
+    blind_peak_gamma_max: float,
+    blind_latent_update_period: int,
+    blind_max_tiles: int,
+    tile_selection_strategy: str,
 ) -> str:
     stat = image_path.stat()
     payload = {
@@ -498,7 +642,13 @@ def _psf_cache_key(
         "merge_mode": merge_mode,
         "snr_weight_cap": snr_weight_cap,
         "z_window": z_window,
-        "version": 3,
+        "blind_backend": blind_backend,
+        "blind_peak_normalization": blind_peak_normalization,
+        "blind_peak_gamma_max": blind_peak_gamma_max,
+        "blind_latent_update_period": blind_latent_update_period,
+        "blind_max_tiles": blind_max_tiles,
+        "tile_selection_strategy": tile_selection_strategy,
+        "version": 8,
     }
     encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()[:20]
@@ -601,6 +751,105 @@ def _run_matlab_deconvblind(
         )
 
 
+def _run_cupy_deconvblind(
+    chunk_path: Path,
+    psf_seed: np.ndarray,
+    psf_seed_path: Path,
+    output_psf_path: Path,
+    n_iters: int,
+    pad_z: int,
+    script_dir: Path,
+    matlab_bin: str,
+    matlab_threads: int,
+    matlab_timeout: int,
+    blind_peak_normalization: str,
+    blind_peak_gamma_max: float,
+    blind_latent_update_period: int,
+) -> None:
+    """
+    Run native blind Richardson-Lucy estimation in an isolated GPU process.
+
+    MATLAB-only arguments remain in the signature so both backends use the
+    same tile task payload.
+    """
+    if blind_peak_normalization not in ("none", "gamma", "unit"):
+        raise ValueError(
+            f"Unknown blind_peak_normalization='{blind_peak_normalization}'"
+        )
+    if blind_peak_normalization != "none" and blind_peak_gamma_max <= 0:
+        raise ValueError(
+            "blind_peak_gamma_max must be > 0 when blind_peak_normalization is enabled"
+        )
+
+    imwrite(
+        str(psf_seed_path),
+        np.asarray(psf_seed, dtype=np.float32),
+        photometric="minisblack",
+    )
+    del psf_seed, script_dir, matlab_bin, matlab_threads, matlab_timeout
+    try:
+        from blind_rl import estimate_psf_file_in_process
+    except ImportError as exc:
+        raise RuntimeError(
+            "Unable to import the native CuPy blind-RL backend"
+        ) from exc
+
+    estimate_psf_file_in_process(
+        chunk_path,
+        psf_seed_path,
+        output_psf_path,
+        n_iters,
+        pad_z,
+        peak_normalization=blind_peak_normalization,
+        peak_gamma_max=blind_peak_gamma_max,
+        latent_update_period=blind_latent_update_period,
+    )
+
+
+def _run_cupy_deconvblind_array(
+    chunk: np.ndarray,
+    psf_seed: np.ndarray,
+    n_iters: int,
+    pad_z: int,
+    blind_peak_normalization: str,
+    blind_peak_gamma_max: float,
+    blind_latent_update_period: int,
+    cupy_pool_trim_bytes: int | None,
+) -> np.ndarray:
+    """Run native CuPy blind-RL directly on in-memory tile arrays."""
+    try:
+        from blind_rl import estimate_psf_array_cupy, trim_cupy_memory_pool
+    except ImportError as exc:
+        raise RuntimeError(
+            "Unable to import the native CuPy blind-RL backend"
+        ) from exc
+
+    psf = estimate_psf_array_cupy(
+        chunk,
+        psf_seed,
+        n_iters,
+        pad_z,
+        peak_normalization=blind_peak_normalization,
+        peak_gamma_max=blind_peak_gamma_max,
+        clear_plan_cache=False,
+        free_memory_pool=False,
+        latent_update_period=blind_latent_update_period,
+    )
+    trim_cupy_memory_pool(cupy_pool_trim_bytes)
+    return psf
+
+
+def _clear_cupy_blind_memory() -> None:
+    try:
+        from blind_rl import clear_cupy_memory
+    except ImportError as exc:
+        raise RuntimeError(
+            "Unable to import the native CuPy blind-RL backend"
+        ) from exc
+
+    clear_cupy_memory(clear_plan_cache=True, free_memory_pool=True)
+
+
 # ---------------------------------------------------------------------------
 # Main estimation entry point
 # ---------------------------------------------------------------------------
@@ -663,6 +912,96 @@ def _snr_weight(core: np.ndarray, weight_cap: float = DEFAULT_SNR_WEIGHT_CAP) ->
     return weight
 
 
+def _select_representative_tiles(
+    volume,
+    tile_origins: list[tuple[int, int, int, int]],
+    max_tiles: int,
+    snr_weight_cap: float,
+) -> list[tuple[int, int, int, int]]:
+    """Select high-SNR tiles across balanced spatial regions."""
+    if max_tiles < 0:
+        raise ValueError(f"blind_max_tiles cannot be negative, got {max_tiles}")
+    if max_tiles == 0 or len(tile_origins) <= max_tiles:
+        print(
+            f"  Blind tile selection: strategy={BLIND_TILE_SELECTION_STRATEGY}, "
+            f"candidates={len(tile_origins)}, selected={len(tile_origins)}, "
+            "reduction=0.0%",
+            flush=True,
+        )
+        return list(tile_origins)
+
+    y_positions = sorted({tile[0] for tile in tile_origins})
+    x_positions = sorted({tile[1] for tile in tile_origins})
+    y_indices = {position: index for index, position in enumerate(y_positions)}
+    x_indices = {position: index for index, position in enumerate(x_positions)}
+
+    region_rows = max(
+        1,
+        min(
+            len(y_positions),
+            max_tiles,
+            int(round(math.sqrt(max_tiles * len(y_positions) / len(x_positions)))),
+        ),
+    )
+    region_columns = max(
+        1,
+        min(len(x_positions), max_tiles // region_rows),
+    )
+
+    scored_tiles: list[tuple[float, tuple[int, int, int, int]]] = []
+    regions: dict[
+        tuple[int, int], list[tuple[float, tuple[int, int, int, int]]]
+    ] = {}
+    for tile in tile_origins:
+        y0, x0, y1, x1 = tile
+        core = np.asarray(volume[:, y0:y1, x0:x1])
+        score = _snr_weight(core, weight_cap=snr_weight_cap)
+        scored = (score, tile)
+        scored_tiles.append(scored)
+        region = (
+            min(
+                region_rows - 1,
+                y_indices[y0] * region_rows // len(y_positions),
+            ),
+            min(
+                region_columns - 1,
+                x_indices[x0] * region_columns // len(x_positions),
+            ),
+        )
+        regions.setdefault(region, []).append(scored)
+
+    selected: list[tuple[float, tuple[int, int, int, int]]] = []
+    selected_tiles: set[tuple[int, int, int, int]] = set()
+    for region in sorted(regions):
+        best = min(regions[region], key=lambda item: (-item[0], item[1]))
+        selected.append(best)
+        selected_tiles.add(best[1])
+
+    for scored in sorted(scored_tiles, key=lambda item: (-item[0], item[1])):
+        if len(selected) >= max_tiles:
+            break
+        if scored[1] not in selected_tiles:
+            selected.append(scored)
+            selected_tiles.add(scored[1])
+
+    selected.sort(key=lambda item: item[1])
+    reduction = 100.0 * (1.0 - len(selected) / len(tile_origins))
+    print(
+        f"  Blind tile selection: strategy={BLIND_TILE_SELECTION_STRATEGY}, "
+        f"candidates={len(tile_origins)}, selected={len(selected)}, "
+        f"reduction={reduction:.1f}%",
+        flush=True,
+    )
+    for index, (score, tile) in enumerate(selected, start=1):
+        y0, x0, y1, x1 = tile
+        print(
+            f"    Selected blind tile {index}/{len(selected)}: "
+            f"tile=({y0}:{y1}, {x0}:{x1}), snr_weight={score:.3g}",
+            flush=True,
+        )
+    return [tile for _, tile in selected]
+
+
 def _format_seconds(seconds: float) -> str:
     return f"{seconds:.2f}s"
 
@@ -678,11 +1017,16 @@ def _estimate_one_tile(
     n_iters: int,
     script_dir: Path,
     tmpdir: Path,
-    matlab_lock: threading.Semaphore,
+    backend: str,
+    backend_lock: threading.Semaphore | None,
     matlab_threads: int,
     matlab_bin: str,
     matlab_timeout: int,
+    blind_peak_normalization: str,
+    blind_peak_gamma_max: float,
+    blind_latent_update_period: int,
     snr_weight_cap: float,
+    cupy_pool_trim_bytes: int | None = None,
 ) -> tuple[int, np.ndarray | None, float, str | None]:
     chunk_start = time.perf_counter()
     y0, x0, y1, x1 = tile
@@ -701,45 +1045,96 @@ def _estimate_one_tile(
     chunk_path = tmpdir / f"chunk_{idx:04d}.tif"
     seed_path = tmpdir / f"seed_{idx:04d}.tif"
     psf_out_path = tmpdir / f"psf_out_{idx:04d}.tif"
-    write_start = time.perf_counter()
-    _write_chunk(chunk, chunk_path)
-    del chunk
-    write_elapsed = time.perf_counter() - write_start
+    psf_chunk = None
+    output_read_elapsed = 0.0
+    if backend == "cupy":
+        write_elapsed = 0.0
+    else:
+        write_start = time.perf_counter()
+        _write_chunk(chunk, chunk_path)
+        del chunk
+        write_elapsed = time.perf_counter() - write_start
 
+    backend_wait_elapsed = 0.0
+    backend_elapsed = 0.0
     try:
-        matlab_wait_start = time.perf_counter()
-        with matlab_lock:
-            matlab_wait_elapsed = time.perf_counter() - matlab_wait_start
-            matlab_started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if backend not in ("matlab", "cupy"):
+            raise ValueError(f"Unsupported blind backend: {backend}")
+        backend_wait_start = time.perf_counter()
+        backend_lock_ctx = backend_lock if backend == "matlab" else None
+        if backend_lock_ctx is None:
+            backend_started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             print(
-                f"  Blind chunk {idx + 1}/{total_tiles} MATLAB started at "
-                f"{matlab_started_at}: wait={_format_seconds(matlab_wait_elapsed)}, "
+                f"  Blind chunk {idx + 1}/{total_tiles} {backend} started at "
+                f"{backend_started_at}: wait={_format_seconds(backend_wait_elapsed)}, "
                 f"input_shape={chunk_shape}",
                 flush=True,
             )
-            matlab_start = time.perf_counter()
-            _run_matlab_deconvblind(
-                chunk_path,
-                psf_seed,
-                seed_path,
-                psf_out_path,
-                n_iters,
-                pad_z,
-                script_dir,
-                matlab_bin,
-                matlab_threads,
-                matlab_timeout,
-            )
-            matlab_elapsed = time.perf_counter() - matlab_start
-    except RuntimeError as exc:
+            backend_start = time.perf_counter()
+            if backend == "cupy":
+                psf_chunk = _run_cupy_deconvblind_array(
+                    chunk,
+                    psf_seed,
+                    n_iters,
+                    pad_z,
+                    blind_peak_normalization,
+                    blind_peak_gamma_max,
+                    blind_latent_update_period,
+                    cupy_pool_trim_bytes,
+                )
+                del chunk
+            else:
+                _run_matlab_deconvblind(
+                    chunk_path,
+                    psf_seed,
+                    seed_path,
+                    psf_out_path,
+                    n_iters,
+                    pad_z,
+                    script_dir,
+                    matlab_bin,
+                    matlab_threads,
+                    matlab_timeout,
+                )
+            backend_elapsed = time.perf_counter() - backend_start
+        else:
+            with backend_lock_ctx:
+                backend_wait_elapsed = time.perf_counter() - backend_wait_start
+                backend_started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                print(
+                    f"  Blind chunk {idx + 1}/{total_tiles} {backend} started at "
+                    f"{backend_started_at}: wait={_format_seconds(backend_wait_elapsed)}, "
+                    f"input_shape={chunk_shape}",
+                    flush=True,
+                )
+                backend_start = time.perf_counter()
+                _run_matlab_deconvblind(
+                    chunk_path,
+                    psf_seed,
+                    seed_path,
+                    psf_out_path,
+                    n_iters,
+                    pad_z,
+                    script_dir,
+                    matlab_bin,
+                    matlab_threads,
+                    matlab_timeout,
+                )
+                backend_elapsed = time.perf_counter() - backend_start
+    except BaseException as exc:
+        if backend == "cupy" and _is_cupy_out_of_memory(exc):
+            raise
+        if not isinstance(exc, RuntimeError):
+            raise
         return idx, None, weight, str(exc)
 
-    if not psf_out_path.exists():
-        return idx, None, weight, "MATLAB produced no PSF output"
+    if psf_chunk is None:
+        if not psf_out_path.exists():
+            return idx, None, weight, f"{backend.upper()} produced no PSF output"
 
-    output_read_start = time.perf_counter()
-    psf_chunk = ensure_3d_volume(imread(str(psf_out_path))).astype(np.float32)
-    output_read_elapsed = time.perf_counter() - output_read_start
+        output_read_start = time.perf_counter()
+        psf_chunk = ensure_3d_volume(imread(str(psf_out_path))).astype(np.float32)
+        output_read_elapsed = time.perf_counter() - output_read_start
     if psf_chunk.shape != psf_seed.shape:
         return (
             idx,
@@ -756,18 +1151,159 @@ def _estimate_one_tile(
         f"snr_weight={weight:.3g}, "
         f"read={_format_seconds(read_elapsed)}, "
         f"write={_format_seconds(write_elapsed)}, "
-        f"matlab_wait={_format_seconds(matlab_wait_elapsed)}, "
-        f"matlab={_format_seconds(matlab_elapsed)}, "
+        f"backend_wait={_format_seconds(backend_wait_elapsed)}, "
+        f"backend={_format_seconds(backend_elapsed)}, "
         f"output_read={_format_seconds(output_read_elapsed)}, "
         f"total={_format_seconds(total_elapsed)}",
         flush=True,
     )
     return idx, _normalise_psf(psf_chunk), weight, None
 
+
+def _run_blind_tile_pass(
+    volume: np.ndarray,
+    psf_seed: np.ndarray,
+    tile_origins: list[tuple[int, int, int, int]],
+    *,
+    pad_xy: int,
+    pad_z: int,
+    n_iters: int,
+    script_dir: Path,
+    blind_backend: str,
+    max_workers: int,
+    prefetch_chunks: int,
+    matlab_workers: int,
+    matlab_threads: int,
+    matlab_bin: str,
+    matlab_timeout: int,
+    blind_peak_normalization: str,
+    blind_peak_gamma_max: float,
+    blind_latent_update_period: int,
+    snr_weight_cap: float,
+    cupy_pool_trim_bytes: int | None = None,
+) -> tuple[list[np.ndarray], list[float]]:
+    psf_estimates: list[np.ndarray] = []
+    psf_weights: list[float] = []
+    failure_details: list[str] = []
+    failed_chunks = 0
+    completed_chunks = 0
+    prefetch_limit = prefetch_chunks if prefetch_chunks > 0 else max_workers
+    heartbeat_seconds = 60.0
+    last_heartbeat = time.perf_counter()
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="psf_est_") as tmpdir_value:
+            tmpdir = Path(tmpdir_value)
+            backend_lock = (
+                threading.Semaphore(matlab_workers)
+                if blind_backend == "matlab"
+                else None
+            )
+            next_idx = 0
+            pending: set[futures.Future] = set()
+
+            with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                while next_idx < len(tile_origins) or pending:
+                    submitted_before = next_idx
+                    while (
+                        next_idx < len(tile_origins)
+                        and len(pending) < prefetch_limit
+                    ):
+                        pending.add(
+                            executor.submit(
+                                _estimate_one_tile,
+                                next_idx,
+                                len(tile_origins),
+                                volume,
+                                tile_origins[next_idx],
+                                psf_seed,
+                                pad_xy,
+                                pad_z,
+                                n_iters,
+                                script_dir,
+                                tmpdir,
+                                blind_backend,
+                                backend_lock,
+                                matlab_threads,
+                                matlab_bin,
+                                matlab_timeout,
+                                blind_peak_normalization,
+                                blind_peak_gamma_max,
+                                blind_latent_update_period,
+                                snr_weight_cap,
+                                cupy_pool_trim_bytes,
+                            )
+                        )
+                        next_idx += 1
+                    if next_idx > submitted_before:
+                        print(
+                            f"  Submitted blind chunks {submitted_before + 1}-{next_idx}/"
+                            f"{len(tile_origins)}; pending={len(pending)}, "
+                            f"completed={completed_chunks}, failed={failed_chunks}",
+                            flush=True,
+                        )
+
+                    done, pending = futures.wait(
+                        pending,
+                        timeout=heartbeat_seconds,
+                        return_when=futures.FIRST_COMPLETED,
+                    )
+                    if not done:
+                        now = time.perf_counter()
+                        if now - last_heartbeat >= heartbeat_seconds:
+                            print(
+                                f"  Blind PSF heartbeat: submitted={next_idx}/"
+                                f"{len(tile_origins)}, completed={completed_chunks}, "
+                                f"failed={failed_chunks}, pending={len(pending)}",
+                                flush=True,
+                            )
+                            last_heartbeat = now
+                        continue
+
+                    for future in done:
+                        try:
+                            idx, psf_chunk, weight, error = future.result()
+                        except BaseException:
+                            for pending_future in pending:
+                                pending_future.cancel()
+                            raise
+                        completed_chunks += 1
+                        if error:
+                            failed_chunks += 1
+                            failure_details.append(f"chunk {idx}: {error}")
+                            if "initial PSF must have at least one non-zero element" in error:
+                                raise RuntimeError(
+                                    "MATLAB read the PSF seed as all zeros. "
+                                    "The seed TIFF writer is incompatible with MATLAB."
+                                )
+                            if failed_chunks >= 3 and not psf_estimates:
+                                for pending_future in pending:
+                                    pending_future.cancel()
+                                detail = "\n\n".join(failure_details[:3])
+                                raise RuntimeError(
+                                    "First three chunks failed during PSF estimation; "
+                                    "aborting instead of submitting every tile to the backend.\n\n"
+                                    f"{detail}"
+                                )
+                            print(
+                                f"  WARNING: chunk {idx} failed, skipping. {error}",
+                                flush=True,
+                            )
+                            continue
+                        if psf_chunk is not None:
+                            psf_estimates.append(psf_chunk)
+                            psf_weights.append(weight)
+    finally:
+        if blind_backend == "cupy":
+            _clear_cupy_blind_memory()
+
+    return psf_estimates, psf_weights
+
 def estimate_psf_from_chunks(
     image_path: str | Path,
     psf_seed: np.ndarray,
     n_iters: int = 10,
+    blind_backend: str = DEFAULT_BLIND_BACKEND,
     chunk_xy: int = DEFAULT_BLIND_CHUNK_XY,
     pad_xy: int = 32,
     pad_z: int = 20,
@@ -782,22 +1318,28 @@ def estimate_psf_from_chunks(
     matlab_bin: str = "matlab",
     matlab_timeout: int = 1800,
     snr_weight_cap: float = DEFAULT_SNR_WEIGHT_CAP,
+    blind_peak_normalization: str = DEFAULT_BLIND_PEAK_NORMALIZATION,
+    blind_peak_gamma_max: float = DEFAULT_BLIND_PEAK_GAMMA_MAX,
+    blind_latent_update_period: int = DEFAULT_BLIND_LATENT_UPDATE_PERIOD,
     blind_z_slices: int = DEFAULT_BLIND_Z_SLICES,
+    blind_max_tiles: int = DEFAULT_BLIND_MAX_TILES,
 ) -> np.ndarray:
     """
-    Estimate a PSF by running MATLAB deconvblind on spatial XY chunks of the
-    first deskewed volume and merging per-chunk estimates by SNR-weighted mean.
+    Estimate a PSF by running deconvblind-like estimation on spatial XY chunks of
+    the first deskewed volume and merging per-chunk estimates by SNR-weighted
+    mean.
 
     Parameters
     ----------
     image_path  : path to the deskewed input TIFF or OME-Zarr (full Z stack, 3-D).
     psf_seed    : initial PSF guess, float32 numpy array (nz_psf, ny_psf, nx_psf).
                   Typically the output of generate_theoretical_psf().
-    n_iters     : number of deconvblind iterations per chunk.
+    blind_backend : 'matlab' or 'cupy'. 'matlab' runs MATLAB deconvblind.
+    n_iters       : number of blind iterations per chunk.
     chunk_xy    : XY tile size.  <= 0 chooses a VRAM-aware size.
     pad_xy      : XY halo per edge before deconvblind. Interior tiles include
                   real neighboring pixels; only image borders are reflect-padded.
-    pad_z       : Z halo per edge before deconvblind, applied symmetrically in MATLAB.
+    pad_z       : Z halo per edge before blind estimation.
     script_dir  : directory containing readtiffstack.m / writetiffstack.m.
                   Defaults to the directory of this script.
 
@@ -828,9 +1370,14 @@ def estimate_psf_from_chunks(
         )
     requested_workers = max_workers
     cpu_workers = resolve_worker_count(requested_workers)
+    blind_backend = blind_backend.lower() if blind_backend else DEFAULT_BLIND_BACKEND
     matlab_threads = min(2, max(1, matlab_threads))
     matlab_workers = max(1, matlab_workers)
     matlab_timeout = max(0, matlab_timeout)
+    if blind_backend not in ("matlab", "cupy"):
+        raise ValueError(
+            f"Unsupported blind backend '{blind_backend}'. Expected 'matlab' or 'cupy'."
+        )
     pad_z = max(0, pad_z)
     if nz == 1 and pad_z > 0:
         print(
@@ -840,6 +1387,11 @@ def estimate_psf_from_chunks(
         )
         pad_z = 0
     snr_weight_cap = max(0.0, snr_weight_cap)
+    blind_latent_update_period = max(1, int(blind_latent_update_period))
+    if blind_max_tiles < 0:
+        raise ValueError(
+            f"blind_max_tiles cannot be negative, got {blind_max_tiles}"
+        )
     chunk_xy = resolve_chunk_xy(
         chunk_xy,
         volume.shape,
@@ -850,6 +1402,37 @@ def estimate_psf_from_chunks(
         min_xy=max(128, psf_seed.shape[-1]),
         max_xy=min(DEFAULT_BLIND_CHUNK_XY, ny, nx),
     )
+    cupy_sizing_detail = None
+    min_cupy_chunk_xy = min(
+        ny,
+        nx,
+        max(
+            64,
+            int(
+                math.ceil(max(psf_seed.shape[-2:]) / BLIND_CHUNK_ALIGNMENT)
+            ) * BLIND_CHUNK_ALIGNMENT,
+        ),
+    )
+    if blind_backend == "cupy":
+        chunk_xy, cupy_sizing_detail = resolve_cupy_blind_chunk_xy(
+            chunk_xy,
+            volume.shape,
+            psf_seed.shape,
+            pad_xy,
+            pad_z,
+            vram_gb=vram_gb,
+        )
+    cupy_pool_trim_bytes = None
+    if blind_backend == "cupy":
+        cupy_vram_bytes = (
+            int(vram_gb * (1024 ** 3))
+            if vram_gb and vram_gb > 0
+            else detect_vram_bytes()
+        )
+        if cupy_vram_bytes:
+            cupy_pool_trim_bytes = int(
+                cupy_vram_bytes * DEFAULT_CUPY_VRAM_FRACTION
+            )
     max_workers, worker_detail = resolve_blind_worker_count(
         requested_workers,
         cpu_workers,
@@ -864,138 +1447,159 @@ def estimate_psf_from_chunks(
         f"{z_window_detail}; resolved_chunk_xy={chunk_xy}",
         flush=True,
     )
-    matlab_workers = min(matlab_workers, max_workers)
+    backend_executor_workers = resolve_backend_executor_workers(
+        blind_backend,
+        blind_workers=max_workers,
+        matlab_workers=matlab_workers,
+    )
+    if blind_backend == "cupy":
+        if backend_executor_workers != max_workers:
+            print(
+                f"  CuPy backend clamps blind_workers from {max_workers} to 1 "
+                "for one allocated GPU.",
+                flush=True,
+            )
+            worker_detail = f"{worker_detail}; cupy_gpu_cap=1"
+        max_workers = backend_executor_workers
+        print(
+            "  Blind backend configured as 'cupy'; running each chunk in an "
+            "in-process direct CuPy array path.",
+            flush=True,
+        )
+        print(
+            f"  CuPy FFT workspace sizing: chunk_xy={chunk_xy}; "
+            f"{cupy_sizing_detail}",
+            flush=True,
+        )
+        if cupy_pool_trim_bytes:
+            print(
+                "  CuPy memory-pool trim threshold: "
+                f"{cupy_pool_trim_bytes / (1024 ** 3):.1f}GiB retained "
+                "(dynamic per visible GPU budget).",
+                flush=True,
+            )
+        matlab_workers = min(matlab_workers, max_workers)
+    else:
+        blind_backend = "matlab"
+        if backend_executor_workers > max_workers:
+            print(
+                f"  MATLAB backend expands the blind executor from "
+                f"{max_workers} to {backend_executor_workers} workers to honor "
+                f"matlab_workers={matlab_workers}.",
+                flush=True,
+            )
+            worker_detail = (
+                f"{worker_detail}; matlab_backend_floor={matlab_workers}"
+            )
+        max_workers = backend_executor_workers
     print(
-        f"  Blind worker selection: io_workers={max_workers} ({worker_detail}); "
-        f"matlab_workers={matlab_workers}",
+        f"  Blind worker selection: executor_workers={max_workers} "
+        f"({worker_detail}); "
+        f"backend='{blind_backend}', backend_workers={matlab_workers}, "
+        f"matlab_threads={matlab_threads}, "
+        f"matlab_timeout={matlab_timeout}s, snr_weight_cap={snr_weight_cap:g}, "
+        f"blind_latent_update_period={blind_latent_update_period}",
         flush=True,
     )
-
     cache_path = None
+    cache_root = None
     if use_cache:
         cache_root = _resolve_psf_cache_root(image_path, cache_dir)
+    def _cache_path_for_chunk(resolved_chunk_xy: int) -> Path | None:
+        if cache_root is None:
+            return None
         cache_key = _psf_cache_key(
             image_path,
             psf_seed,
             n_iters,
-            chunk_xy,
+            resolved_chunk_xy,
             pad_xy,
             pad_z,
             script_dir,
             "snr_weighted_mean",
             snr_weight_cap,
             (z_start, z_stop),
+            blind_backend,
+            blind_peak_normalization,
+            blind_peak_gamma_max,
+            blind_latent_update_period,
+            blind_max_tiles,
+            BLIND_TILE_SELECTION_STRATEGY,
         )
-        cache_path = cache_root / f"estimated_psf_{cache_key}.tif"
+        return cache_root / f"estimated_psf_{cache_key}.tif"
+
+    cache_path = _cache_path_for_chunk(chunk_xy)
+    if cache_path is not None:
         if cache_path.exists():
             print(f"Using cached PSF estimate: {cache_path}", flush=True)
             return _normalise_psf(imread(str(cache_path)))
 
-    tile_origins = _tile_origins(ny, nx, chunk_xy)
-
-    print(f"  Processing {len(tile_origins)} chunk(s) of size "
-          f"(nz={nz}, xy<={chunk_xy}, halo_xy={pad_xy}, pad_z={pad_z}, "
-          f"io_workers={max_workers}, "
-          f"matlab_workers={matlab_workers}, "
-          f"matlab_threads={matlab_threads}, matlab_timeout={matlab_timeout}s, "
-          f"snr_weight_cap={snr_weight_cap:g})...",
-          flush=True)
-
-    psf_estimates: list[np.ndarray] = []
-    psf_weights: list[float] = []
-    failure_details: list[str] = []
-    failed_chunks = 0
-    completed_chunks = 0
-    prefetch_chunks = prefetch_chunks if prefetch_chunks > 0 else max_workers
-    heartbeat_seconds = 60.0
-    last_heartbeat = time.perf_counter()
-
-    with tempfile.TemporaryDirectory(prefix="psf_est_") as tmpdir:
-        tmpdir = Path(tmpdir)
-        matlab_slots = threading.Semaphore(matlab_workers)
-        next_idx = 0
-        pending: set[futures.Future] = set()
-
-        with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            while next_idx < len(tile_origins) or pending:
-                submitted_before = next_idx
-                while next_idx < len(tile_origins) and len(pending) < prefetch_chunks:
-                    pending.add(
-                        executor.submit(
-                            _estimate_one_tile,
-                            next_idx,
-                            len(tile_origins),
-                            volume,
-                            tile_origins[next_idx],
-                            psf_seed,
-                            pad_xy,
-                            pad_z,
-                            n_iters,
-                            script_dir,
-                            tmpdir,
-                            matlab_slots,
-                            matlab_threads,
-                            matlab_bin,
-                            matlab_timeout,
-                            snr_weight_cap,
-                        )
-                    )
-                    next_idx += 1
-                if next_idx > submitted_before:
-                    print(
-                        f"  Submitted blind chunks {submitted_before + 1}-{next_idx}/"
-                        f"{len(tile_origins)}; pending={len(pending)}, "
-                        f"completed={completed_chunks}, failed={failed_chunks}",
-                        flush=True,
-                    )
-
-                done, pending = futures.wait(
-                    pending,
-                    timeout=heartbeat_seconds,
-                    return_when=futures.FIRST_COMPLETED,
-                )
-                if not done:
-                    now = time.perf_counter()
-                    if now - last_heartbeat >= heartbeat_seconds:
-                        print(
-                            f"  Blind PSF heartbeat: submitted={next_idx}/"
-                            f"{len(tile_origins)}, completed={completed_chunks}, "
-                            f"failed={failed_chunks}, pending={len(pending)}",
-                            flush=True,
-                        )
-                        last_heartbeat = now
-                    continue
-
-                for future in done:
-                    idx, psf_chunk, weight, error = future.result()
-                    completed_chunks += 1
-                    if error:
-                        failed_chunks += 1
-                        failure_details.append(f"chunk {idx}: {error}")
-                        if "initial PSF must have at least one non-zero element" in error:
-                            raise RuntimeError(
-                                "MATLAB read the PSF seed as all zeros. "
-                                "The seed TIFF writer is incompatible with MATLAB."
-                            )
-                        if failed_chunks >= 3 and not psf_estimates:
-                            for pending_future in pending:
-                                pending_future.cancel()
-                            detail = "\n\n".join(failure_details[:3])
-                            raise RuntimeError(
-                                "First three chunks failed during PSF estimation; "
-                                "aborting instead of submitting every tile to MATLAB.\n\n"
-                                f"{detail}"
-                            )
-                        print(f"  WARNING: chunk {idx} failed, skipping. {error}", flush=True)
-                        continue
-                    if psf_chunk is not None:
-                        psf_estimates.append(psf_chunk)
-                        psf_weights.append(weight)
+    while True:
+        candidate_tile_origins = _tile_origins(ny, nx, chunk_xy)
+        tile_origins = _select_representative_tiles(
+            volume,
+            candidate_tile_origins,
+            max_tiles=blind_max_tiles,
+            snr_weight_cap=snr_weight_cap,
+        )
+        print(
+            f"  Processing {len(tile_origins)} chunk(s) of size "
+            f"(nz={nz}, xy<={chunk_xy}, halo_xy={pad_xy}, pad_z={pad_z}, "
+            f"executor_workers={max_workers}, backend='{blind_backend}', "
+            f"backend_workers={matlab_workers}, matlab_threads={matlab_threads}, "
+            f"matlab_timeout={matlab_timeout}s, snr_weight_cap={snr_weight_cap:g}, "
+            f"blind_latent_update_period={blind_latent_update_period})...",
+            flush=True,
+        )
+        try:
+            psf_estimates, psf_weights = _run_blind_tile_pass(
+                volume,
+                psf_seed,
+                tile_origins,
+                pad_xy=pad_xy,
+                pad_z=pad_z,
+                n_iters=n_iters,
+                script_dir=script_dir,
+                blind_backend=blind_backend,
+                max_workers=max_workers,
+                prefetch_chunks=prefetch_chunks,
+                matlab_workers=matlab_workers,
+                matlab_threads=matlab_threads,
+                matlab_bin=matlab_bin,
+                matlab_timeout=matlab_timeout,
+                blind_peak_normalization=blind_peak_normalization,
+                blind_peak_gamma_max=blind_peak_gamma_max,
+                blind_latent_update_period=blind_latent_update_period,
+                cupy_pool_trim_bytes=cupy_pool_trim_bytes,
+                snr_weight_cap=snr_weight_cap,
+            )
+            break
+        except BaseException as exc:
+            reduced_chunk_xy = _next_smaller_blind_chunk_xy(
+                chunk_xy, min_cupy_chunk_xy
+            )
+            if (
+                blind_backend != "cupy"
+                or not _is_cupy_out_of_memory(exc)
+                or reduced_chunk_xy >= chunk_xy
+            ):
+                raise
+            print(
+                f"  WARNING: CuPy exhausted VRAM at chunk_xy={chunk_xy}; "
+                f"discarding the partial pass and retrying all tiles with "
+                f"chunk_xy={reduced_chunk_xy}.",
+                flush=True,
+            )
+            chunk_xy = reduced_chunk_xy
+            cache_path = _cache_path_for_chunk(chunk_xy)
+            if cache_path is not None and cache_path.exists():
+                print(f"Using cached PSF estimate: {cache_path}", flush=True)
+                return _normalise_psf(imread(str(cache_path)))
 
     if not psf_estimates:
         raise RuntimeError(
             "All chunks failed during PSF estimation. "
-            "Check MATLAB logs above and ensure deconvblind is available."
+            "Check backend logs above and ensure blind estimation is available."
         )
 
     print(f"Merging {len(psf_estimates)} PSF estimate(s) via SNR-weighted mean...", flush=True)
@@ -1025,9 +1629,13 @@ def main() -> None:
     parser.add_argument("--image_path",  required=True)
     parser.add_argument("--output_path", required=True,
                         help="Where to save the merged PSF TIFF.")
+    parser.add_argument("--blind_backend", default=DEFAULT_BLIND_BACKEND, choices=("matlab", "cupy"),
+                        help="Backend for blind estimation: matlab (default) or cupy.")
     parser.add_argument("--n_iters",    type=int,   default=10)
     parser.add_argument("--chunk_xy",   type=int,   default=DEFAULT_BLIND_CHUNK_XY,
                         help="XY tile size. <=0 auto-sizes from available VRAM.")
+    parser.add_argument("--blind_max_tiles", type=int, default=DEFAULT_BLIND_MAX_TILES,
+                        help="Maximum representative PSF tiles; 0 processes the full grid.")
     parser.add_argument("--pad_xy",     type=int,   default=32,
                         help="XY halo per edge before deconvblind (pixels).")
     parser.add_argument("--pad_z",      type=int,   default=20,
@@ -1038,6 +1646,13 @@ def main() -> None:
                         help="Threads per MATLAB deconvblind process; clamped to 1 or 2.")
     parser.add_argument("--matlab_workers", type=int, default=1,
                         help="Concurrent MATLAB deconvblind processes; default 1 avoids MATLAB orchestration hangs.")
+    parser.add_argument("--blind_peak_normalization", default=DEFAULT_BLIND_PEAK_NORMALIZATION,
+                        choices=("none", "gamma", "unit"),
+                        help="Optional peak normalization behavior used by the CuPy backend.")
+    parser.add_argument("--blind_peak_gamma_max", type=float, default=DEFAULT_BLIND_PEAK_GAMMA_MAX,
+                        help="Maximum gamma scaling value used when blind_peak_normalization='gamma'.")
+    parser.add_argument("--blind_latent_update_period", type=int, default=DEFAULT_BLIND_LATENT_UPDATE_PERIOD,
+                        help="Update latent image every N blind iterations; 1 preserves full alternating updates.")
     parser.add_argument("--matlab_bin", default="matlab",
                         help="MATLAB executable used for deconvblind.")
     parser.add_argument("--matlab_timeout", type=int, default=1800,
@@ -1112,6 +1727,7 @@ def main() -> None:
         pad_z=args.pad_z,
         script_dir=args.script_dir,
         max_workers=args.blind_workers,
+        blind_backend=args.blind_backend,
         prefetch_chunks=args.prefetch_chunks,
         vram_gb=args.vram_gb,
         cache_dir=args.cache_dir,
@@ -1121,6 +1737,10 @@ def main() -> None:
         matlab_bin=args.matlab_bin,
         matlab_timeout=args.matlab_timeout,
         snr_weight_cap=args.snr_weight_cap,
+        blind_peak_normalization=args.blind_peak_normalization,
+        blind_peak_gamma_max=args.blind_peak_gamma_max,
+        blind_latent_update_period=args.blind_latent_update_period,
+        blind_max_tiles=args.blind_max_tiles,
         blind_z_slices=args.blind_z_slices,
     )
 
