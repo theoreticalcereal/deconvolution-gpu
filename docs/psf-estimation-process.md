@@ -173,6 +173,10 @@ the resulting PSF shapes by normalized correlation, and keeps
 the remaining blind iterations on only those kept tiles and merges the final
 estimates by SNR-weighted mean.
 
+Routine Astrocyte runs expose only `blind_backend` and `cupy_fft_engine`; the
+scout iteration count, retained tile count, tile preselection, and merge
+controls use defaults from `workflow/configs/nextflow.config`.
+
 Use direct `cupyx` mode with `cupy_fft_engine = cupyx` when every selected tile
 should contribute for the full iteration count, such as comparison runs or
 datasets where real spatial PSF variation should not be filtered as tile

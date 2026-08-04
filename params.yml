@@ -24,29 +24,4 @@ light_sheet_angle: 90
 
 # GPU blind PSF backend. Use "matlab" for the CPU/MATLAB backend.
 blind_backend: cupy
-blind_peak_normalization: none
-blind_peak_gamma_max: 2.5
-blind_latent_update_period: 2
-blind_iters: 20
-chunk_xy: 256
-blind_max_tiles: 16
 cupy_fft_engine: scout
-adaptive_scout_iters: 2
-adaptive_keep_tiles: 4
-tile_selection_strategy: spatial_snr_v1
-coarse_region_rows: 4
-coarse_region_columns: 4
-coarse_region_limit: 8
-blind_workers: 1
-prefetch_chunks: 72
-blind_z_slices: 128
-snr_weight_cap: 100
-
-# MATLAB-only controls, retained when blind_backend is switched to "matlab".
-matlab_workers: 24
-matlab_threads: 1
-matlab_timeout: 1800
-
-decon_chunk_xy: 0
-decon_workers: 1
-vram_gb: -1

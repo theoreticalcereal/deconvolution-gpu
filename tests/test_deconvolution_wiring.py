@@ -227,7 +227,7 @@ class DeconvolutionWiringTest(unittest.TestCase):
             max_downsample=4,
         )
 
-    def test_blind_max_tiles_parameter_is_exposed_and_forwarded(self):
+    def test_blind_max_tiles_parameter_is_hidden_and_forwarded(self):
         config_text = (
             ROOT / "workflow/configs/nextflow.config"
         ).read_text(encoding="utf-8")
@@ -237,9 +237,7 @@ class DeconvolutionWiringTest(unittest.TestCase):
         psf_text = PSF_SCRIPT_PATH.read_text(encoding="utf-8")
 
         self.assertIn("blind_max_tiles = 16", config_text)
-        self.assertIn("id: blind_max_tiles", package_text)
-        self.assertIn("default: 16", package_text)
-        self.assertIn("min: 0", package_text)
+        self.assertNotIn("id: blind_max_tiles", package_text)
         self.assertIn(
             "blind_max_tiles_flag = flag('blind_max_tiles', params.blind_max_tiles)",
             modules_text,
@@ -250,7 +248,7 @@ class DeconvolutionWiringTest(unittest.TestCase):
         self.assertIn('parser.add_argument("--blind_max_tiles"', psf_text)
         self.assertIn("blind_max_tiles=args.blind_max_tiles", psf_text)
 
-    def test_blind_latent_update_period_parameter_is_exposed_and_forwarded(self):
+    def test_blind_latent_update_period_parameter_is_hidden_and_forwarded(self):
         config_text = (
             ROOT / "workflow/configs/nextflow.config"
         ).read_text(encoding="utf-8")
@@ -260,7 +258,7 @@ class DeconvolutionWiringTest(unittest.TestCase):
         psf_text = PSF_SCRIPT_PATH.read_text(encoding="utf-8")
 
         self.assertIn("blind_latent_update_period = 2", config_text)
-        self.assertIn("id: blind_latent_update_period", package_text)
+        self.assertNotIn("id: blind_latent_update_period", package_text)
         self.assertIn(
             "blind_latent_update_period_flag = flag('blind_latent_update_period', params.blind_latent_update_period)",
             modules_text,
@@ -365,7 +363,7 @@ class DeconvolutionWiringTest(unittest.TestCase):
         self.assertLess(module._psf_shape_similarity(first, outlier), 0.1)
         np.testing.assert_allclose(scout_seed.sum(), 1.0, rtol=1e-6)
 
-    def test_scout_parameters_are_exposed_with_readable_astrocyte_descriptions(self):
+    def test_scout_parameters_keep_simple_astrocyte_surface_and_hidden_defaults(self):
         config_text = (ROOT / "workflow/configs/nextflow.config").read_text(encoding="utf-8")
         package_text = (ROOT / "astrocyte_pkg.yml").read_text(encoding="utf-8")
         package_data = yaml.safe_load(package_text)
@@ -389,6 +387,13 @@ class DeconvolutionWiringTest(unittest.TestCase):
         ):
             self.assertIn(expected, config_text)
 
+        exposed_param_ids = {
+            parameter["id"]
+            for parameter in package_data["workflow_parameters"]
+        }
+        self.assertIn("blind_backend", exposed_param_ids)
+        self.assertIn("cupy_fft_engine", exposed_param_ids)
+
         for param_id in (
             "cupy_fft_engine",
             "adaptive_scout_iters",
@@ -398,7 +403,6 @@ class DeconvolutionWiringTest(unittest.TestCase):
             "coarse_region_columns",
             "coarse_region_limit",
         ):
-            self.assertIn(f"id: {param_id}", package_text)
             self.assertIn(f"{param_id}_flag = flag('{param_id}', params.{param_id})", modules_text)
             self.assertIn(f"${{{param_id}_flag}}", modules_text)
             self.assertIn(f'parser.add_argument("--{param_id}"', wrapper_text)
@@ -406,15 +410,35 @@ class DeconvolutionWiringTest(unittest.TestCase):
             self.assertIn(f"{param_id}=args.{param_id}", wrapper_text)
             self.assertIn(f"{param_id}=args.{param_id}", psf_text)
 
+        for param_id in (
+            "blind_iters",
+            "chunk_xy",
+            "blind_max_tiles",
+            "adaptive_scout_iters",
+            "adaptive_keep_tiles",
+            "tile_selection_strategy",
+            "coarse_region_rows",
+            "coarse_region_columns",
+            "coarse_region_limit",
+            "blind_peak_normalization",
+            "blind_peak_gamma_max",
+            "blind_latent_update_period",
+            "blind_workers",
+            "matlab_workers",
+            "matlab_threads",
+            "matlab_timeout",
+            "prefetch_chunks",
+            "blind_z_slices",
+            "snr_weight_cap",
+            "decon_chunk_xy",
+            "decon_workers",
+            "vram_gb",
+        ):
+            self.assertNotIn(f"id: {param_id}", package_text)
+
         workflow_parameters_text = package_text.split("workflow_parameters:", 1)[1]
         self.assertNotIn("title:", workflow_parameters_text)
         self.assertIn("CuPy blind PSF estimation mode", package_params["cupy_fft_engine"]["description"])
-        self.assertIn("Number of blind-RL iterations", package_params["adaptive_scout_iters"]["description"])
-        self.assertIn("Number of scout-approved tiles", package_params["adaptive_keep_tiles"]["description"])
-        self.assertIn("Method used to preselect candidate blind PSF tiles", package_params["tile_selection_strategy"]["description"])
-        self.assertIn("Number of row bands", package_params["coarse_region_rows"]["description"])
-        self.assertIn("Number of column bands", package_params["coarse_region_columns"]["description"])
-        self.assertIn("Maximum coarse regions", package_params["coarse_region_limit"]["description"])
 
     def test_scout_defaults_are_documented_for_test_run(self):
         params_text = (ROOT / "params.yml").read_text(encoding="utf-8")
@@ -425,22 +449,40 @@ class DeconvolutionWiringTest(unittest.TestCase):
         for expected in (
             "blind_backend: cupy",
             "cupy_fft_engine: scout",
-            "adaptive_scout_iters: 2",
-            "adaptive_keep_tiles: 4",
-            "tile_selection_strategy: spatial_snr_v1",
-            "coarse_region_rows: 4",
-            "coarse_region_columns: 4",
-            "coarse_region_limit: 8",
         ):
             self.assertIn(expected, params_text)
+        for hidden_param in (
+            "blind_iters",
+            "chunk_xy",
+            "blind_max_tiles",
+            "adaptive_scout_iters",
+            "adaptive_keep_tiles",
+            "tile_selection_strategy",
+            "coarse_region_rows",
+            "coarse_region_columns",
+            "coarse_region_limit",
+            "blind_peak_normalization",
+            "blind_peak_gamma_max",
+            "blind_latent_update_period",
+            "blind_workers",
+            "prefetch_chunks",
+            "blind_z_slices",
+            "snr_weight_cap",
+            "matlab_workers",
+            "matlab_threads",
+            "matlab_timeout",
+            "decon_chunk_xy",
+            "decon_workers",
+            "vram_gb",
+        ):
+            self.assertNotIn(f"{hidden_param}:", params_text)
 
         self.assertIn("`cupy_fft_engine`", profiles_text)
-        self.assertIn("`adaptive_scout_iters`", profiles_text)
-        self.assertIn("`adaptive_keep_tiles`", profiles_text)
-        self.assertIn("`tile_selection_strategy`", profiles_text)
+        self.assertIn("Advanced defaults are kept in `workflow/configs/nextflow.config`", profiles_text)
         self.assertIn("default scout path", process_text)
         self.assertIn("direct `cupyx`", process_text)
-        self.assertIn("Scout Iterations", troubleshooting_text)
+        self.assertIn("Advanced scout tuning", troubleshooting_text)
+        self.assertIn("hidden from Astrocyte", troubleshooting_text)
 
     def test_scout_backend_alias_normalizes_to_cupy_scout_mode(self):
         module = load_psf_estimation()
