@@ -35,6 +35,7 @@ from psf_estimation import (
     DEFAULT_SNR_WEIGHT_CAP,
     estimate_psf_from_chunks,
     detect_vram_bytes,
+    normalize_blind_backend,
     open_tiff_memmap,
     resolve_dxy,
     resolve_chunk_xy,
@@ -688,12 +689,26 @@ def main() -> None:
     # Blind estimation options
     parser.add_argument("--blind_iters", type=int, default=10,
                         help="deconvblind iterations per chunk during PSF estimation.")
-    parser.add_argument("--blind_backend", default="matlab", choices=("matlab", "cupy"),
-                        help="Backend for blind PSF estimation: 'matlab' or 'cupy'.")
+    parser.add_argument("--blind_backend", default="cupy", choices=("matlab", "cupy", "scout", "cupyx"),
+                        help="Backend for blind PSF estimation: 'cupy' or 'matlab'. Legacy scout/cupyx values select cupy with that CuPy mode.")
     parser.add_argument("--chunk_xy",    type=int, default=DEFAULT_BLIND_CHUNK_XY,
                         help="XY tile size for blind PSF estimation. <=0 auto-sizes from VRAM.")
     parser.add_argument("--blind_max_tiles", type=int, default=DEFAULT_BLIND_MAX_TILES,
                         help="Maximum representative PSF tiles; 0 processes the full grid.")
+    parser.add_argument("--cupy_fft_engine", choices=("cupyx", "scout"), default="scout",
+                        help="CuPy PSF estimation mode: scout filters tiles before final CuPy refinement; cupyx runs all selected tiles directly.")
+    parser.add_argument("--adaptive_scout_iters", type=int, default=2,
+                        help="Short blind-RL iterations used by the scout pass.")
+    parser.add_argument("--adaptive_keep_tiles", type=int, default=4,
+                        help="Number of scout-approved tiles to finish with the full CuPy pass.")
+    parser.add_argument("--tile_selection_strategy", choices=("spatial_snr_v1", "coarse_to_fine_snr"), default="spatial_snr_v1",
+                        help="Strategy for selecting representative blind PSF tiles.")
+    parser.add_argument("--coarse_region_rows", type=int, default=4,
+                        help="Coarse region row count for coarse_to_fine_snr tile selection.")
+    parser.add_argument("--coarse_region_columns", type=int, default=4,
+                        help="Coarse region column count for coarse_to_fine_snr tile selection.")
+    parser.add_argument("--coarse_region_limit", type=int, default=8,
+                        help="Maximum coarse regions considered by coarse_to_fine_snr tile selection.")
     parser.add_argument("--decon_chunk_xy", type=int, default=0,
                         help="Core XY tile size for CUDA deconvolution. <=0 auto-sizes from VRAM.")
     parser.add_argument("--pad_xy",      type=int, default=32,
@@ -793,6 +808,10 @@ def main() -> None:
                         help="Directory containing readtiffstack.m / writetiffstack.m.")
 
     args = parser.parse_args()
+    args.blind_backend, args.cupy_fft_engine = normalize_blind_backend(
+        args.blind_backend,
+        args.cupy_fft_engine,
+    )
 
     image_dir = Path(args.image_path)
     log_progress(f"DECON starting: image_path={image_dir}")
@@ -901,6 +920,13 @@ def main() -> None:
         blind_latent_update_period=args.blind_latent_update_period,
         blind_z_slices=args.blind_z_slices,
         blind_max_tiles=args.blind_max_tiles,
+        cupy_fft_engine=args.cupy_fft_engine,
+        adaptive_scout_iters=args.adaptive_scout_iters,
+        adaptive_keep_tiles=args.adaptive_keep_tiles,
+        tile_selection_strategy=args.tile_selection_strategy,
+        coarse_region_rows=args.coarse_region_rows,
+        coarse_region_columns=args.coarse_region_columns,
+        coarse_region_limit=args.coarse_region_limit,
     )
     psf_save_path = image_dir / "estimated_psf.tif"
     psf_save_path = _write_tiff_near_input_or_cwd(psf_save_path, psf)

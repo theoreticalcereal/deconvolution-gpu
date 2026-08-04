@@ -133,6 +133,13 @@ process DECON {
     def blind_backend_flag = flag('blind_backend', params.blind_backend)
     def chunk_xy_flag    = flag('chunk_xy', params.chunk_xy)
     def blind_max_tiles_flag = flag('blind_max_tiles', params.blind_max_tiles)
+    def cupy_fft_engine_flag = flag('cupy_fft_engine', params.cupy_fft_engine)
+    def adaptive_scout_iters_flag = flag('adaptive_scout_iters', params.adaptive_scout_iters)
+    def adaptive_keep_tiles_flag = flag('adaptive_keep_tiles', params.adaptive_keep_tiles)
+    def tile_selection_strategy_flag = flag('tile_selection_strategy', params.tile_selection_strategy)
+    def coarse_region_rows_flag = flag('coarse_region_rows', params.coarse_region_rows)
+    def coarse_region_columns_flag = flag('coarse_region_columns', params.coarse_region_columns)
+    def coarse_region_limit_flag = flag('coarse_region_limit', params.coarse_region_limit)
     def decon_chunk_xy_flag = flag('decon_chunk_xy', params.decon_chunk_xy)
     def pad_xy_flag      = flag('pad_xy', params.pad_xy)
     def pad_z_flag       = flag('pad_z', params.pad_z)
@@ -221,6 +228,13 @@ process DECON {
         ${blind_backend_flag} \\
         ${chunk_xy_flag} \\
         ${blind_max_tiles_flag} \\
+        ${cupy_fft_engine_flag} \\
+        ${adaptive_scout_iters_flag} \\
+        ${adaptive_keep_tiles_flag} \\
+        ${tile_selection_strategy_flag} \\
+        ${coarse_region_rows_flag} \\
+        ${coarse_region_columns_flag} \\
+        ${coarse_region_limit_flag} \\
         ${decon_chunk_xy_flag} \\
         ${pad_xy_flag} \\
         ${pad_z_flag} \\

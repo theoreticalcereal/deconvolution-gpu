@@ -47,13 +47,43 @@ DEFAULT_BLIND_Z_SLICES = 128
 DEFAULT_BLIND_CHUNK_XY = 256
 DEFAULT_BLIND_MAX_TILES = 16
 DEFAULT_BLIND_LATENT_UPDATE_PERIOD = 2
-DEFAULT_BLIND_BACKEND = "matlab"
+DEFAULT_BLIND_BACKEND = "cupy"
 DEFAULT_BLIND_PEAK_NORMALIZATION = "none"
 DEFAULT_BLIND_PEAK_GAMMA_MAX = 2.5
 DEFAULT_CUPY_VRAM_FRACTION = 0.72
 DEFAULT_CUPY_FFT_BYTES_PER_VOXEL = 208
+DEFAULT_ADAPTIVE_SCOUT_ITERS = 2
+DEFAULT_ADAPTIVE_KEEP_TILES = 4
 BLIND_CHUNK_ALIGNMENT = 32
 BLIND_TILE_SELECTION_STRATEGY = "spatial_snr_v1"
+COARSE_TO_FINE_TILE_SELECTION_STRATEGY = "coarse_to_fine_snr"
+TILE_SELECTION_STRATEGIES = (
+    BLIND_TILE_SELECTION_STRATEGY,
+    COARSE_TO_FINE_TILE_SELECTION_STRATEGY,
+)
+DEFAULT_COARSE_REGION_ROWS = 4
+DEFAULT_COARSE_REGION_COLUMNS = 4
+DEFAULT_COARSE_REGION_LIMIT = 8
+BLIND_BACKENDS = ("matlab", "cupy")
+BLIND_BACKEND_CLI_CHOICES = ("matlab", "cupy", "scout", "cupyx")
+
+
+def normalize_blind_backend(
+    blind_backend: str | None,
+    cupy_fft_engine: str | None = "scout",
+) -> tuple[str, str]:
+    """Return canonical backend and CuPy mode values.
+
+    Accept scout/cupyx as legacy backend aliases from older params files.
+    """
+    backend = str(blind_backend or DEFAULT_BLIND_BACKEND).lower()
+    engine = str(cupy_fft_engine or "scout").lower()
+
+    if backend == "scout":
+        return "cupy", "scout"
+    if backend == "cupyx":
+        return "cupy", "cupyx"
+    return backend, engine
 
 
 def _ensure_writable_dir(path: Path) -> None:
@@ -263,6 +293,7 @@ def resolve_backend_executor_workers(
     matlab_workers: int,
 ) -> int:
     """Resolve the thread-pool size needed to feed the selected backend."""
+    blind_backend, _ = normalize_blind_backend(blind_backend)
     blind_workers = max(1, int(blind_workers))
     matlab_workers = max(1, int(matlab_workers))
     if blind_backend == "cupy":
@@ -626,6 +657,12 @@ def _psf_cache_key(
     blind_latent_update_period: int,
     blind_max_tiles: int,
     tile_selection_strategy: str,
+    cupy_fft_engine: str = "cupyx",
+    adaptive_scout_iters: int = DEFAULT_ADAPTIVE_SCOUT_ITERS,
+    adaptive_keep_tiles: int = DEFAULT_ADAPTIVE_KEEP_TILES,
+    coarse_region_rows: int = DEFAULT_COARSE_REGION_ROWS,
+    coarse_region_columns: int = DEFAULT_COARSE_REGION_COLUMNS,
+    coarse_region_limit: int = DEFAULT_COARSE_REGION_LIMIT,
 ) -> str:
     stat = image_path.stat()
     payload = {
@@ -648,7 +685,13 @@ def _psf_cache_key(
         "blind_latent_update_period": blind_latent_update_period,
         "blind_max_tiles": blind_max_tiles,
         "tile_selection_strategy": tile_selection_strategy,
-        "version": 8,
+        "cupy_fft_engine": cupy_fft_engine,
+        "adaptive_scout_iters": adaptive_scout_iters,
+        "adaptive_keep_tiles": adaptive_keep_tiles,
+        "coarse_region_rows": coarse_region_rows,
+        "coarse_region_columns": coarse_region_columns,
+        "coarse_region_limit": coarse_region_limit,
+        "version": 9,
     }
     encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()[:20]
@@ -912,23 +955,163 @@ def _snr_weight(core: np.ndarray, weight_cap: float = DEFAULT_SNR_WEIGHT_CAP) ->
     return weight
 
 
+def _log_selected_blind_tiles(
+    selected: list[tuple[float, tuple[int, int, int, int]]],
+    candidate_count: int,
+    strategy: str,
+) -> None:
+    reduction = 100.0 * (1.0 - len(selected) / candidate_count) if candidate_count else 0.0
+    print(
+        f"  Blind tile selection: strategy={strategy}, "
+        f"candidates={candidate_count}, selected={len(selected)}, "
+        f"reduction={reduction:.1f}%",
+        flush=True,
+    )
+    for index, (score, tile) in enumerate(selected, start=1):
+        y0, x0, y1, x1 = tile
+        print(
+            f"    Selected blind tile {index}/{len(selected)}: "
+            f"tile=({y0}:{y1}, {x0}:{x1}), snr_weight={score:.3g}",
+            flush=True,
+        )
+
+
+def _select_coarse_to_fine_snr_tiles(
+    volume,
+    tile_origins: list[tuple[int, int, int, int]],
+    *,
+    max_tiles: int,
+    snr_weight_cap: float,
+    coarse_region_rows: int = DEFAULT_COARSE_REGION_ROWS,
+    coarse_region_columns: int = DEFAULT_COARSE_REGION_COLUMNS,
+    coarse_region_limit: int = DEFAULT_COARSE_REGION_LIMIT,
+) -> list[tuple[int, int, int, int]]:
+    if max_tiles < 0:
+        raise ValueError(f"blind_max_tiles cannot be negative, got {max_tiles}")
+    if max_tiles == 0 or len(tile_origins) <= max_tiles:
+        print(
+            f"  Blind tile selection: strategy={COARSE_TO_FINE_TILE_SELECTION_STRATEGY}, "
+            f"candidates={len(tile_origins)}, selected={len(tile_origins)}, "
+            "reduction=0.0%",
+            flush=True,
+        )
+        return list(tile_origins)
+
+    coarse_region_rows = max(1, int(coarse_region_rows))
+    coarse_region_columns = max(1, int(coarse_region_columns))
+    coarse_region_limit = max(1, int(coarse_region_limit))
+    y_min = min(tile[0] for tile in tile_origins)
+    y_max = max(tile[2] for tile in tile_origins)
+    x_min = min(tile[1] for tile in tile_origins)
+    x_max = max(tile[3] for tile in tile_origins)
+    y_span = max(1, y_max - y_min)
+    x_span = max(1, x_max - x_min)
+
+    scored_tiles: list[tuple[float, tuple[int, int, int, int]]] = []
+    regions: dict[
+        tuple[int, int], list[tuple[float, tuple[int, int, int, int]]]
+    ] = {}
+    for tile in tile_origins:
+        y0, x0, y1, x1 = tile
+        core = np.asarray(volume[:, y0:y1, x0:x1])
+        score = _snr_weight(core, weight_cap=snr_weight_cap)
+        scored = (score, tile)
+        scored_tiles.append(scored)
+        y_center = ((y0 + y1) / 2.0) - y_min
+        x_center = ((x0 + x1) / 2.0) - x_min
+        region = (
+            min(coarse_region_rows - 1, int(y_center * coarse_region_rows / y_span)),
+            min(coarse_region_columns - 1, int(x_center * coarse_region_columns / x_span)),
+        )
+        regions.setdefault(region, []).append(scored)
+
+    region_scores = [
+        (max(score for score, _ in candidates), region)
+        for region, candidates in regions.items()
+    ]
+    selected_regions = {
+        region
+        for _, region in sorted(region_scores, key=lambda item: (-item[0], item[1]))[
+            : min(coarse_region_limit, len(region_scores))
+        ]
+    }
+
+    selected: list[tuple[float, tuple[int, int, int, int]]] = []
+    selected_tiles: set[tuple[int, int, int, int]] = set()
+    for region in sorted(selected_regions):
+        best = min(regions[region], key=lambda item: (-item[0], item[1]))
+        selected.append(best)
+        selected_tiles.add(best[1])
+        if len(selected) >= max_tiles:
+            break
+
+    ranked_by_region = {
+        region: sorted(candidates, key=lambda item: (-item[0], item[1]))
+        for region, candidates in regions.items()
+        if region in selected_regions
+    }
+    while len(selected) < max_tiles:
+        added = False
+        for region in sorted(selected_regions):
+            for scored in ranked_by_region.get(region, []):
+                if scored[1] in selected_tiles:
+                    continue
+                selected.append(scored)
+                selected_tiles.add(scored[1])
+                added = True
+                break
+            if len(selected) >= max_tiles:
+                break
+        if not added:
+            break
+
+    selected.sort(key=lambda item: item[1])
+    _log_selected_blind_tiles(
+        selected,
+        len(tile_origins),
+        COARSE_TO_FINE_TILE_SELECTION_STRATEGY,
+    )
+    return [tile for _, tile in selected]
+
+
 def _select_representative_tiles(
     volume,
     tile_origins: list[tuple[int, int, int, int]],
     max_tiles: int,
     snr_weight_cap: float,
+    *,
+    strategy: str = BLIND_TILE_SELECTION_STRATEGY,
+    coarse_region_rows: int = DEFAULT_COARSE_REGION_ROWS,
+    coarse_region_columns: int = DEFAULT_COARSE_REGION_COLUMNS,
+    coarse_region_limit: int = DEFAULT_COARSE_REGION_LIMIT,
 ) -> list[tuple[int, int, int, int]]:
     """Select high-SNR tiles across balanced spatial regions."""
     if max_tiles < 0:
         raise ValueError(f"blind_max_tiles cannot be negative, got {max_tiles}")
     if max_tiles == 0 or len(tile_origins) <= max_tiles:
         print(
-            f"  Blind tile selection: strategy={BLIND_TILE_SELECTION_STRATEGY}, "
+            f"  Blind tile selection: strategy={strategy}, "
             f"candidates={len(tile_origins)}, selected={len(tile_origins)}, "
             "reduction=0.0%",
             flush=True,
         )
         return list(tile_origins)
+    strategy = str(strategy)
+    if strategy == COARSE_TO_FINE_TILE_SELECTION_STRATEGY:
+        return _select_coarse_to_fine_snr_tiles(
+            volume,
+            tile_origins,
+            max_tiles=max_tiles,
+            snr_weight_cap=snr_weight_cap,
+            coarse_region_rows=coarse_region_rows,
+            coarse_region_columns=coarse_region_columns,
+            coarse_region_limit=coarse_region_limit,
+        )
+    if strategy != BLIND_TILE_SELECTION_STRATEGY:
+        raise ValueError(
+            f"Unknown tile selection strategy {strategy!r}; "
+            f"expected one of {TILE_SELECTION_STRATEGIES!r}"
+        )
 
     y_positions = sorted({tile[0] for tile in tile_origins})
     x_positions = sorted({tile[1] for tile in tile_origins})
@@ -985,20 +1168,7 @@ def _select_representative_tiles(
             selected_tiles.add(scored[1])
 
     selected.sort(key=lambda item: item[1])
-    reduction = 100.0 * (1.0 - len(selected) / len(tile_origins))
-    print(
-        f"  Blind tile selection: strategy={BLIND_TILE_SELECTION_STRATEGY}, "
-        f"candidates={len(tile_origins)}, selected={len(selected)}, "
-        f"reduction={reduction:.1f}%",
-        flush=True,
-    )
-    for index, (score, tile) in enumerate(selected, start=1):
-        y0, x0, y1, x1 = tile
-        print(
-            f"    Selected blind tile {index}/{len(selected)}: "
-            f"tile=({y0}:{y1}, {x0}:{x1}), snr_weight={score:.3g}",
-            flush=True,
-        )
+    _log_selected_blind_tiles(selected, len(tile_origins), strategy)
     return [tile for _, tile in selected]
 
 
@@ -1160,6 +1330,175 @@ def _estimate_one_tile(
     return idx, _normalise_psf(psf_chunk), weight, None
 
 
+def _merge_weighted_psfs(
+    psf_estimates: list[np.ndarray],
+    psf_weights: list[float],
+    snr_weight_cap: float,
+) -> np.ndarray:
+    if not psf_estimates:
+        raise RuntimeError("Cannot merge an empty PSF estimate list")
+    stack = np.stack(psf_estimates, axis=0)
+    weights = np.asarray(psf_weights, dtype=np.float32)
+    max_weight = snr_weight_cap if snr_weight_cap > 0 else None
+    weights = np.clip(weights, 1e-3, max_weight)
+    weights = weights / weights.sum()
+    merged = np.tensordot(weights, stack, axes=(0, 0)).astype(np.float32)
+    return _normalise_psf(merged)
+
+
+def _psf_shape_similarity(first: np.ndarray, second: np.ndarray) -> float:
+    first_values = np.asarray(first, dtype=np.float32).ravel()
+    second_values = np.asarray(second, dtype=np.float32).ravel()
+    if first_values.shape != second_values.shape:
+        raise ValueError(
+            f"PSF shapes do not match for NCC: {np.asarray(first).shape} "
+            f"vs {np.asarray(second).shape}"
+        )
+    denominator = float(np.linalg.norm(first_values) * np.linalg.norm(second_values))
+    if denominator <= 0.0:
+        return 1.0 if np.allclose(first_values, second_values) else 0.0
+    return float(np.dot(first_values, second_values) / denominator)
+
+
+def _select_adaptive_scout_tiles(
+    origins: list[tuple[int, int, int, int]],
+    scout_estimates: list[np.ndarray],
+    scout_weights: list[float],
+    *,
+    keep_tiles: int,
+    snr_weight_cap: float,
+) -> tuple[list[tuple[int, int, int, int]], list[float], np.ndarray]:
+    if not scout_estimates:
+        raise RuntimeError("Adaptive blind PSF scout produced no estimates")
+    if len(scout_estimates) != len(scout_weights):
+        raise ValueError("Adaptive scout estimates and weights must have the same length")
+    if len(origins) < len(scout_estimates):
+        raise ValueError("Adaptive scout received more estimates than tile origins")
+
+    keep_count = min(max(1, int(keep_tiles)), len(scout_estimates))
+    max_weight = snr_weight_cap if snr_weight_cap > 0 else None
+    scored: list[tuple[float, float, tuple[int, int, int, int], int]] = []
+    for index, (tile, psf, weight) in enumerate(
+        zip(origins, scout_estimates, scout_weights)
+    ):
+        similarities = [
+            _psf_shape_similarity(psf, other)
+            for other_index, other in enumerate(scout_estimates)
+            if other_index != index
+        ]
+        consensus_score = float(np.mean(similarities)) if similarities else 1.0
+        clipped_weight = float(np.clip(float(weight), 1e-3, max_weight))
+        scored.append((consensus_score, clipped_weight, tile, index))
+
+    selected = sorted(scored, key=lambda item: (-item[0], -item[1], item[2]))[
+        :keep_count
+    ]
+    selected.sort(key=lambda item: item[3])
+    selected_indices = [index for _, _, _, index in selected]
+    kept_origins = [tile for _, _, tile, _ in selected]
+    kept_weights = [float(scout_weights[index]) for index in selected_indices]
+    scout_seed = _merge_weighted_psfs(
+        [scout_estimates[index] for index in selected_indices],
+        [1.0] * len(selected_indices),
+        snr_weight_cap,
+    )
+    return kept_origins, kept_weights, scout_seed
+
+
+def _run_blind_tile_adaptive_cupyx_pass(
+    volume: np.ndarray,
+    psf_seed: np.ndarray,
+    tile_origins: list[tuple[int, int, int, int]],
+    *,
+    pad_xy: int,
+    pad_z: int,
+    n_iters: int,
+    script_dir: Path,
+    max_workers: int,
+    prefetch_chunks: int,
+    matlab_workers: int,
+    matlab_threads: int,
+    matlab_bin: str,
+    matlab_timeout: int,
+    blind_peak_normalization: str,
+    blind_peak_gamma_max: float,
+    blind_latent_update_period: int,
+    snr_weight_cap: float,
+    cupy_pool_trim_bytes: int | None,
+    adaptive_scout_iters: int,
+    adaptive_keep_tiles: int,
+) -> tuple[list[np.ndarray], list[float]]:
+    scout_iters = min(max(1, int(adaptive_scout_iters)), max(1, int(n_iters)))
+    refine_iters = max(0, int(n_iters) - scout_iters)
+    scout_estimates, scout_weights = _run_blind_tile_pass(
+        volume,
+        psf_seed,
+        tile_origins,
+        pad_xy=pad_xy,
+        pad_z=pad_z,
+        n_iters=scout_iters,
+        script_dir=script_dir,
+        blind_backend="cupy",
+        max_workers=max_workers,
+        prefetch_chunks=prefetch_chunks,
+        matlab_workers=matlab_workers,
+        matlab_threads=matlab_threads,
+        matlab_bin=matlab_bin,
+        matlab_timeout=matlab_timeout,
+        blind_peak_normalization=blind_peak_normalization,
+        blind_peak_gamma_max=blind_peak_gamma_max,
+        blind_latent_update_period=blind_latent_update_period,
+        snr_weight_cap=snr_weight_cap,
+        cupy_pool_trim_bytes=cupy_pool_trim_bytes,
+        cupy_fft_engine="cupyx",
+        adaptive_scout_iters=adaptive_scout_iters,
+        adaptive_keep_tiles=adaptive_keep_tiles,
+    )
+    kept_origins, kept_weights, scout_seed = _select_adaptive_scout_tiles(
+        tile_origins,
+        scout_estimates,
+        scout_weights,
+        keep_tiles=adaptive_keep_tiles,
+        snr_weight_cap=snr_weight_cap,
+    )
+    total_weight = float(np.sum(kept_weights, dtype=np.float64))
+    print(
+        f"  Adaptive CuPy blind PSF scout kept {len(kept_origins)}/"
+        f"{len(tile_origins)} tile(s); scout_iters={scout_iters}; "
+        f"final_iters={refine_iters}; final_engine=cupyx",
+        flush=True,
+    )
+    if refine_iters == 0:
+        return [scout_seed], [float(np.sum(scout_weights, dtype=np.float64))]
+
+    final_estimates, final_weights = _run_blind_tile_pass(
+        volume,
+        psf_seed,
+        kept_origins,
+        pad_xy=pad_xy,
+        pad_z=pad_z,
+        n_iters=refine_iters,
+        script_dir=script_dir,
+        blind_backend="cupy",
+        max_workers=max_workers,
+        prefetch_chunks=prefetch_chunks,
+        matlab_workers=matlab_workers,
+        matlab_threads=matlab_threads,
+        matlab_bin=matlab_bin,
+        matlab_timeout=matlab_timeout,
+        blind_peak_normalization=blind_peak_normalization,
+        blind_peak_gamma_max=blind_peak_gamma_max,
+        blind_latent_update_period=blind_latent_update_period,
+        snr_weight_cap=snr_weight_cap,
+        cupy_pool_trim_bytes=cupy_pool_trim_bytes,
+        cupy_fft_engine="cupyx",
+        adaptive_scout_iters=adaptive_scout_iters,
+        adaptive_keep_tiles=adaptive_keep_tiles,
+    )
+    merged = _merge_weighted_psfs(final_estimates, final_weights, snr_weight_cap)
+    return [merged], [total_weight]
+
+
 def _run_blind_tile_pass(
     volume: np.ndarray,
     psf_seed: np.ndarray,
@@ -1181,7 +1520,38 @@ def _run_blind_tile_pass(
     blind_latent_update_period: int,
     snr_weight_cap: float,
     cupy_pool_trim_bytes: int | None = None,
+    cupy_fft_engine: str = "cupyx",
+    adaptive_scout_iters: int = DEFAULT_ADAPTIVE_SCOUT_ITERS,
+    adaptive_keep_tiles: int = DEFAULT_ADAPTIVE_KEEP_TILES,
 ) -> tuple[list[np.ndarray], list[float]]:
+    if blind_backend == "cupy" and cupy_fft_engine == "scout":
+        return _run_blind_tile_adaptive_cupyx_pass(
+            volume,
+            psf_seed,
+            tile_origins,
+            pad_xy=pad_xy,
+            pad_z=pad_z,
+            n_iters=n_iters,
+            script_dir=script_dir,
+            max_workers=max_workers,
+            prefetch_chunks=prefetch_chunks,
+            matlab_workers=matlab_workers,
+            matlab_threads=matlab_threads,
+            matlab_bin=matlab_bin,
+            matlab_timeout=matlab_timeout,
+            blind_peak_normalization=blind_peak_normalization,
+            blind_peak_gamma_max=blind_peak_gamma_max,
+            blind_latent_update_period=blind_latent_update_period,
+            snr_weight_cap=snr_weight_cap,
+            cupy_pool_trim_bytes=cupy_pool_trim_bytes,
+            adaptive_scout_iters=adaptive_scout_iters,
+            adaptive_keep_tiles=adaptive_keep_tiles,
+        )
+    if blind_backend == "cupy" and cupy_fft_engine != "cupyx":
+        raise ValueError(
+            f"cupy_fft_engine must be 'cupyx' or 'scout', got {cupy_fft_engine!r}"
+        )
+
     psf_estimates: list[np.ndarray] = []
     psf_weights: list[float] = []
     failure_details: list[str] = []
@@ -1323,6 +1693,13 @@ def estimate_psf_from_chunks(
     blind_latent_update_period: int = DEFAULT_BLIND_LATENT_UPDATE_PERIOD,
     blind_z_slices: int = DEFAULT_BLIND_Z_SLICES,
     blind_max_tiles: int = DEFAULT_BLIND_MAX_TILES,
+    cupy_fft_engine: str = "scout",
+    adaptive_scout_iters: int = DEFAULT_ADAPTIVE_SCOUT_ITERS,
+    adaptive_keep_tiles: int = DEFAULT_ADAPTIVE_KEEP_TILES,
+    tile_selection_strategy: str = BLIND_TILE_SELECTION_STRATEGY,
+    coarse_region_rows: int = DEFAULT_COARSE_REGION_ROWS,
+    coarse_region_columns: int = DEFAULT_COARSE_REGION_COLUMNS,
+    coarse_region_limit: int = DEFAULT_COARSE_REGION_LIMIT,
 ) -> np.ndarray:
     """
     Estimate a PSF by running deconvblind-like estimation on spatial XY chunks of
@@ -1370,11 +1747,14 @@ def estimate_psf_from_chunks(
         )
     requested_workers = max_workers
     cpu_workers = resolve_worker_count(requested_workers)
-    blind_backend = blind_backend.lower() if blind_backend else DEFAULT_BLIND_BACKEND
+    blind_backend, cupy_fft_engine = normalize_blind_backend(
+        blind_backend,
+        cupy_fft_engine,
+    )
     matlab_threads = min(2, max(1, matlab_threads))
     matlab_workers = max(1, matlab_workers)
     matlab_timeout = max(0, matlab_timeout)
-    if blind_backend not in ("matlab", "cupy"):
+    if blind_backend not in BLIND_BACKENDS:
         raise ValueError(
             f"Unsupported blind backend '{blind_backend}'. Expected 'matlab' or 'cupy'."
         )
@@ -1388,6 +1768,21 @@ def estimate_psf_from_chunks(
         pad_z = 0
     snr_weight_cap = max(0.0, snr_weight_cap)
     blind_latent_update_period = max(1, int(blind_latent_update_period))
+    if cupy_fft_engine not in ("cupyx", "scout"):
+        raise ValueError(
+            f"cupy_fft_engine must be 'cupyx' or 'scout', got {cupy_fft_engine!r}"
+        )
+    adaptive_scout_iters = max(1, int(adaptive_scout_iters))
+    adaptive_keep_tiles = max(1, int(adaptive_keep_tiles))
+    tile_selection_strategy = str(tile_selection_strategy)
+    if tile_selection_strategy not in TILE_SELECTION_STRATEGIES:
+        raise ValueError(
+            f"tile_selection_strategy must be one of {TILE_SELECTION_STRATEGIES!r}, "
+            f"got {tile_selection_strategy!r}"
+        )
+    coarse_region_rows = max(1, int(coarse_region_rows))
+    coarse_region_columns = max(1, int(coarse_region_columns))
+    coarse_region_limit = max(1, int(coarse_region_limit))
     if blind_max_tiles < 0:
         raise ValueError(
             f"blind_max_tiles cannot be negative, got {blind_max_tiles}"
@@ -1524,7 +1919,13 @@ def estimate_psf_from_chunks(
             blind_peak_gamma_max,
             blind_latent_update_period,
             blind_max_tiles,
-            BLIND_TILE_SELECTION_STRATEGY,
+            tile_selection_strategy,
+            cupy_fft_engine,
+            adaptive_scout_iters,
+            adaptive_keep_tiles,
+            coarse_region_rows,
+            coarse_region_columns,
+            coarse_region_limit,
         )
         return cache_root / f"estimated_psf_{cache_key}.tif"
 
@@ -1541,6 +1942,10 @@ def estimate_psf_from_chunks(
             candidate_tile_origins,
             max_tiles=blind_max_tiles,
             snr_weight_cap=snr_weight_cap,
+            strategy=tile_selection_strategy,
+            coarse_region_rows=coarse_region_rows,
+            coarse_region_columns=coarse_region_columns,
+            coarse_region_limit=coarse_region_limit,
         )
         print(
             f"  Processing {len(tile_origins)} chunk(s) of size "
@@ -1548,7 +1953,10 @@ def estimate_psf_from_chunks(
             f"executor_workers={max_workers}, backend='{blind_backend}', "
             f"backend_workers={matlab_workers}, matlab_threads={matlab_threads}, "
             f"matlab_timeout={matlab_timeout}s, snr_weight_cap={snr_weight_cap:g}, "
-            f"blind_latent_update_period={blind_latent_update_period})...",
+            f"blind_latent_update_period={blind_latent_update_period}, "
+            f"cupy_fft_engine={cupy_fft_engine}, "
+            f"adaptive_scout_iters={adaptive_scout_iters}, "
+            f"adaptive_keep_tiles={adaptive_keep_tiles})...",
             flush=True,
         )
         try:
@@ -1572,6 +1980,9 @@ def estimate_psf_from_chunks(
                 blind_latent_update_period=blind_latent_update_period,
                 cupy_pool_trim_bytes=cupy_pool_trim_bytes,
                 snr_weight_cap=snr_weight_cap,
+                cupy_fft_engine=cupy_fft_engine,
+                adaptive_scout_iters=adaptive_scout_iters,
+                adaptive_keep_tiles=adaptive_keep_tiles,
             )
             break
         except BaseException as exc:
@@ -1603,13 +2014,7 @@ def estimate_psf_from_chunks(
         )
 
     print(f"Merging {len(psf_estimates)} PSF estimate(s) via SNR-weighted mean...", flush=True)
-    stack = np.stack(psf_estimates, axis=0)
-    weights = np.asarray(psf_weights, dtype=np.float32)
-    max_weight = snr_weight_cap if snr_weight_cap > 0 else None
-    weights = np.clip(weights, 1e-3, max_weight)
-    weights = weights / weights.sum()
-    merged = np.tensordot(weights, stack, axes=(0, 0)).astype(np.float32)
-    merged = _normalise_psf(merged)
+    merged = _merge_weighted_psfs(psf_estimates, psf_weights, snr_weight_cap)
 
     if cache_path is not None:
         imwrite(str(cache_path), merged)
@@ -1629,13 +2034,27 @@ def main() -> None:
     parser.add_argument("--image_path",  required=True)
     parser.add_argument("--output_path", required=True,
                         help="Where to save the merged PSF TIFF.")
-    parser.add_argument("--blind_backend", default=DEFAULT_BLIND_BACKEND, choices=("matlab", "cupy"),
-                        help="Backend for blind estimation: matlab (default) or cupy.")
+    parser.add_argument("--blind_backend", default=DEFAULT_BLIND_BACKEND, choices=("matlab", "cupy", "scout", "cupyx"),
+                        help="Backend for blind estimation: cupy (default) or matlab. Legacy scout/cupyx values select cupy with that CuPy mode.")
     parser.add_argument("--n_iters",    type=int,   default=10)
     parser.add_argument("--chunk_xy",   type=int,   default=DEFAULT_BLIND_CHUNK_XY,
                         help="XY tile size. <=0 auto-sizes from available VRAM.")
     parser.add_argument("--blind_max_tiles", type=int, default=DEFAULT_BLIND_MAX_TILES,
                         help="Maximum representative PSF tiles; 0 processes the full grid.")
+    parser.add_argument("--cupy_fft_engine", choices=("cupyx", "scout"), default="scout",
+                        help="CuPy PSF estimation mode: scout filters tiles before final CuPy refinement; cupyx runs all selected tiles directly.")
+    parser.add_argument("--adaptive_scout_iters", type=int, default=DEFAULT_ADAPTIVE_SCOUT_ITERS,
+                        help="Short blind-RL iterations used by the scout pass.")
+    parser.add_argument("--adaptive_keep_tiles", type=int, default=DEFAULT_ADAPTIVE_KEEP_TILES,
+                        help="Number of scout-approved tiles to finish with the full CuPy pass.")
+    parser.add_argument("--tile_selection_strategy", choices=TILE_SELECTION_STRATEGIES, default=BLIND_TILE_SELECTION_STRATEGY,
+                        help="Strategy for selecting representative blind PSF tiles.")
+    parser.add_argument("--coarse_region_rows", type=int, default=DEFAULT_COARSE_REGION_ROWS,
+                        help="Coarse region row count for coarse_to_fine_snr tile selection.")
+    parser.add_argument("--coarse_region_columns", type=int, default=DEFAULT_COARSE_REGION_COLUMNS,
+                        help="Coarse region column count for coarse_to_fine_snr tile selection.")
+    parser.add_argument("--coarse_region_limit", type=int, default=DEFAULT_COARSE_REGION_LIMIT,
+                        help="Maximum coarse regions considered by coarse_to_fine_snr tile selection.")
     parser.add_argument("--pad_xy",     type=int,   default=32,
                         help="XY halo per edge before deconvblind (pixels).")
     parser.add_argument("--pad_z",      type=int,   default=20,
@@ -1694,6 +2113,10 @@ def main() -> None:
     parser.add_argument("--psf_size_xy",type=int,   default=128)
     parser.add_argument("--background", type=float, default=0.0)
     args = parser.parse_args()
+    args.blind_backend, args.cupy_fft_engine = normalize_blind_backend(
+        args.blind_backend,
+        args.cupy_fft_engine,
+    )
 
     dxy = resolve_dxy(args.dxy, args.camera_pixel_size, args.magnification)
     psf_seed = generate_theoretical_psf(
@@ -1742,6 +2165,13 @@ def main() -> None:
         blind_latent_update_period=args.blind_latent_update_period,
         blind_max_tiles=args.blind_max_tiles,
         blind_z_slices=args.blind_z_slices,
+        cupy_fft_engine=args.cupy_fft_engine,
+        adaptive_scout_iters=args.adaptive_scout_iters,
+        adaptive_keep_tiles=args.adaptive_keep_tiles,
+        tile_selection_strategy=args.tile_selection_strategy,
+        coarse_region_rows=args.coarse_region_rows,
+        coarse_region_columns=args.coarse_region_columns,
+        coarse_region_limit=args.coarse_region_limit,
     )
 
     imwrite(args.output_path, merged_psf)

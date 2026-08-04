@@ -164,6 +164,25 @@ coordinates, and SNR weights. Set `blind_max_tiles = 0` to process the complete
 grid for comparison runs. Tile selection does not change the selected tiles'
 halos, Z window, blind iterations, or merge weights.
 
+## CuPy Scout Mode
+
+The default scout path is `cupy_fft_engine = scout`. It first runs
+`adaptive_scout_iters` short blind-RL iterations on the selected tiles, compares
+the resulting PSF shapes by normalized correlation, and keeps
+`adaptive_keep_tiles` tile PSFs that agree best with the group. It then spends
+the remaining blind iterations on only those kept tiles and merges the final
+estimates by SNR-weighted mean.
+
+Use direct `cupyx` mode with `cupy_fft_engine = cupyx` when every selected tile
+should contribute for the full iteration count, such as comparison runs or
+datasets where real spatial PSF variation should not be filtered as tile
+disagreement.
+
+`tile_selection_strategy = spatial_snr_v1` is the default preselection method.
+`tile_selection_strategy = coarse_to_fine_snr` first ranks coarse image regions
+using `coarse_region_rows`, `coarse_region_columns`, and `coarse_region_limit`,
+then selects high-SNR tiles from the best regions.
+
 ## MATLAB `deconvblind`
 
 MATLAB still operates on temporary TIFF chunks. For OME-Zarr inputs, Python

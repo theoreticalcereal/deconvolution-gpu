@@ -22,6 +22,13 @@ MATLAB `deconvblind` remains available with `blind_backend = matlab`. The
 BioHPC config loads MATLAB and passes its executable into the process for that
 backend.
 
+Astrocyte exposes the CuPy scout controls with human-readable labels. **CuPy
+PSF Engine** maps to `cupy_fft_engine`; **Scout Iterations** maps to
+`adaptive_scout_iters`; **Scout Tiles to Keep** maps to `adaptive_keep_tiles`.
+The defaults run scout mode with two short iterations and keep four tiles for
+final refinement. Use direct `cupyx` mode for full selected-tile comparison
+runs.
+
 ## Runtime Environment
 
 The workflow runs in the prebuilt

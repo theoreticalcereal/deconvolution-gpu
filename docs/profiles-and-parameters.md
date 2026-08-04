@@ -40,6 +40,13 @@ level.
 | `blind_iters` | `20` | Alternating image/PSF update count per tile. |
 | `chunk_xy` | `256` | Maximum CuPy blind-estimation XY tile size; FFT-aware VRAM sizing and OOM recovery may reduce it. |
 | `blind_max_tiles` | `16` | Spatially distributed high-SNR tile limit; use `0` for a full-grid comparison. |
+| `cupy_fft_engine` | `scout` | CuPy PSF estimation mode. `scout` runs a short filtering pass and refines the most consistent tile PSFs; `cupyx` runs every selected tile directly. |
+| `adaptive_scout_iters` | `2` | Blind-RL iterations used by the scout pass before tile filtering. |
+| `adaptive_keep_tiles` | `4` | Number of scout-approved tile PSFs kept for the final CuPy refinement. |
+| `tile_selection_strategy` | `spatial_snr_v1` | Preselection strategy before blind estimation. Use `coarse_to_fine_snr` to search high-signal coarse regions first. |
+| `coarse_region_rows` | `4` | Row bands used by `coarse_to_fine_snr`. |
+| `coarse_region_columns` | `4` | Column bands used by `coarse_to_fine_snr`. |
+| `coarse_region_limit` | `8` | Maximum coarse regions considered by `coarse_to_fine_snr`. |
 | `blind_z_slices` | `128` | Centered Z planes used for estimation; nonpositive values use full Z. |
 | `blind_workers` | `1` | Concurrent blind tile tasks; use one per allocated GPU. |
 | `prefetch_chunks` | `0` | Additional tile tasks submitted ahead of processing. |

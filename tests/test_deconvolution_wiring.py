@@ -1,5 +1,6 @@
 from pathlib import Path
 import importlib.util
+import re
 import sys
 import tempfile
 import types
@@ -7,6 +8,7 @@ import unittest
 from unittest import mock
 
 import numpy as np
+import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -82,6 +84,13 @@ def load_decon_wrapper_with_fakes():
         DEFAULT_SNR_WEIGHT_CAP=100.0,
         estimate_psf_from_chunks=lambda **kwargs: FakeArray((3, 3, 3)),
         detect_vram_bytes=lambda: None,
+        normalize_blind_backend=lambda blind_backend, cupy_fft_engine="scout": (
+            ("cupy", "scout")
+            if blind_backend == "scout"
+            else ("cupy", "cupyx")
+            if blind_backend == "cupyx"
+            else (blind_backend, cupy_fft_engine)
+        ),
         open_tiff_memmap=lambda path: FakeArray((2, 4, 4)),
         resolve_dxy=lambda *args, **kwargs: 0.168,
         resolve_chunk_xy=lambda *args, **kwargs: 64,
@@ -292,6 +301,173 @@ class DeconvolutionWiringTest(unittest.TestCase):
             full_grid = module._psf_cache_key(**common, blind_max_tiles=0)
 
         self.assertNotEqual(representative, full_grid)
+
+    def test_cache_key_separates_scout_psf_settings(self):
+        module = load_psf_estimation()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            image_path = Path(tmpdir) / "image.tiff"
+            image_path.write_bytes(b"image")
+            common = {
+                "image_path": image_path,
+                "psf_seed": np.ones((3, 3, 3), dtype=np.float32),
+                "n_iters": 20,
+                "chunk_xy": 160,
+                "pad_xy": 32,
+                "pad_z": 20,
+                "script_dir": ROOT / "workflow/scripts",
+                "merge_mode": "snr_weighted_mean",
+                "snr_weight_cap": 100.0,
+                "z_window": (0, 128),
+                "blind_backend": "cupy",
+                "blind_peak_normalization": "none",
+                "blind_peak_gamma_max": 2.5,
+                "blind_latent_update_period": 2,
+                "blind_max_tiles": 16,
+                "tile_selection_strategy": "spatial_snr_v1",
+                "coarse_region_rows": 4,
+                "coarse_region_columns": 4,
+                "coarse_region_limit": 8,
+            }
+
+            direct = module._psf_cache_key(
+                **common,
+                cupy_fft_engine="cupyx",
+                adaptive_scout_iters=2,
+                adaptive_keep_tiles=4,
+            )
+            scout_more_tiles = module._psf_cache_key(
+                **common,
+                cupy_fft_engine="scout",
+                adaptive_scout_iters=2,
+                adaptive_keep_tiles=6,
+            )
+
+        self.assertNotEqual(direct, scout_more_tiles)
+
+    def test_adaptive_scout_keeps_consistent_psf_shapes(self):
+        module = load_psf_estimation()
+        origins = [(0, 0, 1, 1), (0, 1, 1, 2), (0, 2, 1, 3)]
+        first = np.array([[[0.9, 0.1, 0.0]]], dtype=np.float32)
+        second = np.array([[[0.8, 0.2, 0.0]]], dtype=np.float32)
+        outlier = np.array([[[0.0, 0.0, 1.0]]], dtype=np.float32)
+
+        kept_origins, kept_weights, scout_seed = module._select_adaptive_scout_tiles(
+            origins,
+            [first, second, outlier],
+            [1.0, 1.0, 100.0],
+            keep_tiles=2,
+            snr_weight_cap=100.0,
+        )
+
+        self.assertEqual(kept_origins, origins[:2])
+        self.assertEqual(kept_weights, [1.0, 1.0])
+        self.assertGreater(module._psf_shape_similarity(first, second), 0.9)
+        self.assertLess(module._psf_shape_similarity(first, outlier), 0.1)
+        np.testing.assert_allclose(scout_seed.sum(), 1.0, rtol=1e-6)
+
+    def test_scout_parameters_are_exposed_with_readable_astrocyte_descriptions(self):
+        config_text = (ROOT / "workflow/configs/nextflow.config").read_text(encoding="utf-8")
+        package_text = (ROOT / "astrocyte_pkg.yml").read_text(encoding="utf-8")
+        package_data = yaml.safe_load(package_text)
+        package_params = {
+            parameter["id"]: parameter
+            for parameter in package_data["workflow_parameters"]
+        }
+        modules_text = (ROOT / "workflow/modules.nf").read_text(encoding="utf-8")
+        wrapper_text = SCRIPT_PATH.read_text(encoding="utf-8")
+        psf_text = PSF_SCRIPT_PATH.read_text(encoding="utf-8")
+
+        for expected in (
+            "blind_backend = 'cupy'",
+            "cupy_fft_engine = 'scout'",
+            "adaptive_scout_iters = 2",
+            "adaptive_keep_tiles = 4",
+            "tile_selection_strategy = 'spatial_snr_v1'",
+            "coarse_region_rows = 4",
+            "coarse_region_columns = 4",
+            "coarse_region_limit = 8",
+        ):
+            self.assertIn(expected, config_text)
+
+        for param_id in (
+            "cupy_fft_engine",
+            "adaptive_scout_iters",
+            "adaptive_keep_tiles",
+            "tile_selection_strategy",
+            "coarse_region_rows",
+            "coarse_region_columns",
+            "coarse_region_limit",
+        ):
+            self.assertIn(f"id: {param_id}", package_text)
+            self.assertIn(f"{param_id}_flag = flag('{param_id}', params.{param_id})", modules_text)
+            self.assertIn(f"${{{param_id}_flag}}", modules_text)
+            self.assertIn(f'parser.add_argument("--{param_id}"', wrapper_text)
+            self.assertIn(f'parser.add_argument("--{param_id}"', psf_text)
+            self.assertIn(f"{param_id}=args.{param_id}", wrapper_text)
+            self.assertIn(f"{param_id}=args.{param_id}", psf_text)
+
+        workflow_parameters_text = package_text.split("workflow_parameters:", 1)[1]
+        self.assertNotIn("title:", workflow_parameters_text)
+        self.assertIn("CuPy blind PSF estimation mode", package_params["cupy_fft_engine"]["description"])
+        self.assertIn("Number of blind-RL iterations", package_params["adaptive_scout_iters"]["description"])
+        self.assertIn("Number of scout-approved tiles", package_params["adaptive_keep_tiles"]["description"])
+        self.assertIn("Method used to preselect candidate blind PSF tiles", package_params["tile_selection_strategy"]["description"])
+        self.assertIn("Number of row bands", package_params["coarse_region_rows"]["description"])
+        self.assertIn("Number of column bands", package_params["coarse_region_columns"]["description"])
+        self.assertIn("Maximum coarse regions", package_params["coarse_region_limit"]["description"])
+
+    def test_scout_defaults_are_documented_for_test_run(self):
+        params_text = (ROOT / "params.yml").read_text(encoding="utf-8")
+        profiles_text = (ROOT / "docs/profiles-and-parameters.md").read_text(encoding="utf-8")
+        process_text = (ROOT / "docs/psf-estimation-process.md").read_text(encoding="utf-8")
+        troubleshooting_text = (ROOT / "docs/outputs-and-troubleshooting.md").read_text(encoding="utf-8")
+
+        for expected in (
+            "blind_backend: cupy",
+            "cupy_fft_engine: scout",
+            "adaptive_scout_iters: 2",
+            "adaptive_keep_tiles: 4",
+            "tile_selection_strategy: spatial_snr_v1",
+            "coarse_region_rows: 4",
+            "coarse_region_columns: 4",
+            "coarse_region_limit: 8",
+        ):
+            self.assertIn(expected, params_text)
+
+        self.assertIn("`cupy_fft_engine`", profiles_text)
+        self.assertIn("`adaptive_scout_iters`", profiles_text)
+        self.assertIn("`adaptive_keep_tiles`", profiles_text)
+        self.assertIn("`tile_selection_strategy`", profiles_text)
+        self.assertIn("default scout path", process_text)
+        self.assertIn("direct `cupyx`", process_text)
+        self.assertIn("Scout Iterations", troubleshooting_text)
+
+    def test_scout_backend_alias_normalizes_to_cupy_scout_mode(self):
+        module = load_psf_estimation()
+
+        self.assertEqual(
+            module.normalize_blind_backend("scout", "cupyx"),
+            ("cupy", "scout"),
+        )
+        self.assertEqual(
+            module.normalize_blind_backend("cupyx", "scout"),
+            ("cupy", "cupyx"),
+        )
+        self.assertEqual(
+            module.normalize_blind_backend("cupy", "scout"),
+            ("cupy", "scout"),
+        )
+
+    def test_decon_wrapper_accepts_legacy_scout_backend_argument(self):
+        wrapper_text = SCRIPT_PATH.read_text(encoding="utf-8")
+        psf_text = PSF_SCRIPT_PATH.read_text(encoding="utf-8")
+
+        self.assertIn('choices=("matlab", "cupy", "scout", "cupyx")', wrapper_text)
+        self.assertIn('choices=("matlab", "cupy", "scout", "cupyx")', psf_text)
+        self.assertIn("normalize_blind_backend(", wrapper_text)
+        self.assertIn("normalize_blind_backend(", psf_text)
+        self.assertIn("args.blind_backend", wrapper_text)
+        self.assertIn("args.blind_backend", psf_text)
 
     def test_backend_executor_workers_honor_matlab_parallelism(self):
         module = load_psf_estimation()
@@ -636,6 +812,26 @@ class DeconvolutionWiringTest(unittest.TestCase):
 
         self.assertIn("cleanup = true", config_text)
         self.assertIn("scratch true", modules_text)
+
+    def test_slurm_jobs_start_from_stable_workflow_directory(self):
+        config_text = (ROOT / "workflow/configs/nextflow.config").read_text(encoding="utf-8")
+
+        self.assertIn("def slurmChdirOption = \"--chdir=${baseDir}\"", config_text)
+        self.assertIn("clusterOptions = slurmChdirOption", config_text)
+        self.assertIn("clusterOptions = \"${slurmChdirOption} --gres=gpu:1\"", config_text)
+
+    def test_stage_decon_input_uses_super_queue(self):
+        config_text = (ROOT / "workflow/configs/nextflow.config").read_text(encoding="utf-8")
+        match = re.search(
+            r"withName:\s*STAGE_DECON_INPUT\s*\{(?P<body>[^}]*)\}",
+            config_text,
+        )
+
+        self.assertIsNotNone(match)
+        body = match.group("body")
+        self.assertIn("queue = 'super'", body)
+        self.assertNotIn("cpus", body)
+        self.assertNotIn("memory", body)
 
     def test_ozx_is_native_input_and_output_format(self):
         config_text = (ROOT / "workflow/configs/nextflow.config").read_text(encoding="utf-8")
