@@ -186,6 +186,12 @@ def _require_positive(name: str, value: float | None) -> float:
     return value
 
 
+def _resolve_sample_refractive_index(ns: float | None, ni: float) -> float:
+    if ns is None or ns == -1:
+        return ni
+    return _require_positive("ns", ns)
+
+
 def _resolve_required_dxy(
     dxy: float | None,
     camera_pixel_size: float | None,
@@ -850,7 +856,7 @@ def main() -> None:
     dz = _require_positive("dz", args.dz)
     wavelength = _require_positive("wavelength", args.wavelength)
     ni = _require_positive("ni", args.ni)
-    ns = _require_positive("ns", args.ns)
+    ns = _resolve_sample_refractive_index(args.ns, ni)
     detection_na = args.detection_na if args.detection_na is not None else args.na
     detection_na = _require_positive("detection_na", detection_na)
     if args.psf_mode == "light_sheet":

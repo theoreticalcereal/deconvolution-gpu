@@ -951,6 +951,79 @@ class DeconvolutionWiringTest(unittest.TestCase):
 
         self.assertEqual(psf_calls[0]["image_path"], str(zarr_path))
 
+    def test_decon_wrapper_uses_ni_when_ns_is_negative_one(self):
+        module = load_decon_wrapper_with_fakes()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            image_dir = Path(tmpdir)
+            zarr_path = image_dir / "sample.ome.zarr"
+            zarr_path.mkdir()
+            psf_seed_calls = []
+
+            def fake_generate_psf_seed(**kwargs):
+                psf_seed_calls.append(kwargs)
+                return FakeArray((3, 3, 3))
+
+            argv = [
+                "decon_wrapper.py",
+                "--image_path", str(image_dir),
+                "--dxy", "0.168",
+                "--dz", "0.2",
+                "--wavelength", "0.595",
+                "--detection_na", "0.7",
+                "--ni", "1.33333",
+                "--ns", "-1",
+                "--psf_size_z", "3",
+                "--psf_size_xy", "3",
+            ]
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.object(module, "discover_image_volumes", return_value=[zarr_path]),
+                mock.patch.object(module, "open_ome_zarr_array", return_value=FakeArray((2, 4, 4))),
+                mock.patch.object(module, "generate_psf_seed", side_effect=fake_generate_psf_seed),
+                mock.patch.object(module, "deconvolve_ome_zarr_to_zarr"),
+            ):
+                module.main()
+
+        self.assertEqual(psf_seed_calls[0]["ni"], 1.33333)
+        self.assertEqual(psf_seed_calls[0]["ns"], 1.33333)
+
+    def test_decon_wrapper_uses_ni_when_ns_is_omitted(self):
+        module = load_decon_wrapper_with_fakes()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            image_dir = Path(tmpdir)
+            zarr_path = image_dir / "sample.ome.zarr"
+            zarr_path.mkdir()
+            psf_seed_calls = []
+
+            def fake_generate_psf_seed(**kwargs):
+                psf_seed_calls.append(kwargs)
+                return FakeArray((3, 3, 3))
+
+            argv = [
+                "decon_wrapper.py",
+                "--image_path", str(image_dir),
+                "--dxy", "0.168",
+                "--dz", "0.2",
+                "--wavelength", "0.595",
+                "--detection_na", "0.7",
+                "--ni", "1.33333",
+                "--psf_size_z", "3",
+                "--psf_size_xy", "3",
+            ]
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.object(module, "discover_image_volumes", return_value=[zarr_path]),
+                mock.patch.object(module, "open_ome_zarr_array", return_value=FakeArray((2, 4, 4))),
+                mock.patch.object(module, "generate_psf_seed", side_effect=fake_generate_psf_seed),
+                mock.patch.object(module, "deconvolve_ome_zarr_to_zarr"),
+            ):
+                module.main()
+
+        self.assertEqual(psf_seed_calls[0]["ni"], 1.33333)
+        self.assertEqual(psf_seed_calls[0]["ns"], 1.33333)
+
     def test_psf_estimation_opens_ome_zarr_source_without_tiff_memmap(self):
         zarr_volume = FakeArray((2, 4, 4))
         zarr_calls = []
