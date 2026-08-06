@@ -40,7 +40,7 @@ from psf_estimation import (
     resolve_dxy,
     resolve_chunk_xy,
 )
-from psf_modes import generate_psf_seed
+from psf_modes import generate_psf_seed, load_psf_seed
 
 try:
     from ome_zarr_io import (
@@ -794,6 +794,10 @@ def main() -> None:
                         help="psfmodels PSF model.")
     parser.add_argument("--psf_mode", choices=("single", "light_sheet"), default="single",
                         help="Seed PSF mode: single detection PSF or light-sheet detection x rotated illumination PSF.")
+    parser.add_argument("--psf_seed_path", default="",
+                        help="Optional calibrated TIFF PSF seed; center-fitted to the configured PSF support.")
+    parser.add_argument("--fixed_psf_path", default="",
+                        help="Optional calibrated TIFF PSF used directly for final deconvolution.")
     parser.add_argument("--light_sheet_angle", type=float, default=90.0,
                         help="Degrees to rotate illumination PSF in Z/X for light_sheet PSF mode.")
     parser.add_argument("--camera_pixel_size", type=float, default=None,
@@ -867,73 +871,86 @@ def main() -> None:
         f"detection_na={detection_na}, ni={ni}, ns={ns}, psf_mode={args.psf_mode}"
     )
 
-    # Build the optical-model PSF seed. This is intentionally not accepted as
-    # the final deconvolution PSF because the measured blind estimates are much
-    # closer to the observed data.
-    psf_seed = generate_psf_seed(
-        psf_mode=args.psf_mode,
-        na=args.na,
-        detection_na=args.detection_na,
-        illumination_na=args.illumination_na,
-        wavelength=wavelength,
-        ni=ni,
-        ns=ns,
-        ni0=args.ni0,
-        tg=args.tg,
-        tg0=args.tg0,
-        ng=args.ng,
-        ng0=args.ng0,
-        ti0=args.ti0,
-        oversample_factor=args.oversample_factor,
-        psf_model=args.psf_model,
-        dxy=dxy,
-        dz=dz,
-        psf_size_z=args.psf_size_z,
-        psf_size_xy=args.psf_size_xy,
-        background=args.background,
-        light_sheet_angle=args.light_sheet_angle,
-    )
-    log_progress(
-        f"Using PSF seed mode={args.psf_mode}, shape={psf_seed.shape}, "
-        f"sum={float(psf_seed.sum()):.6g}"
-    )
-
-    psf_input_path = image_inputs[0]
-
-    log_progress(f"Running blind PSF estimation on first image volume: {psf_input_path}")
     psf_start = time.perf_counter()
-    psf = estimate_psf_from_chunks(
-        image_path=str(psf_input_path),
-        psf_seed=psf_seed,
-        n_iters=args.blind_iters,
-        blind_backend=args.blind_backend,
-        chunk_xy=args.chunk_xy,
-        pad_xy=args.pad_xy,
-        pad_z=args.pad_z,
-        script_dir=args.script_dir,
-        max_workers=args.blind_workers,
-        prefetch_chunks=args.prefetch_chunks,
-        vram_gb=args.vram_gb,
-        cache_dir=args.cache_dir,
-        use_cache=not args.no_psf_cache,
-        matlab_threads=args.matlab_threads,
-        matlab_workers=args.matlab_workers,
-        matlab_bin=args.matlab_bin,
-        matlab_timeout=args.matlab_timeout,
-        snr_weight_cap=args.snr_weight_cap,
-        blind_peak_normalization=args.blind_peak_normalization,
-        blind_peak_gamma_max=args.blind_peak_gamma_max,
-        blind_latent_update_period=args.blind_latent_update_period,
-        blind_z_slices=args.blind_z_slices,
-        blind_max_tiles=args.blind_max_tiles,
-        cupy_fft_engine=args.cupy_fft_engine,
-        adaptive_scout_iters=args.adaptive_scout_iters,
-        adaptive_keep_tiles=args.adaptive_keep_tiles,
-        tile_selection_strategy=args.tile_selection_strategy,
-        coarse_region_rows=args.coarse_region_rows,
-        coarse_region_columns=args.coarse_region_columns,
-        coarse_region_limit=args.coarse_region_limit,
-    )
+    psf_shape = (args.psf_size_z, args.psf_size_xy, args.psf_size_xy)
+    if args.fixed_psf_path:
+        psf = load_psf_seed(args.fixed_psf_path, psf_shape)
+        log_progress(
+            f"Loaded fixed PSF from {args.fixed_psf_path}; "
+            f"center-fitted shape={psf.shape}. Skipping blind PSF estimation."
+        )
+    else:
+        if args.psf_seed_path:
+            psf_seed = load_psf_seed(args.psf_seed_path, psf_shape)
+            log_progress(
+                f"Loaded calibrated PSF seed from {args.psf_seed_path}; "
+                f"center-fitted shape={psf_seed.shape}"
+            )
+        else:
+            psf_seed = generate_psf_seed(
+                psf_mode=args.psf_mode,
+                na=args.na,
+                detection_na=args.detection_na,
+                illumination_na=args.illumination_na,
+                wavelength=wavelength,
+                ni=ni,
+                ns=ns,
+                ni0=args.ni0,
+                tg=args.tg,
+                tg0=args.tg0,
+                ng=args.ng,
+                ng0=args.ng0,
+                ti0=args.ti0,
+                oversample_factor=args.oversample_factor,
+                psf_model=args.psf_model,
+                dxy=dxy,
+                dz=dz,
+                psf_size_z=args.psf_size_z,
+                psf_size_xy=args.psf_size_xy,
+                background=args.background,
+                light_sheet_angle=args.light_sheet_angle,
+            )
+        log_progress(
+            f"Using PSF seed mode={args.psf_mode}, shape={psf_seed.shape}, "
+            f"sum={float(psf_seed.sum()):.6g}"
+        )
+
+        psf_input_path = image_inputs[0]
+        log_progress(
+            f"Running blind PSF estimation on first image volume: {psf_input_path}"
+        )
+        psf = estimate_psf_from_chunks(
+            image_path=str(psf_input_path),
+            psf_seed=psf_seed,
+            n_iters=args.blind_iters,
+            blind_backend=args.blind_backend,
+            chunk_xy=args.chunk_xy,
+            pad_xy=args.pad_xy,
+            pad_z=args.pad_z,
+            script_dir=args.script_dir,
+            max_workers=args.blind_workers,
+            prefetch_chunks=args.prefetch_chunks,
+            vram_gb=args.vram_gb,
+            cache_dir=args.cache_dir,
+            use_cache=not args.no_psf_cache,
+            matlab_threads=args.matlab_threads,
+            matlab_workers=args.matlab_workers,
+            matlab_bin=args.matlab_bin,
+            matlab_timeout=args.matlab_timeout,
+            snr_weight_cap=args.snr_weight_cap,
+            blind_peak_normalization=args.blind_peak_normalization,
+            blind_peak_gamma_max=args.blind_peak_gamma_max,
+            blind_latent_update_period=args.blind_latent_update_period,
+            blind_z_slices=args.blind_z_slices,
+            blind_max_tiles=args.blind_max_tiles,
+            cupy_fft_engine=args.cupy_fft_engine,
+            adaptive_scout_iters=args.adaptive_scout_iters,
+            adaptive_keep_tiles=args.adaptive_keep_tiles,
+            tile_selection_strategy=args.tile_selection_strategy,
+            coarse_region_rows=args.coarse_region_rows,
+            coarse_region_columns=args.coarse_region_columns,
+            coarse_region_limit=args.coarse_region_limit,
+        )
     psf_save_path = image_dir / "estimated_psf.tif"
     psf_save_path = _write_tiff_near_input_or_cwd(psf_save_path, psf)
     published_psf_path = Path.cwd() / "estimated_psf.tif"

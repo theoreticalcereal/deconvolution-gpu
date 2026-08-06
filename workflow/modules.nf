@@ -122,6 +122,8 @@ process DECON {
     def oversample_factor_flag = flag('oversample_factor', params.oversample_factor)
     def psf_model_flag   = flag('psf_model', params.psf_model)
     def psf_mode_flag    = flag('psf_mode', params.psf_mode)
+    def psf_seed_path_flag = flag('psf_seed_path', params.psf_seed_path)
+    def fixed_psf_path_flag = flag('fixed_psf_path', params.fixed_psf_path)
     def light_sheet_angle_flag = flag('light_sheet_angle', params.light_sheet_angle)
     def camera_pixel_size_flag = flag('camera_pixel_size', params.camera_pixel_size)
     def magnification_flag = flag('magnification', params.magnification)
@@ -224,6 +226,8 @@ process DECON {
         ${dz_flag} \\
         ${psf_size_z_flag} \\
         ${psf_size_xy_flag} \\
+        ${psf_seed_path_flag} \\
+        ${fixed_psf_path_flag} \\
         ${blind_iters_flag} \\
         ${blind_backend_flag} \\
         ${chunk_xy_flag} \\

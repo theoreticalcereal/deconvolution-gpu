@@ -14,6 +14,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = ROOT / "workflow/scripts/decon_wrapper.py"
 PSF_SCRIPT_PATH = ROOT / "workflow/scripts/psf_estimation.py"
+PSF_MODES_PATH = ROOT / "workflow/scripts/psf_modes.py"
 WORKFLOW_CONTAINER_IMAGE = "git.biohpc.swmed.edu:5050/dean-lab/ctaslm2-deconvolution:0.1.2"
 
 
@@ -97,6 +98,7 @@ def load_decon_wrapper_with_fakes():
     )
     fake_psf_modes = types.SimpleNamespace(
         generate_psf_seed=lambda **kwargs: FakeArray((3, 3, 3)),
+        load_psf_seed=lambda path, shape: FakeArray(shape),
     )
 
     spec = importlib.util.spec_from_file_location("decon_wrapper", SCRIPT_PATH)
@@ -162,6 +164,16 @@ def load_psf_estimation_with_fakes(zarr_calls, zarr_volume):
 def load_psf_estimation():
     spec = importlib.util.spec_from_file_location(
         "psf_estimation_selection_test", PSF_SCRIPT_PATH
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_psf_modes():
+    spec = importlib.util.spec_from_file_location(
+        "psf_modes_external_seed_test", PSF_MODES_PATH
     )
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -362,6 +374,112 @@ class DeconvolutionWiringTest(unittest.TestCase):
         self.assertGreater(module._psf_shape_similarity(first, second), 0.9)
         self.assertLess(module._psf_shape_similarity(first, outlier), 0.1)
         np.testing.assert_allclose(scout_seed.sum(), 1.0, rtol=1e-6)
+
+    def test_adaptive_scout_refinement_continues_from_consensus_seed(self):
+        module = load_psf_estimation()
+        initial_seed = np.full((1, 1, 3), 1.0 / 3.0, dtype=np.float32)
+        first = np.array([[[0.9, 0.1, 0.0]]], dtype=np.float32)
+        second = np.array([[[0.8, 0.2, 0.0]]], dtype=np.float32)
+        final = np.array([[[0.7, 0.3, 0.0]]], dtype=np.float32)
+        origins = [(0, 0, 1, 1), (0, 1, 1, 2)]
+
+        with mock.patch.object(
+            module,
+            "_run_blind_tile_pass",
+            side_effect=[([first, second], [1.0, 1.0]), ([final], [1.0])],
+        ) as run_pass:
+            module._run_blind_tile_adaptive_cupyx_pass(
+                np.ones((1, 1, 2), dtype=np.float32),
+                initial_seed,
+                origins,
+                pad_xy=0,
+                pad_z=0,
+                n_iters=4,
+                script_dir=ROOT / "workflow/scripts",
+                max_workers=1,
+                prefetch_chunks=1,
+                matlab_workers=1,
+                matlab_threads=1,
+                matlab_bin="matlab",
+                matlab_timeout=1,
+                blind_peak_normalization="none",
+                blind_peak_gamma_max=2.5,
+                blind_latent_update_period=1,
+                snr_weight_cap=100.0,
+                cupy_pool_trim_bytes=None,
+                adaptive_scout_iters=2,
+                adaptive_keep_tiles=2,
+            )
+
+        expected_consensus = module._merge_weighted_psfs(
+            [first, second], [1.0, 1.0], 100.0
+        )
+        np.testing.assert_allclose(
+            run_pass.call_args_list[1].args[1], expected_consensus
+        )
+
+    def test_external_psf_seed_is_center_fitted_and_normalized(self):
+        from tifffile import imwrite
+
+        module = load_psf_modes()
+        source = np.arange(7 * 9 * 11, dtype=np.float32).reshape(7, 9, 11)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            seed_path = Path(tmpdir) / "calibrated_psf.tif"
+            imwrite(seed_path, source)
+            seed = module.load_psf_seed(seed_path, (5, 5, 5))
+
+        expected = source[1:6, 2:7, 3:8]
+        expected /= expected.sum()
+        self.assertEqual(seed.shape, (5, 5, 5))
+        self.assertEqual(seed.dtype, np.float32)
+        np.testing.assert_allclose(seed, expected, rtol=1e-6)
+        self.assertAlmostEqual(float(seed.sum()), 1.0, places=6)
+
+    def test_external_psf_seed_is_wired_through_workflow_and_comparison(self):
+        config_text = (
+            ROOT / "workflow/configs/nextflow.config"
+        ).read_text(encoding="utf-8")
+        modules_text = (ROOT / "workflow/modules.nf").read_text(encoding="utf-8")
+        wrapper_text = SCRIPT_PATH.read_text(encoding="utf-8")
+        runner_text = (
+            ROOT / "workflow/scripts/run_matlab_reference_comparison.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("psf_seed_path = ''", config_text)
+        self.assertIn(
+            "psf_seed_path_flag = flag('psf_seed_path', params.psf_seed_path)",
+            modules_text,
+        )
+        self.assertIn("${psf_seed_path_flag}", modules_text)
+        self.assertIn('parser.add_argument("--psf_seed_path"', wrapper_text)
+        self.assertIn("load_psf_seed(", wrapper_text)
+        self.assertIn("WF_PSF_SEED_PATH", runner_text)
+        self.assertIn('--psf_seed_path "${workflow_psf_seed_path}"', runner_text)
+
+    def test_fixed_psf_is_wired_as_a_blind_estimation_bypass(self):
+        config_text = (
+            ROOT / "workflow/configs/nextflow.config"
+        ).read_text(encoding="utf-8")
+        modules_text = (ROOT / "workflow/modules.nf").read_text(encoding="utf-8")
+        wrapper_text = SCRIPT_PATH.read_text(encoding="utf-8")
+        runner_text = (
+            ROOT / "workflow/scripts/run_matlab_reference_comparison.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("fixed_psf_path = ''", config_text)
+        self.assertIn(
+            "fixed_psf_path_flag = flag('fixed_psf_path', params.fixed_psf_path)",
+            modules_text,
+        )
+        self.assertIn("${fixed_psf_path_flag}", modules_text)
+        self.assertIn('parser.add_argument("--fixed_psf_path"', wrapper_text)
+        self.assertIn("if args.fixed_psf_path:", wrapper_text)
+        self.assertIn("Skipping blind PSF estimation", wrapper_text)
+        self.assertIn("WF_FIXED_PSF_PATH", runner_text)
+        self.assertIn("WF_DECON_ITERS", runner_text)
+        self.assertIn('--iter "${WF_DECON_ITERS}"', runner_text)
+        self.assertIn("REFERENCE_RUN_DIR", runner_text)
 
     def test_scout_parameters_keep_simple_astrocyte_surface_and_hidden_defaults(self):
         config_text = (ROOT / "workflow/configs/nextflow.config").read_text(encoding="utf-8")
