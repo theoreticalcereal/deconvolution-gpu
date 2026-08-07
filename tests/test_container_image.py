@@ -65,11 +65,11 @@ class DeconvolutionContainerImageTests(unittest.TestCase):
         for dependency in (
             "cuda-version=11.8",
             "cupy=13.6.0",
-            "cucim=23.06.00",
         ):
             self.assertIn(dependency, gpu_environment)
 
-        self.assertIn("rapidsai", gpu_environment)
+        self.assertNotIn("cucim", gpu_environment)
+        self.assertNotIn("rapidsai", gpu_environment)
         self.assertIn("nodefaults", environment)
         self.assertIn("nodefaults", gpu_environment)
         self.assertIn("readonly IMAGE=${REGISTRY}/${IMAGE_NAME}:${TAG}", build_script)
@@ -89,14 +89,13 @@ class DeconvolutionContainerImageTests(unittest.TestCase):
         self.assertIn("mamba list", build_script)
         self.assertIn("--explicit", build_script)
         self.assertIn("printf '@EXPLICIT\\n'", build_script)
-        self.assertIn(
-            "awk '/^(https?|file):\\/\\// && $0 !~ /\\/(pycudadecon|cudadecon)-/ { print }'",
-            build_script,
-        )
+        self.assertIn("(cucim|pycudadecon|cudadecon)-", build_script)
         self.assertIn('!= "@EXPLICIT"', build_script)
         self.assertIn("grep -q '/cupy-'", build_script)
-        self.assertIn("grep -q '/cucim-'", build_script)
-        self.assertIn("grep -Eq '/(pycudadecon|cudadecon)-'", build_script)
+        self.assertNotIn("! grep -q '/cucim-'", build_script)
+        self.assertIn(
+            "grep -Eq '/(cucim|pycudadecon|cudadecon)-'", build_script
+        )
         self.assertNotIn(
             "import numpy, scipy, numba, zarr, tifffile, dask, pycudadecon",
             build_script,
@@ -109,7 +108,9 @@ class DeconvolutionContainerImageTests(unittest.TestCase):
         self.assertNotIn("mamba env create", build_script)
         self.assertNotIn("mamba install", build_script)
         self.assertIn("from cupyx.scipy.signal import fftconvolve", build_script)
-        self.assertIn("from cucim.skimage.restoration import richardson_lucy", build_script)
+        self.assertIn("from cupy.fft import fftn, ifftn", build_script)
+        self.assertNotIn("import cucim", build_script)
+        self.assertNotIn("cucim.__version__", build_script)
         self.assertIn('numpy.__version__ == \\"1.26.4\\"', build_script)
         self.assertIn("import numpy, scipy, numba, zarr, tifffile, dask, pandas", build_script)
 
@@ -118,7 +119,8 @@ class DeconvolutionContainerImageTests(unittest.TestCase):
         self.assertIn("SINGULARITY_DOCKER_USERNAME", check_script)
         self.assertIn("singularity inspect", check_script)
         self.assertIn("from cupyx.scipy.signal import fftconvolve", check_script)
-        self.assertIn("from cucim.skimage.restoration import richardson_lucy", check_script)
+        self.assertIn("from cupy.fft import fftn, ifftn", check_script)
+        self.assertNotIn("import cucim", check_script)
         self.assertIn('numpy.__version__ == \\"1.26.4\\"', check_script)
         self.assertIn("import numpy, scipy, pandas", check_script)
         self.assertIn("MATLAB_BIND=${MATLAB_BIND:-/home1/apps/MATLAB:/home1/apps/MATLAB}", check_script)

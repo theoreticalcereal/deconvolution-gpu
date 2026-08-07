@@ -97,7 +97,8 @@ fi
 
 echo "Validating source environment: ${SOURCE_ENV_PREFIX}"
 "${SOURCE_ENV_PREFIX}/bin/python" -c "
-import cucim, cupy, numba, numpy, scipy, tifffile, zarr
+import cupy, numba, numpy, scipy, tifffile, zarr
+from cupy.fft import fftn, ifftn
 actual = {
     'numpy': numpy.__version__,
     'numba': numba.__version__,
@@ -105,7 +106,6 @@ actual = {
     'tifffile': tifffile.__version__,
     'zarr': zarr.__version__,
     'cupy': cupy.__version__,
-    'cucim': cucim.__version__,
 }
 expected = {
     'numpy': '1.26.4',
@@ -114,7 +114,6 @@ expected = {
     'tifffile': '2022.10.10',
     'zarr': '2.18.3',
     'cupy': '13.6.0',
-    'cucim': '23.06.00',
 }
 mismatches = [
     f'{name}: expected {expected[name]}, found {actual[name]}'
@@ -134,14 +133,13 @@ echo "Exporting explicit lock with Lmod mamba $(mamba --version)"
     --prefix "${SOURCE_ENV_PREFIX}" \
     --explicit \
     --md5 \
-    | awk '/^(https?|file):\/\// && $0 !~ /\/(pycudadecon|cudadecon)-/ { print }'
+    | awk '/^(https?|file):\/\// && $0 !~ /\/(cucim|pycudadecon|cudadecon)-/ { print }'
 } > "${LOCK_PATH}"
 
 if [[ $(head -n 1 "${LOCK_PATH}") != "@EXPLICIT" ]] \
   || [[ $(wc -l < "${LOCK_PATH}") -le 1 ]] \
   || ! grep -q '/cupy-' "${LOCK_PATH}" \
-  || ! grep -q '/cucim-' "${LOCK_PATH}" \
-  || grep -Eq '/(pycudadecon|cudadecon)-' "${LOCK_PATH}"; then
+  || grep -Eq '/(cucim|pycudadecon|cudadecon)-' "${LOCK_PATH}"; then
   echo "Failed to generate a valid explicit Conda lock file." >&2
   exit 4
 fi
@@ -164,7 +162,7 @@ if id -un >/dev/null 2>&1; then
   run_with_heartbeat "Singularity image verification" \
     singularity exec --nv "docker://${IMAGE}" sh -lc '
     export PATH=/opt/conda/envs/app/bin:$PATH
-    python -c "import numpy, scipy, numba, zarr, tifffile, dask, pandas, psfmodels, cupy, cucim; from cupyx.scipy.signal import fftconvolve; from cucim.skimage.restoration import richardson_lucy; assert numpy.__version__ == \"1.26.4\", numpy.__version__; print(\"deconvolution image imports ok\", \"numpy=\" + numpy.__version__, \"cupy=\" + cupy.__version__, \"cucim=\" + cucim.__version__)"
+    python -c "import numpy, scipy, numba, zarr, tifffile, dask, pandas, psfmodels, cupy; from cupyx.scipy.signal import fftconvolve; from cupy.fft import fftn, ifftn; assert numpy.__version__ == \"1.26.4\", numpy.__version__; print(\"deconvolution image imports ok\", \"numpy=\" + numpy.__version__, \"cupy=\" + cupy.__version__)"
   '
 else
   echo "WARNING: pushed ${IMAGE}, but skipped local Singularity verification because the current UID is not resolvable." >&2

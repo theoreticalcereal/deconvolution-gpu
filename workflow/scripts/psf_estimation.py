@@ -10,7 +10,7 @@
 #   Python collects all per-tile PSFs and returns an SNR-weighted PSF merge.
 #
 # The returned PSF is float32, normalised to sum=1, and saved as estimated_psf.tif
-# next to the input image for direct use by cuCIM.
+# next to the input image for direct use by the restoration stage.
 
 from __future__ import annotations
 
@@ -41,6 +41,7 @@ except ModuleNotFoundError:
 
 DEFAULT_CPU_THREADS = 32
 DEFAULT_SNR_WEIGHT_CAP = 100.0
+DEFAULT_BLIND_ITERS = 12
 DEFAULT_BLIND_MEMORY_MULTIPLIER = 28.0
 DEFAULT_BLIND_MEMORY_OVERHEAD_GB = 1.0
 DEFAULT_BLIND_Z_SLICES = 128
@@ -2036,7 +2037,7 @@ def main() -> None:
                         help="Where to save the merged PSF TIFF.")
     parser.add_argument("--blind_backend", default=DEFAULT_BLIND_BACKEND, choices=("matlab", "cupy", "scout", "cupyx"),
                         help="Backend for blind estimation: cupy (default) or matlab. Legacy scout/cupyx values select cupy with that CuPy mode.")
-    parser.add_argument("--n_iters",    type=int,   default=10)
+    parser.add_argument("--n_iters",    type=int,   default=DEFAULT_BLIND_ITERS)
     parser.add_argument("--chunk_xy",   type=int,   default=DEFAULT_BLIND_CHUNK_XY,
                         help="XY tile size. <=0 auto-sizes from available VRAM.")
     parser.add_argument("--blind_max_tiles", type=int, default=DEFAULT_BLIND_MAX_TILES,
