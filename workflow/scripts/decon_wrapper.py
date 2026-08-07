@@ -7,9 +7,8 @@
 #   recovered per-chunk blind PSFs with SNR weighting and save estimated_psf.tif.
 #
 # Deconvolution:
-#   cuCIM Richardson-Lucy processes each volume as full-Z
-#   XY chunks using map_overlap.  The requested chunk_xy is treated as the
-#   core tile size; <=0 auto-sizes from available VRAM.
+#   Petakit-compatible accelerated Richardson-Lucy runs as one whole-volume
+#   CuPy FFT when VRAM permits, with PSF-sized 3-D overlap as a fallback.
 
 from __future__ import annotations
 
@@ -25,10 +24,11 @@ import dask.array as da
 import numpy as np
 from tifffile import imwrite
 
-from blind_rl import deconvolve_with_cucim
+from petakit_rl import restore_uint16_cupy
 
 from psf_estimation import (
     DEFAULT_BLIND_CHUNK_XY,
+    DEFAULT_BLIND_ITERS,
     DEFAULT_BLIND_LATENT_UPDATE_PERIOD,
     DEFAULT_BLIND_MAX_TILES,
     DEFAULT_BLIND_Z_SLICES,
@@ -259,12 +259,11 @@ def _decon_chunk(
     chunk: np.ndarray,
     psf: np.ndarray,
     n_iters: int,
+    background: float,
     total_chunks: int,
     block_info: dict | None = None,
 ) -> np.ndarray:
-    """
-    Process one spatial chunk with cuCIM Richardson-Lucy.
-    """
+    """Process one spatial chunk with Petakit-compatible CuPy RL."""
     _, chunk_label = _chunk_progress(block_info, total_chunks)
     if chunk.size == 0:
         return chunk
@@ -275,7 +274,12 @@ def _decon_chunk(
     )
 
     start = time.perf_counter()
-    result = deconvolve_with_cucim(chunk, psf, n_iters)
+    result = restore_uint16_cupy(
+        chunk,
+        psf,
+        n_iters,
+        background=background,
+    )
     elapsed = time.perf_counter() - start
     avg_iter = elapsed / n_iters if n_iters > 0 else elapsed
 
@@ -285,56 +289,114 @@ def _decon_chunk(
         f"avg_iteration_time={_format_seconds(avg_iter)}",
         flush=True,
     )
-    output = np.clip(result, 0, 65535).astype(np.uint16)
-    return _center_crop_or_pad_to_shape(output, chunk.shape)
-
-
-def _match_input_intensity_range(output: np.ndarray, input_volume: np.ndarray) -> np.ndarray:
-    """Map deconvolved output to the original TIFF intensity range."""
-    in_min = float(np.min(input_volume))
-    in_max = float(np.max(input_volume))
-    out_min = float(np.min(output))
-    out_max = float(np.max(output))
-    dtype_max = float(np.iinfo(np.uint16).max)
-
-    if not np.isfinite([in_min, in_max, out_min, out_max]).all():
-        raise ValueError("Cannot rescale deconvolution output with non-finite intensity bounds")
-
-    if out_max > out_min and in_max > in_min:
-        scaled = output.astype(np.float32, copy=False)
-        scaled = (scaled - out_min) / (out_max - out_min)
-        scaled = scaled * (in_max - in_min) + in_min
-    else:
-        scaled = output
-
-    return np.clip(np.rint(scaled), 0, dtype_max).astype(np.uint16)
-
-
-def _match_block_intensity_range(
-    block: np.ndarray,
-    input_min: float,
-    input_max: float,
-    output_min: float,
-    output_max: float,
-) -> np.ndarray:
-    dtype_max = float(np.iinfo(np.uint16).max)
-    if output_max > output_min and input_max > input_min:
-        scaled = block.astype(np.float32, copy=False)
-        scaled = (scaled - output_min) / (output_max - output_min)
-        scaled = scaled * (input_max - input_min) + input_min
-    else:
-        scaled = block
-    return np.clip(np.rint(scaled), 0, dtype_max).astype(np.uint16)
+    return _center_crop_or_pad_to_shape(result, chunk.shape)
 
 
 # ---------------------------------------------------------------------------
 # Per-TIFF deconvolution
 # ---------------------------------------------------------------------------
 
-def _psf_overlap_xy(psf: np.ndarray) -> int:
-    """Use a moderate PSF-support halo at chunk boundaries."""
-    psf_xy = max(psf.shape[-2:])
-    return min(48, max(16, int(np.ceil(psf_xy / 4))))
+DECON_WORKSPACE_BYTES_PER_VOXEL = 80.0
+
+
+def _psf_halo(psf_shape: tuple[int, int, int]) -> tuple[int, int, int]:
+    """Return Petakit's large-file border size for each PSF axis."""
+    if len(psf_shape) != 3 or any(int(size) <= 0 for size in psf_shape):
+        raise ValueError(f"PSF shape must contain three positive axes, got {psf_shape}")
+    return tuple((int(size) + 11) // 2 for size in psf_shape)
+
+
+def _available_vram_bytes(vram_gb: float | None) -> int | None:
+    if vram_gb and vram_gb > 0:
+        return int(vram_gb * (1024 ** 3))
+    return detect_vram_bytes()
+
+
+def _whole_volume_fits(
+    volume_shape: tuple[int, int, int],
+    vram_gb: float | None,
+    safety_fraction: float = 0.65,
+) -> bool:
+    available = _available_vram_bytes(vram_gb)
+    if not available:
+        return False
+    estimated = float(np.prod(volume_shape)) * DECON_WORKSPACE_BYTES_PER_VOXEL
+    return estimated <= available * safety_fraction
+
+
+def _expanded_chunk_shape(
+    core_shape: tuple[int, int, int],
+    volume_shape: tuple[int, int, int],
+    halo: tuple[int, int, int],
+) -> tuple[int, int, int]:
+    return tuple(
+        min(int(volume), int(core) + 2 * int(depth))
+        for core, volume, depth in zip(core_shape, volume_shape, halo)
+    )
+
+
+def _fit_core_chunks_to_vram(
+    core_shape: tuple[int, int, int],
+    volume_shape: tuple[int, int, int],
+    halo: tuple[int, int, int],
+    available_bytes: int,
+    safety_fraction: float = 0.55,
+) -> tuple[int, int, int]:
+    """Shrink core chunks until their halo-expanded FFT domain fits VRAM."""
+    max_voxels = int(
+        int(available_bytes) * safety_fraction / DECON_WORKSPACE_BYTES_PER_VOXEL
+    )
+    volume_shape = tuple(int(size) for size in volume_shape)
+    halo = tuple(int(size) for size in halo)
+    minimum = [
+        min(volume, max(1, depth))
+        for volume, depth in zip(volume_shape, halo)
+    ]
+    core = [
+        max(minimum[axis], min(int(size), volume_shape[axis]))
+        for axis, size in enumerate(core_shape)
+    ]
+
+    while np.prod(_expanded_chunk_shape(tuple(core), volume_shape, halo)) > max_voxels:
+        reducible = [
+            axis for axis, size in enumerate(core) if size > minimum[axis]
+        ]
+        if not reducible:
+            raise MemoryError(
+                "PSF halo-compatible minimum chunk exceeds the configured VRAM budget"
+            )
+        axis = max(
+            reducible,
+            key=lambda item: _expanded_chunk_shape(
+                tuple(core), volume_shape, halo
+            )[item],
+        )
+        reduced = max(minimum[axis], int(core[axis] * 0.8))
+        if axis in (1, 2) and reduced >= 32:
+            reduced = max(32, (reduced // 32) * 32)
+        if reduced >= core[axis]:
+            reduced = max(minimum[axis], core[axis] - 1)
+        core[axis] = reduced
+
+    return tuple(core)
+
+
+def _balanced_axis_chunks(
+    axis_size: int, target_size: int, minimum_size: int
+) -> tuple[int, ...]:
+    """Partition an axis without a remainder smaller than the overlap depth."""
+    axis_size = int(axis_size)
+    target_size = max(1, int(target_size))
+    minimum_size = max(1, min(axis_size, int(minimum_size)))
+    chunk_count = min(
+        math.ceil(axis_size / target_size),
+        max(1, axis_size // minimum_size),
+    )
+    base, remainder = divmod(axis_size, chunk_count)
+    return tuple(
+        base + (1 if index < remainder else 0)
+        for index in range(chunk_count)
+    )
 
 
 def _auto_decon_max_xy(
@@ -346,17 +408,14 @@ def _auto_decon_max_xy(
 ) -> int:
     nz, ny, nx = volume_shape
     image_max_xy = min(ny, nx)
-    if nz > 4:
-        return min(1024, image_max_xy)
-
-    vram_bytes = int(vram_gb * (1024 ** 3)) if vram_gb and vram_gb > 0 else detect_vram_bytes()
+    vram_bytes = _available_vram_bytes(vram_gb)
     if not vram_bytes:
         return min(fallback_xy, image_max_xy)
 
     workers = max(1, workers)
     bytes_per_voxel = np.dtype(dtype).itemsize
-    target_bytes = vram_bytes * 0.05 / workers
-    memory_multiplier = 2048.0
+    target_bytes = vram_bytes * 0.55 / workers
+    memory_multiplier = DECON_WORKSPACE_BYTES_PER_VOXEL / bytes_per_voxel
     denom = max(1, nz) * bytes_per_voxel * memory_multiplier
     max_xy = int(math.sqrt(max(1.0, target_bytes / denom)))
     max_xy = max(128, (max_xy // 32) * 32)
@@ -368,6 +427,7 @@ def _build_deconvolution_graph(
     image_name: str,
     psf: np.ndarray,
     n_iters: int,
+    background: float = 0.0,
     chunk_xy: int = 0,
     vram_gb: float | None = None,
     decon_workers: int = 1,
@@ -376,39 +436,84 @@ def _build_deconvolution_graph(
     """
     Build a lazy deconvolution graph for a single 3-D volume.
 
-    Chunks are full-Z XY tiles with PSF-dependent XY overlap so tile boundaries
-    are invisible in the merged output.  Z is never split.  `chunk_xy` is the
-    core tile size; <=0 chooses a VRAM-aware size.
+    Whole volumes use one unpadded block. Larger volumes use PSF-derived 3-D
+    overlap. `chunk_xy` is the core XY tile size; <=0 is VRAM-aware.
     """
     if volume.ndim != 3:
         raise ValueError(f"Expected 3-D volume, got shape {volume.shape}")
 
     original_shape = volume.shape
-    overlap_xy = overlap_xy if overlap_xy > 0 else _psf_overlap_xy(psf)
-    overlap_xy = min(overlap_xy, max(1, (min(volume.shape[1:]) - 1) // 2))
+    halo_z, halo_y, halo_x = _psf_halo(tuple(int(size) for size in psf.shape))
+    if overlap_xy > 0:
+        halo_y = max(halo_y, int(overlap_xy))
+        halo_x = max(halo_x, int(overlap_xy))
     if decon_workers != 1:
         log_progress(
-            f"  cuCIM uses one GPU worker per allocation; "
+            f"  CuPy restoration uses one GPU worker per allocation; "
             f"clamping decon_workers={decon_workers} to 1"
         )
     decon_workers = 1
-    core_chunk_xy = resolve_chunk_xy(
-        chunk_xy,
-        volume.shape,
-        volume.dtype,
-        overlap_xy=overlap_xy,
-        vram_gb=vram_gb,
-        workers=decon_workers,
-        min_xy=max(128, overlap_xy * 2),
-        max_xy=_auto_decon_max_xy(volume.shape, volume.dtype, decon_workers, vram_gb),
-    )
+    nz, ny, nx = (int(size) for size in volume.shape)
+    halo_z = min(halo_z, max(0, nz - 1))
+    halo_y = min(halo_y, max(0, ny - 1))
+    halo_x = min(halo_x, max(0, nx - 1))
+    if chunk_xy <= 0 and _whole_volume_fits((nz, ny, nx), vram_gb):
+        core_chunk_xy = max(ny, nx)
+    else:
+        core_chunk_xy = resolve_chunk_xy(
+            chunk_xy,
+            volume.shape,
+            volume.dtype,
+            overlap_xy=max(halo_y, halo_x),
+            vram_gb=vram_gb,
+            workers=decon_workers,
+            safety_fraction=0.55,
+            memory_multiplier=(
+                DECON_WORKSPACE_BYTES_PER_VOXEL / np.dtype(volume.dtype).itemsize
+            ),
+            min_xy=max(128, halo_y * 2, halo_x * 2),
+            max_xy=_auto_decon_max_xy(
+                volume.shape, volume.dtype, decon_workers, vram_gb
+            ),
+        )
     if core_chunk_xy <= 0:
         raise ValueError(f"Resolved decon chunk size must be positive, got {core_chunk_xy}")
 
-    nz, ny, nx = volume.shape
+    core_chunk_xy = min(core_chunk_xy, max(ny, nx))
+    chunk_y = min(core_chunk_xy, ny)
+    chunk_x = min(core_chunk_xy, nx)
+    chunk_z = nz
+    available = _available_vram_bytes(vram_gb)
+    if available:
+        chunk_z, chunk_y, chunk_x = _fit_core_chunks_to_vram(
+            (chunk_z, chunk_y, chunk_x),
+            (nz, ny, nx),
+            (halo_z, halo_y, halo_x),
+            available,
+        )
+
+    chunk_divisions = tuple(
+        _balanced_axis_chunks(axis, core, max(1, depth))
+        for axis, core, depth in zip(
+            (nz, ny, nx),
+            (chunk_z, chunk_y, chunk_x),
+            (halo_z, halo_y, halo_x),
+        )
+    )
+    largest_core = tuple(max(chunks) for chunks in chunk_divisions)
+    if available:
+        expanded = _expanded_chunk_shape(
+            largest_core, (nz, ny, nx), (halo_z, halo_y, halo_x)
+        )
+        estimated = np.prod(expanded) * DECON_WORKSPACE_BYTES_PER_VOXEL
+        if estimated > available * 0.55:
+            raise MemoryError(
+                "Halo-compatible Dask chunks exceed the configured VRAM budget"
+            )
+
     lazy = da.from_array(
         volume,
-        chunks=(nz, core_chunk_xy, core_chunk_xy),
+        chunks=chunk_divisions,
         asarray=False,
         lock=False,
     )
@@ -417,19 +522,33 @@ def _build_deconvolution_graph(
     log_progress(f"Deconvolving {image_name}: shape={original_shape}, dtype={volume.dtype}")
     log_progress(
         f"  Deconvolution chunks: total={total_chunks}, "
-        f"core_chunk_shape=(z={nz}, y={core_chunk_xy}, x={core_chunk_xy}), "
-        f"psf_overlap_xy={overlap_xy}, image_xy=({ny}, {nx}), "
+        f"max_core_chunk_shape={largest_core}, "
+        f"psf_halo=(z={halo_z}, y={halo_y}, x={halo_x}), "
+        f"image_shape=({nz}, {ny}, {nx}), "
         f"iterations_per_chunk={n_iters}, workers={decon_workers}"
     )
 
-    return lazy.map_overlap(
+    common_kwargs = {
+        "dtype": np.uint16,
+        "psf": psf,
+        "n_iters": n_iters,
+        "background": background,
+        "total_chunks": total_chunks,
+    }
+    if total_chunks == 1:
+        return da.map_blocks(
+            _decon_chunk,
+            lazy,
+            **common_kwargs,
+        ), decon_workers
+
+    return da.map_overlap(
         _decon_chunk,
-        depth={0: 0, 1: overlap_xy, 2: overlap_xy},
-        boundary="reflect",
-        dtype=np.uint16,
-        psf=psf,
-        n_iters=n_iters,
-        total_chunks=total_chunks,
+        lazy,
+        depth={0: halo_z, 1: halo_y, 2: halo_x},
+        boundary="none",
+        allow_rechunk=False,
+        **common_kwargs,
     ), decon_workers
 
 
@@ -447,6 +566,7 @@ def deconvolve_volume(
     wavelength: float,
     na: float,
     ni: float,
+    background: float = 0.0,
     chunk_xy: int = 0,
     vram_gb: float | None = None,
     decon_workers: int = 1,
@@ -458,6 +578,7 @@ def deconvolve_volume(
         image_name,
         psf,
         n_iters,
+        background=background,
         chunk_xy=chunk_xy,
         vram_gb=vram_gb,
         decon_workers=decon_workers,
@@ -465,18 +586,10 @@ def deconvolve_volume(
     )
     scheduler = _deconvolution_scheduler(decon_workers)
     log_progress(
-        f"Computing cuCIM deconvolution graph for {image_name}: "
+        f"Computing Petakit-compatible CuPy deconvolution graph for {image_name}: "
         f"scheduler={scheduler}, workers={decon_workers}"
     )
-    output = processed.compute(scheduler=scheduler, num_workers=decon_workers)
-
-    output = _match_input_intensity_range(output, volume)
-    log_progress(
-        f"  Matched deconvolution intensity range to input: "
-        f"min={int(output.min())}, max={int(output.max())}"
-    )
-
-    return output
+    return processed.compute(scheduler=scheduler, num_workers=decon_workers)
 
 
 def deconvolve_tiff(
@@ -488,6 +601,7 @@ def deconvolve_tiff(
     wavelength: float,
     na: float,
     ni: float,
+    background: float = 0.0,
     chunk_xy: int = 0,
     vram_gb: float | None = None,
     decon_workers: int = 1,
@@ -505,6 +619,7 @@ def deconvolve_tiff(
         wavelength,
         na,
         ni,
+        background=background,
         chunk_xy=chunk_xy,
         vram_gb=vram_gb,
         decon_workers=decon_workers,
@@ -521,6 +636,7 @@ def deconvolve_ome_zarr(
     wavelength: float,
     na: float,
     ni: float,
+    background: float = 0.0,
     chunk_xy: int = 0,
     vram_gb: float | None = None,
     decon_workers: int = 1,
@@ -538,15 +654,12 @@ def deconvolve_ome_zarr(
         wavelength,
         na,
         ni,
+        background=background,
         chunk_xy=chunk_xy,
         vram_gb=vram_gb,
         decon_workers=decon_workers,
         overlap_xy=overlap_xy,
     )
-
-
-def _zarr_chunks_from_dask(array: da.Array) -> tuple[int, int, int]:
-    return tuple(int(axis_chunks[0]) for axis_chunks in array.chunks)
 
 
 def _default_output_chunks(shape: tuple[int, int, int]) -> tuple[int, int, int]:
@@ -574,6 +687,7 @@ def deconvolve_ome_zarr_to_zarr(
     wavelength: float,
     na: float,
     ni: float,
+    background: float = 0.0,
     chunk_xy: int = 0,
     vram_gb: float | None = None,
     decon_workers: int = 1,
@@ -592,84 +706,26 @@ def deconvolve_ome_zarr_to_zarr(
         image_path.name,
         psf,
         n_iters,
+        background=background,
         chunk_xy=chunk_xy,
         vram_gb=vram_gb,
         decon_workers=decon_workers,
         overlap_xy=overlap_xy,
     )
     scheduler = _deconvolution_scheduler(decon_workers)
-    try:
-        import zarr
-    except ImportError as exc:
-        raise RuntimeError(
-            "Missing required dependency 'zarr' for streaming OME-Zarr deconvolution"
-        ) from exc
-
-    with tempfile.TemporaryDirectory(prefix=".decon_raw_", dir=Path.cwd()) as temp_dir:
-        raw_path = Path(temp_dir) / "raw.zarr"
-        raw_chunks = _zarr_chunks_from_dask(processed)
-        log_progress(
-            "Streaming raw cuCIM deconvolution chunks to temporary Zarr: "
-            f"path={raw_path}, shape={processed.shape}, chunks={raw_chunks}"
-        )
-        raw_array = zarr.open(
-            str(raw_path),
-            mode="w",
-            shape=tuple(int(axis) for axis in processed.shape),
-            chunks=raw_chunks,
-            dtype=np.uint16,
-            compressor=None,
-        )
-        da.store(processed, raw_array, lock=False, compute=False).compute(
-            scheduler=scheduler,
-            num_workers=decon_workers,
-        )
-
-        raw_lazy = da.from_array(
-            raw_array, chunks=processed.chunks, asarray=False, lock=False
-        )
-        input_lazy = da.from_array(
-            volume, chunks=processed.chunks, asarray=False, lock=False
-        )
-        input_min, input_max, output_min, output_max = da.compute(
-            input_lazy.min(),
-            input_lazy.max(),
-            raw_lazy.min(),
-            raw_lazy.max(),
-            scheduler="threads",
-            num_workers=max(1, decon_workers),
-        )
-        input_min = float(input_min)
-        input_max = float(input_max)
-        output_min = float(output_min)
-        output_max = float(output_max)
-        log_progress(
-            "  Streaming intensity match: "
-            f"input=({input_min:.6g}, {input_max:.6g}), "
-            f"raw_output=({output_min:.6g}, {output_max:.6g})"
-        )
-
-        final_array = create_ome_zarr_array(
-            output_path,
-            shape=tuple(int(axis) for axis in volume.shape),
-            dtype=np.uint16,
-            chunks=_default_output_chunks(tuple(int(axis) for axis in volume.shape)),
-            layer_name=image_stem(output_path),
-            max_downsample=int(max_downsample),
-        )
-        scaled = raw_lazy.map_blocks(
-            _match_block_intensity_range,
-            dtype=np.uint16,
-            input_min=input_min,
-            input_max=input_max,
-            output_min=output_min,
-            output_max=output_max,
-        )
-        log_progress(f"Streaming scaled deconvolution output to OME-Zarr: {output_path}")
-        da.store(scaled, final_array, lock=False, compute=False).compute(
-            scheduler="threads",
-            num_workers=max(1, decon_workers),
-        )
+    final_array = create_ome_zarr_array(
+        output_path,
+        shape=tuple(int(axis) for axis in volume.shape),
+        dtype=np.uint16,
+        chunks=_default_output_chunks(tuple(int(axis) for axis in volume.shape)),
+        layer_name=image_stem(output_path),
+        max_downsample=int(max_downsample),
+    )
+    log_progress(f"Streaming deconvolution output to OME-Zarr: {output_path}")
+    da.store(processed, final_array, lock=False, compute=False).compute(
+        scheduler=scheduler,
+        num_workers=max(1, decon_workers),
+    )
 
     write_downsampled_pyramid(output_path, max_downsample=int(max_downsample))
     log_progress(f"Finished streaming OME-Zarr deconvolution output: {output_path.resolve()}")
@@ -693,7 +749,7 @@ def main() -> None:
                         help="Final output representation requested by the workflow.")
 
     # Blind estimation options
-    parser.add_argument("--blind_iters", type=int, default=10,
+    parser.add_argument("--blind_iters", type=int, default=DEFAULT_BLIND_ITERS,
                         help="deconvblind iterations per chunk during PSF estimation.")
     parser.add_argument("--blind_backend", default="cupy", choices=("matlab", "cupy", "scout", "cupyx"),
                         help="Backend for blind PSF estimation: 'cupy' or 'matlab'. Legacy scout/cupyx values select cupy with that CuPy mode.")
@@ -982,6 +1038,7 @@ def main() -> None:
                 wavelength=wavelength,
                 na=detection_na,
                 ni=ni,
+                background=args.background,
                 chunk_xy=args.decon_chunk_xy,
                 vram_gb=args.vram_gb,
                 decon_workers=args.decon_workers,
@@ -998,6 +1055,7 @@ def main() -> None:
                 wavelength=wavelength,
                 na=detection_na,
                 ni=ni,
+                background=args.background,
                 chunk_xy=args.decon_chunk_xy,
                 vram_gb=args.vram_gb,
                 decon_workers=args.decon_workers,

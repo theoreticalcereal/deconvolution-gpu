@@ -43,7 +43,7 @@ echo "Singularity can inspect ${CONTAINER_URI}"
 echo "Checking Python deconvolution dependencies inside ${CONTAINER_URI}"
 singularity exec --nv "${CONTAINER_URI}" sh -lc '
   export PATH=/opt/conda/envs/app/bin:$PATH
-  python -c "import numpy, scipy, pandas, cupy, cucim; from cupyx.scipy.signal import fftconvolve; from cucim.skimage.restoration import richardson_lucy; assert numpy.__version__ == \"1.26.4\", numpy.__version__; print(\"GPU deconvolution dependencies available\", \"numpy=\" + numpy.__version__, \"cupy=\" + cupy.__version__, \"cucim=\" + cucim.__version__)"
+  python -c "import numpy, scipy, pandas, cupy; from cupyx.scipy.signal import fftconvolve; from cupy.fft import fftn, ifftn; assert numpy.__version__ == \"1.26.4\", numpy.__version__; print(\"GPU deconvolution dependencies available\", \"numpy=\" + numpy.__version__, \"cupy=\" + cupy.__version__)"
 '
 echo "Python deconvolution dependencies are visible inside ${CONTAINER_URI}"
 

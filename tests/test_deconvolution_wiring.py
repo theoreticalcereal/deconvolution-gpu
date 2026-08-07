@@ -67,6 +67,7 @@ def load_decon_wrapper_with_fakes():
         asarray=lambda array: array,
         clip=lambda array, *args, **kwargs: array,
         pad=fake_pad,
+        prod=np.prod,
     )
     fake_dask_array = types.SimpleNamespace(
         from_array=lambda array, chunks=None: array,
@@ -76,8 +77,12 @@ def load_decon_wrapper_with_fakes():
     fake_blind_rl = types.SimpleNamespace(
         deconvolve_with_cucim=lambda chunk, psf, n_iters: chunk,
     )
+    fake_petakit_rl = types.SimpleNamespace(
+        restore_uint16_cupy=lambda chunk, psf, n_iters, **kwargs: chunk,
+    )
     fake_tifffile = types.SimpleNamespace(imwrite=lambda *args, **kwargs: None)
     fake_psf_estimation = types.SimpleNamespace(
+        DEFAULT_BLIND_ITERS=12,
         DEFAULT_BLIND_CHUNK_XY=256,
         DEFAULT_BLIND_LATENT_UPDATE_PERIOD=2,
         DEFAULT_BLIND_MAX_TILES=16,
@@ -110,6 +115,7 @@ def load_decon_wrapper_with_fakes():
             "dask": fake_dask,
             "dask.array": fake_dask_array,
             "blind_rl": fake_blind_rl,
+            "petakit_rl": fake_petakit_rl,
             "tifffile": fake_tifffile,
             "psf_estimation": fake_psf_estimation,
             "psf_modes": fake_psf_modes,
@@ -117,6 +123,19 @@ def load_decon_wrapper_with_fakes():
     ):
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
+    return module
+
+
+def load_decon_wrapper():
+    script_dir = str(SCRIPT_PATH.parent)
+    if script_dir not in sys.path:
+        sys.path.insert(0, script_dir)
+    spec = importlib.util.spec_from_file_location(
+        "decon_wrapper_integration_test", SCRIPT_PATH
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
     return module
 
 
@@ -182,6 +201,14 @@ def load_psf_modes():
 
 
 class DeconvolutionWiringTest(unittest.TestCase):
+    def test_blind_psf_refinement_uses_tuned_shared_default(self):
+        wrapper_text = SCRIPT_PATH.read_text(encoding="utf-8")
+        psf_text = PSF_SCRIPT_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("DEFAULT_BLIND_ITERS = 12", psf_text)
+        self.assertIn("default=DEFAULT_BLIND_ITERS", psf_text)
+        self.assertIn("default=DEFAULT_BLIND_ITERS", wrapper_text)
+
     def test_decon_output_contract_accepts_direct_tiff_or_ozx(self):
         main_text = (ROOT / "workflow/main.nf").read_text(encoding="utf-8")
         modules_text = (ROOT / "workflow/modules.nf").read_text(encoding="utf-8")
@@ -731,21 +758,137 @@ class DeconvolutionWiringTest(unittest.TestCase):
         self.assertEqual(selected, tiles)
         snr_weight.assert_not_called()
 
-    def test_decon_chunk_returns_original_shape_when_cucim_output_is_smaller(self):
+    def test_decon_chunk_forwards_background_and_returns_original_shape(self):
         module = load_decon_wrapper_with_fakes()
+        calls = []
+
+        def fake_restore(chunk, psf, n_iters, **kwargs):
+            calls.append(kwargs)
+            return FakeArray((540, 373, 373))
+
         with mock.patch.object(
             module,
-            "deconvolve_with_cucim",
-            side_effect=lambda *args, **kwargs: FakeArray((540, 373, 373)),
+            "restore_uint16_cupy",
+            side_effect=fake_restore,
         ):
             result = module._decon_chunk(
                 FakeArray((550, 384, 384)),
                 psf=FakeArray((31, 31, 31)),
                 n_iters=10,
+                background=17.0,
                 total_chunks=1,
             )
 
         self.assertEqual(result.shape, (550, 384, 384))
+        self.assertEqual(calls, [{"background": 17.0}])
+
+    def test_psf_halo_matches_petakit_large_file_convention_on_all_axes(self):
+        module = load_decon_wrapper_with_fakes()
+
+        self.assertEqual(module._psf_halo((101, 61, 31)), (56, 36, 21))
+
+    def test_deconvolution_source_bypasses_overlap_for_one_block(self):
+        source = SCRIPT_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("if total_chunks == 1:", source)
+        self.assertIn("da.map_blocks(", source)
+        self.assertIn("depth={0: halo_z, 1: halo_y, 2: halo_x}", source)
+        self.assertIn('boundary="none"', source)
+        self.assertIn("allow_rechunk=False", source)
+
+    def test_balanced_chunks_have_no_remainder_smaller_than_halo(self):
+        module = load_decon_wrapper_with_fakes()
+
+        chunks = module._balanced_axis_chunks(500, 256, 36)
+
+        self.assertEqual(sum(chunks), 500)
+        self.assertLessEqual(max(chunks), 256)
+        self.assertGreaterEqual(min(chunks), 36)
+        self.assertEqual(module._balanced_axis_chunks(8, 4, 7), (8,))
+
+    def test_vram_chunk_fit_accounts_for_expanded_halo(self):
+        module = load_decon_wrapper_with_fakes()
+        available = int(80 * 600_000 / 0.55)
+
+        core = module._fit_core_chunks_to_vram(
+            (100, 256, 256),
+            (100, 512, 512),
+            (20, 30, 30),
+            available,
+        )
+        expanded = module._expanded_chunk_shape(
+            core, (100, 512, 512), (20, 30, 30)
+        )
+
+        self.assertLessEqual(np.prod(expanded) * 80, available * 0.55)
+        self.assertLess(core[1], 256)
+
+    def test_deconvolve_volume_returns_kernel_intensities_without_remapping(self):
+        module = load_decon_wrapper_with_fakes()
+        expected = FakeArray((2, 4, 4))
+
+        class FakeProcessed:
+            def compute(self, **kwargs):
+                return expected
+
+        with mock.patch.object(
+            module,
+            "_build_deconvolution_graph",
+            return_value=(FakeProcessed(), 1),
+        ):
+            actual = module.deconvolve_volume(
+                FakeArray((2, 4, 4)),
+                "sample.tif",
+                FakeArray((1, 1, 1)),
+                3,
+                0.2,
+                0.1,
+                0.5,
+                1.0,
+                1.33,
+                background=9.0,
+            )
+
+        self.assertIs(actual, expected)
+
+    def test_restoration_path_no_longer_references_cucim_or_range_matching(self):
+        source = SCRIPT_PATH.read_text(encoding="utf-8")
+
+        self.assertNotIn("deconvolve_with_cucim", source)
+        self.assertNotIn("_match_input_intensity_range", source)
+        self.assertNotIn("_match_block_intensity_range", source)
+        self.assertIn("restore_uint16_cupy", source)
+
+    def test_chunk_fallback_clamps_halo_to_small_volume_axes(self):
+        module = load_decon_wrapper()
+        volume = np.arange(5 * 8 * 8, dtype=np.uint16).reshape(5, 8, 8)
+        psf = np.ones((3, 3, 3), dtype=np.float32)
+
+        with (
+            mock.patch.object(module, "detect_vram_bytes", return_value=None),
+            mock.patch.object(
+                module,
+                "restore_uint16_cupy",
+                side_effect=lambda chunk, psf, n_iters, **kwargs: np.asarray(
+                    chunk, dtype=np.uint16
+                ),
+            ),
+        ):
+            actual = module.deconvolve_volume(
+                volume,
+                "small.tif",
+                psf,
+                1,
+                0.2,
+                0.1,
+                0.5,
+                1.0,
+                1.33,
+                background=2.0,
+                chunk_xy=4,
+            )
+
+        np.testing.assert_array_equal(actual, volume)
 
     def test_main_wires_deconvolution_without_deskew_or_visualization(self):
         main_text = (ROOT / "workflow/main.nf").read_text(encoding="utf-8")

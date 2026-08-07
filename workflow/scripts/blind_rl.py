@@ -247,55 +247,6 @@ def estimate_blind_psf_cupy(
     )
 
 
-def deconvolve_with_cucim(
-    observed: Array, psf: Array, n_iters: int, *, device_id: int = 0
-) -> np.ndarray:
-    """Restore an image with cuCIM using the estimated PSF."""
-    try:
-        import cupy as cp
-        from cucim.skimage.restoration import richardson_lucy
-    except ImportError as exc:
-        raise RuntimeError("Restoration requires both cupy and cucim") from exc
-
-    image_gpu = None
-    psf_gpu = None
-    restored = None
-    pending_error: BaseException | None = None
-    with cp.cuda.Device(int(device_id)):
-        try:
-            image_gpu = cp.asarray(observed, dtype=cp.float32)
-            psf_gpu = cp.asarray(psf, dtype=cp.float32)
-            epsilon = max(
-                float(np.finfo(np.float32).eps),
-                float(image_gpu.max()) * 1.0e-7,
-            )
-            psf_gpu = _normalise_psf(psf_gpu, cp, epsilon)
-            restored = richardson_lucy(
-                image_gpu,
-                psf_gpu,
-                num_iter=int(n_iters),
-                clip=False,
-                filter_epsilon=epsilon,
-            )
-            cp.cuda.Stream.null.synchronize()
-            restored_host = cp.asnumpy(restored).astype(np.float32, copy=False)
-            return restored_host
-        except BaseException as exc:
-            pending_error = exc
-            raise
-        finally:
-            restored = None
-            psf_gpu = None
-            image_gpu = None
-            try:
-                cp.cuda.Stream.null.synchronize()
-                cp.fft.config.get_plan_cache().clear()
-                cp.get_default_memory_pool().free_all_blocks()
-            except BaseException:
-                if pending_error is None:
-                    raise
-
-
 def _prepare_observed(
     observed: np.ndarray, mode: str, gamma_max: float
 ) -> np.ndarray:
