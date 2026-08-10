@@ -76,7 +76,7 @@ workflow_parameters:
   - id: iter
     type: integer
     required: false
-    default: 20
+    default: 10
     min: 1
     description: Richardson-Lucy iteration count for CUDA deconvolution.
 
