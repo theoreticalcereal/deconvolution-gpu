@@ -59,6 +59,20 @@ def load_psf_seed(path: str | Path, shape: tuple[int, int, int]) -> np.ndarray:
     return _normalise(fitted)
 
 
+def load_fixed_psf(path: str | Path) -> np.ndarray:
+    """Load a restoration PSF without changing its native centering support."""
+    source = np.asarray(imread(path), dtype=np.float32)
+    if source.ndim == 2:
+        source = source[np.newaxis, :, :]
+    if source.ndim != 3:
+        raise ValueError(
+            f"Fixed PSF must be 3-D, got shape {source.shape} from {path}"
+        )
+    if not np.any(np.isfinite(source) & (source > 0)):
+        raise ValueError(f"Fixed PSF has no positive finite energy: {path}")
+    return _normalise(source)
+
+
 def _rotate_illumination_psf(illumination: np.ndarray, angle: float) -> np.ndarray:
     """Rotate illumination coordinates in the Z/X plane and preserve output shape."""
     right_angle_units = angle / 90.0

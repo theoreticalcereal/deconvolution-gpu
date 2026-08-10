@@ -309,6 +309,71 @@ class CupyIntegrationTests(unittest.TestCase):
 
         np.testing.assert_array_equal(actual, np.array([[[1, 2, 3]]], dtype=np.uint16))
 
+    def test_cupy_wrapper_releases_cached_fft_workspace_between_chunks(self):
+        from petakit_rl import restore_uint16_cupy
+
+        released = []
+
+        class FakeDevice:
+            def __init__(self, device_id):
+                self.device_id = device_id
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        class FakeFft:
+            fftn = staticmethod(np.fft.fftn)
+            ifftn = staticmethod(np.fft.ifftn)
+            config = types.SimpleNamespace(
+                get_plan_cache=lambda: types.SimpleNamespace(
+                    clear=lambda: released.append("plan_cache")
+                )
+            )
+
+        fake_cp = types.SimpleNamespace(
+            asarray=np.asarray,
+            asnumpy=np.asarray,
+            clip=np.clip,
+            conj=np.conj,
+            fft=FakeFft,
+            floor=np.floor,
+            float32=np.float32,
+            float64=np.float64,
+            get_default_memory_pool=lambda: types.SimpleNamespace(
+                free_all_blocks=lambda: released.append("memory_pool")
+            ),
+            get_default_pinned_memory_pool=lambda: types.SimpleNamespace(
+                free_all_blocks=lambda: released.append("pinned_pool")
+            ),
+            isfinite=np.isfinite,
+            maximum=np.maximum,
+            roll=np.roll,
+            sum=np.sum,
+            uint16=np.uint16,
+            zeros=np.zeros,
+            zeros_like=np.zeros_like,
+            cuda=types.SimpleNamespace(
+                Device=FakeDevice,
+                Stream=types.SimpleNamespace(
+                    null=types.SimpleNamespace(synchronize=lambda: None)
+                ),
+            ),
+        )
+
+        with mock.patch.dict(sys.modules, {"cupy": fake_cp}):
+            restore_uint16_cupy(
+                np.ones((3, 3, 3), dtype=np.uint16),
+                np.ones((1, 1, 1), dtype=np.float32),
+                1,
+            )
+
+        self.assertEqual(
+            released, ["plan_cache", "memory_pool", "pinned_pool"]
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

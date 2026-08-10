@@ -66,6 +66,19 @@ def _scalar(value: Array) -> float:
     return float(item() if item is not None else value)
 
 
+def _release_cupy_workspace(cp: Any) -> None:
+    """Release shape-specific FFT plans and pooled blocks between Dask chunks."""
+    fft_config = getattr(getattr(cp, "fft", None), "config", None)
+    get_plan_cache = getattr(fft_config, "get_plan_cache", None)
+    if callable(get_plan_cache):
+        get_plan_cache().clear()
+
+    for pool_name in ("get_default_memory_pool", "get_default_pinned_memory_pool"):
+        get_pool = getattr(cp, pool_name, None)
+        if callable(get_pool):
+            get_pool().free_all_blocks()
+
+
 def petakit_simplified_rl(
     observed: Array,
     psf: Array,
@@ -188,3 +201,4 @@ def restore_uint16_cupy(
             restored_gpu = None
             psf_gpu = None
             image_gpu = None
+            _release_cupy_workspace(cp)

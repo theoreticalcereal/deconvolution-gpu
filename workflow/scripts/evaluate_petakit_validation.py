@@ -33,6 +33,8 @@ STAGE2_LIMITS = {
     "frequency_ratio_max": 1.10,
 }
 
+THREE_CHANNELS = ("CH00", "CH01", "CH02")
+
 
 def _check(value: float | None, *, minimum: float | None = None,
            maximum: float | None = None) -> dict[str, Any]:
@@ -64,11 +66,16 @@ def _shape(value: str | list[int]) -> tuple[int, int, int]:
 
 
 def _psf_checks(row: dict[str, Any]) -> dict[str, Any]:
-    checks: dict[str, Any] = {
-        "ncc": _check(row["ncc"], minimum=STAGE1_LIMITS["psf_ncc_min"]),
-    }
     reference_shape = _shape(row["reference_shape"])
     candidate_shape = _shape(row["candidate_shape"])
+    checks: dict[str, Any] = {
+        "shape_match": {
+            "reference": list(reference_shape),
+            "candidate": list(candidate_shape),
+            "passed": candidate_shape == reference_shape,
+        },
+        "ncc": _check(row["ncc"], minimum=STAGE1_LIMITS["psf_ncc_min"]),
+    }
     for index, axis in enumerate(("z", "y", "x")):
         reference_offset = row[f"reference_center_{axis}_voxels"] - (
             reference_shape[index] - 1
@@ -129,6 +136,30 @@ def _stage(checks: dict[str, Any]) -> dict[str, Any]:
     return {
         "passed": all(check["passed"] for check in checks.values()),
         "checks": checks,
+    }
+
+
+def evaluate_three_channel_psfs(
+    channel_rows: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Require MATLAB PSF shape and sizing gates to pass for all three channels."""
+    actual_channels = set(channel_rows)
+    expected_channels = set(THREE_CHANNELS)
+    if actual_channels != expected_channels:
+        missing = sorted(expected_channels - actual_channels)
+        unexpected = sorted(actual_channels - expected_channels)
+        raise ValueError(
+            "Three-channel PSF validation requires exactly CH00, CH01, and CH02; "
+            f"missing={missing}, unexpected={unexpected}"
+        )
+
+    channels = {
+        channel: _stage(_psf_checks(channel_rows[channel]))
+        for channel in THREE_CHANNELS
+    }
+    return {
+        "passed": all(result["passed"] for result in channels.values()),
+        "channels": channels,
     }
 
 

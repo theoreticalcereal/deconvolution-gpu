@@ -40,7 +40,7 @@ from psf_estimation import (
     resolve_dxy,
     resolve_chunk_xy,
 )
-from psf_modes import generate_psf_seed, load_psf_seed
+from psf_modes import generate_psf_seed, load_fixed_psf, load_psf_seed
 
 try:
     from ome_zarr_io import (
@@ -930,10 +930,10 @@ def main() -> None:
     psf_start = time.perf_counter()
     psf_shape = (args.psf_size_z, args.psf_size_xy, args.psf_size_xy)
     if args.fixed_psf_path:
-        psf = load_psf_seed(args.fixed_psf_path, psf_shape)
+        psf = load_fixed_psf(args.fixed_psf_path)
         log_progress(
             f"Loaded fixed PSF from {args.fixed_psf_path}; "
-            f"center-fitted shape={psf.shape}. Skipping blind PSF estimation."
+            f"native shape={psf.shape}. Skipping blind PSF estimation."
         )
     else:
         if args.psf_seed_path:

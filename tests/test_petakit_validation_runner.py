@@ -163,6 +163,61 @@ class ValidationEvaluatorTests(unittest.TestCase):
         self.assertFalse(summary["stage2_application"]["passed"])
         self.assertFalse(summary["passed"])
 
+    def test_evaluator_requires_exact_psf_shape_match(self):
+        module = load_evaluator()
+        mismatched_psf = self._psf_row()
+        mismatched_psf["candidate_shape"] = "99x61x61"
+
+        summary = module.evaluate(
+            mismatched_psf,
+            self._volume_row(0.96, 0.97, 1.1, 0.9),
+            self._volume_row(0.995, 0.995, 1.01, 0.98),
+            workflow_seconds=60.0,
+            reference_seconds=177.0,
+        )
+
+        checks = summary["stage1_psf_effect"]["checks"]
+        self.assertIn("shape_match", checks)
+        shape_check = checks["shape_match"]
+        self.assertEqual(shape_check["reference"], [101, 61, 61])
+        self.assertEqual(shape_check["candidate"], [99, 61, 61])
+        self.assertFalse(shape_check["passed"])
+        self.assertFalse(summary["stage1_psf_effect"]["passed"])
+        self.assertFalse(summary["passed"])
+
+    def test_three_channel_psf_gate_requires_each_channel_to_pass(self):
+        module = load_evaluator()
+        rows = {
+            "CH00": self._psf_row(),
+            "CH01": self._psf_row(),
+            "CH02": self._psf_row(),
+        }
+        rows["CH01"]["candidate_fwhm_z_voxels"] = 13.0
+
+        self.assertTrue(hasattr(module, "evaluate_three_channel_psfs"))
+        summary = module.evaluate_three_channel_psfs(rows)
+
+        self.assertTrue(summary["channels"]["CH00"]["passed"])
+        self.assertFalse(summary["channels"]["CH01"]["passed"])
+        self.assertTrue(summary["channels"]["CH02"]["passed"])
+        self.assertFalse(summary["passed"])
+
+    def test_three_channel_psf_gate_rejects_a_missing_channel(self):
+        module = load_evaluator()
+        rows = {
+            "CH00": self._psf_row(),
+            "CH01": self._psf_row(),
+        }
+
+        try:
+            module.evaluate_three_channel_psfs(rows)
+        except ValueError as exc:
+            self.assertRegex(str(exc), "missing=\\['CH02'\\]")
+        except Exception as exc:
+            self.fail(f"expected a descriptive ValueError, got {type(exc).__name__}: {exc}")
+        else:
+            self.fail("missing CH02 was accepted")
+
     def test_evaluator_marks_missing_runtime_as_not_evaluated(self):
         module = load_evaluator()
 

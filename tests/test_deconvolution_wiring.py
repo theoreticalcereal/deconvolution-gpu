@@ -82,7 +82,7 @@ def load_decon_wrapper_with_fakes():
     )
     fake_tifffile = types.SimpleNamespace(imwrite=lambda *args, **kwargs: None)
     fake_psf_estimation = types.SimpleNamespace(
-        DEFAULT_BLIND_ITERS=12,
+        DEFAULT_BLIND_ITERS=8,
         DEFAULT_BLIND_CHUNK_XY=256,
         DEFAULT_BLIND_LATENT_UPDATE_PERIOD=2,
         DEFAULT_BLIND_MAX_TILES=16,
@@ -103,6 +103,7 @@ def load_decon_wrapper_with_fakes():
     )
     fake_psf_modes = types.SimpleNamespace(
         generate_psf_seed=lambda **kwargs: FakeArray((3, 3, 3)),
+        load_fixed_psf=lambda path: FakeArray((3, 3, 3)),
         load_psf_seed=lambda path, shape: FakeArray(shape),
     )
 
@@ -202,12 +203,21 @@ def load_psf_modes():
 
 class DeconvolutionWiringTest(unittest.TestCase):
     def test_blind_psf_refinement_uses_tuned_shared_default(self):
+        psf_module = load_psf_estimation()
         wrapper_text = SCRIPT_PATH.read_text(encoding="utf-8")
         psf_text = PSF_SCRIPT_PATH.read_text(encoding="utf-8")
+        matlab_runner = (
+            ROOT / "workflow/scripts/run_matlab_reference_comparison.sh"
+        ).read_text(encoding="utf-8")
+        petakit_runner = (
+            ROOT / "workflow/scripts/run_petakit_reference_psf_comparison.sh"
+        ).read_text(encoding="utf-8")
 
-        self.assertIn("DEFAULT_BLIND_ITERS = 12", psf_text)
+        self.assertEqual(psf_module.DEFAULT_BLIND_ITERS, 8)
         self.assertIn("default=DEFAULT_BLIND_ITERS", psf_text)
         self.assertIn("default=DEFAULT_BLIND_ITERS", wrapper_text)
+        self.assertIn("WF_BLIND_ITERS=${WF_BLIND_ITERS:-8}", matlab_runner)
+        self.assertIn("WF_BLIND_ITERS=${WF_BLIND_ITERS:-8}", petakit_runner)
 
     def test_decon_output_contract_accepts_direct_tiff_or_ozx(self):
         main_text = (ROOT / "workflow/main.nf").read_text(encoding="utf-8")
@@ -462,6 +472,23 @@ class DeconvolutionWiringTest(unittest.TestCase):
         self.assertEqual(seed.dtype, np.float32)
         np.testing.assert_allclose(seed, expected, rtol=1e-6)
         self.assertAlmostEqual(float(seed.sum()), 1.0, places=6)
+
+    def test_fixed_psf_preserves_native_support_and_normalizes(self):
+        from tifffile import imwrite
+
+        module = load_psf_modes()
+        source = np.arange(7 * 9 * 11, dtype=np.float32).reshape(7, 9, 11)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            psf_path = Path(tmpdir) / "fixed_psf.tif"
+            imwrite(psf_path, source)
+            psf = module.load_fixed_psf(psf_path)
+
+        expected = source / source.sum()
+        self.assertEqual(psf.shape, source.shape)
+        self.assertEqual(psf.dtype, np.float32)
+        np.testing.assert_allclose(psf, expected, rtol=1e-6)
+        self.assertAlmostEqual(float(psf.sum()), 1.0, places=6)
 
     def test_external_psf_seed_is_wired_through_workflow_and_comparison(self):
         config_text = (
