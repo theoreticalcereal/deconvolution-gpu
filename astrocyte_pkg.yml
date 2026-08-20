@@ -71,6 +71,7 @@ workflow_parameters:
       - [ 'multiscale_low_res_6x_ri_1_56', 'Multiscale - Low Res — 6x — RI 1.56' ]
       - [ 'multiscale_high_res_38x_ri_1_56', 'Multiscale - High Res — 38x — RI 1.56' ]
       - [ 'multiscale_high_res_37x_ri_1_52', 'Multiscale - High Res — 37x — RI 1.52' ]
+      - [ 'custom', 'Custom — provide deconvolution parameters YAML' ]
 
   - id: config_file
     type: files
@@ -78,9 +79,10 @@ workflow_parameters:
     min: 1
     max: 1
     description: |
-      Optional Navigate acquisition YAML. The workflow uses it only to infer
-      the microscope profile, wavelength, and Z spacing when those are not
-      selected or entered below.
+      Optional Navigate acquisition YAML, used to infer the microscope profile,
+      wavelength, and Z spacing when those are not selected or entered below.
+      With the Custom profile, provide the previous flat deconvolution
+      parameters YAML instead.
     regex: ".*(\\.yml|\\.yaml|\\.YML|\\.YAML)$"
 
   - id: wavelength

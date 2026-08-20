@@ -242,6 +242,71 @@ ACQUISITION_MICROSCOPE_NAMES = {
 
 SOLVENT_REFRACTIVE_INDICES = {"BABB": 1.56}
 
+CUSTOM_YAML_PARAMETER_KEYS = frozenset(
+    {
+        "output_format",
+        "blind_iters",
+        "chunk_xy",
+        "blind_max_tiles",
+        "adaptive_scout_iters",
+        "adaptive_keep_tiles",
+        "tile_selection_strategy",
+        "coarse_region_rows",
+        "coarse_region_columns",
+        "coarse_region_limit",
+        "decon_chunk_xy",
+        "pad_xy",
+        "pad_z",
+        "blind_peak_normalization",
+        "blind_peak_gamma_max",
+        "blind_latent_update_period",
+        "blind_workers",
+        "matlab_threads",
+        "matlab_workers",
+        "matlab_bin",
+        "matlab_timeout",
+        "blind_z_slices",
+        "snr_weight_cap",
+        "prefetch_chunks",
+        "decon_workers",
+        "overlap_xy",
+        "vram_gb",
+        "pyramid_max_downsample",
+        "cache_dir",
+        "no_psf_cache",
+        "iter",
+        "background",
+        "na",
+        "detection_na",
+        "illumination_na",
+        "wavelength",
+        "ni",
+        "ns",
+        "ni0",
+        "tg",
+        "tg0",
+        "ng",
+        "ng0",
+        "ti0",
+        "oversample_factor",
+        "psf_model",
+        "psf_mode",
+        "psf_seed_path",
+        "fixed_psf_path",
+        "light_sheet_angle",
+        "camera_pixel_size",
+        "magnification",
+        "dxy",
+        "dz",
+        "psf_size_z",
+        "psf_size_xy",
+    }
+)
+
+MODE_CONTROLLED_CONFIGURATION_KEYS = frozenset(
+    {"image_aggressiveness", "blind_backend", "cupy_fft_engine", "decon_backend"}
+)
+
 
 def resolve_image_aggressiveness(mode: str) -> dict[str, object]:
     """Return the non-overridable processing policy for an Astrocyte mode."""
@@ -342,15 +407,41 @@ def _infer_dz_from_acquisition(metadata: dict[str, object]) -> float:
     return dz
 
 
+def _apply_custom_yaml_parameters(
+    args: argparse.Namespace,
+    values: dict[str, object],
+) -> None:
+    """Apply the legacy flat deconvolution YAML schema for the Custom profile."""
+    if not values:
+        raise ValueError("The Custom profile requires a non-empty deconvolution parameters YAML")
+    controlled = sorted(MODE_CONTROLLED_CONFIGURATION_KEYS.intersection(values))
+    if controlled:
+        raise ValueError(
+            "Custom parameters YAML cannot set mode-controlled values: "
+            + ", ".join(controlled)
+        )
+    unknown = sorted(set(values).difference(CUSTOM_YAML_PARAMETER_KEYS))
+    if unknown:
+        raise ValueError(
+            "Unsupported custom parameters YAML key(s): " + ", ".join(unknown)
+        )
+    for key, value in values.items():
+        setattr(args, key, value)
+
+
 def apply_acquisition_settings(args: argparse.Namespace) -> argparse.Namespace:
-    """Resolve a profile and optional Navigate-derived wavelength/Z spacing."""
+    """Resolve a profile, Navigate metadata, or legacy custom YAML parameters."""
     metadata = _read_acquisition_metadata(args.config_file) if args.config_file else None
     profile_id = args.microscope_profile
     profile = None
-    if profile_id == "auto":
+    if profile_id == "custom":
+        if metadata is None:
+            raise ValueError("The Custom profile requires a deconvolution parameters YAML file")
+        _apply_custom_yaml_parameters(args, metadata)
+    elif profile_id == "auto":
         if metadata is not None:
             profile_id = _infer_profile_from_acquisition(metadata)
-    if profile_id != "auto":
+    if profile_id not in {"auto", "custom"}:
         try:
             profile = MICROSCOPE_PROFILES[profile_id]
         except KeyError as exc:
@@ -365,9 +456,9 @@ def apply_acquisition_settings(args: argparse.Namespace) -> argparse.Namespace:
         args.ni = profile["ri"]
         args.ns = profile["ri"]
         args.light_sheet_angle = profile["light_sheet_angle"]
-    if args.wavelength is None and metadata is not None:
+    if profile_id != "custom" and args.wavelength is None and metadata is not None:
         args.wavelength = _infer_wavelength_from_acquisition(metadata)
-    if args.dz is None and metadata is not None:
+    if profile_id != "custom" and args.dz is None and metadata is not None:
         args.dz = _infer_dz_from_acquisition(metadata)
     for key, value in resolve_image_aggressiveness(args.image_aggressiveness).items():
         setattr(args, key, value)
@@ -381,7 +472,7 @@ def parse_workflow_arguments(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--image_path", required=True)
     parser.add_argument("--config_file", default="")
-    parser.add_argument("--microscope_profile", choices=("auto", *MICROSCOPE_PROFILES), required=True)
+    parser.add_argument("--microscope_profile", choices=("auto", *MICROSCOPE_PROFILES, "custom"), required=True)
     parser.add_argument("--wavelength", type=float, default=None)
     parser.add_argument("--dz", type=float, default=None)
     parser.add_argument(
@@ -1083,7 +1174,7 @@ def main() -> None:
     parser.add_argument("--config_file", default="",
                         help="Optional Navigate acquisition YAML used to infer profile, wavelength, and dz.")
     parser.add_argument("--microscope_profile", default="auto",
-                        choices=("auto", *MICROSCOPE_PROFILES),
+                        choices=("auto", *MICROSCOPE_PROFILES, "custom"),
                         help="Complete microscope/magnification/RI profile, or auto to infer it from acquisition YAML.")
     parser.add_argument("--image_aggressiveness", default="medium",
                         choices=tuple(IMAGE_AGGRESSIVENESS_PRESETS),

@@ -69,6 +69,7 @@ class AstrocyteParameterIntakeTests(unittest.TestCase):
                 ["multiscale_low_res_6x_ri_1_56", "Multiscale - Low Res — 6x — RI 1.56"],
                 ["multiscale_high_res_38x_ri_1_56", "Multiscale - High Res — 38x — RI 1.56"],
                 ["multiscale_high_res_37x_ri_1_52", "Multiscale - High Res — 37x — RI 1.52"],
+                ["custom", "Custom — provide deconvolution parameters YAML"],
             ],
         )
         self.assertEqual(parameters[2]["type"], "files")
@@ -166,6 +167,52 @@ class AstrocyteParameterIntakeTests(unittest.TestCase):
         self.assertEqual(args.dxy, 1.609)
         self.assertEqual(args.wavelength, 0.561)
         self.assertEqual(args.dz, 0.3)
+
+    def test_custom_profile_applies_flat_deconvolution_parameter_yaml(self):
+        wrapper = load_module("decon_wrapper_custom_parameter_intake", WRAPPER_PATH)
+        configuration = {
+            "iter": 7,
+            "background": 3,
+            "wavelength": 0.61,
+            "dxy": 0.104,
+            "dz": 0.3,
+            "detection_na": 1.1,
+            "illumination_na": 0.19,
+            "ni": 1.33,
+            "ns": 1.33,
+            "vram_gb": 40,
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            config_path = tmp_path / "custom.yml"
+            config_path.write_text(yaml.safe_dump(configuration), encoding="utf-8")
+            args = wrapper.parse_workflow_arguments(
+                [
+                    "--image_path",
+                    str(tmp_path / "image_input"),
+                    "--config_file",
+                    str(config_path),
+                    "--microscope_profile",
+                    "custom",
+                    "--image_aggressiveness",
+                    "high",
+                ]
+            )
+
+        self.assertEqual(args.microscope_profile, "custom")
+        self.assertEqual(args.iter, 7)
+        self.assertEqual(args.background, 3)
+        self.assertEqual(args.wavelength, 0.61)
+        self.assertEqual(args.dxy, 0.104)
+        self.assertEqual(args.dz, 0.3)
+        self.assertEqual(args.detection_na, 1.1)
+        self.assertEqual(args.illumination_na, 0.19)
+        self.assertEqual(args.ni, 1.33)
+        self.assertEqual(args.ns, 1.33)
+        self.assertEqual(args.blind_backend, "matlab")
+        self.assertEqual(args.decon_backend, "petakit")
+        self.assertIsNone(args.vram_gb)
 
     def test_mode_resolver_maps_each_aggressiveness_level_to_its_required_engines(self):
         wrapper = load_module("decon_wrapper_mode_resolver", WRAPPER_PATH)

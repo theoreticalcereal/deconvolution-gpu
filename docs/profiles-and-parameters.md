@@ -15,8 +15,8 @@ an optional acquisition YAML, optional wavelength and Z-spacing inputs, and an
 NA, magnification, lateral pixel size, refractive index, and light-sheet
 angle. No separate optical-parameter form entry is required.
 
-The optional acquisition file is a Navigate `.yml`/`.yaml` configuration, not
-a general workflow-tuning file. When a value was not entered in the form, it
+The optional acquisition file is normally a Navigate `.yml`/`.yaml`
+configuration. When a value was not entered in the form, it
 can infer the profile from `MicroscopeState.microscope_name`, `Saving.prefix`,
 and `Saving.solvent`; wavelength from the one selected laser channel; and Z
 spacing from the absolute `MicroscopeState.step_size`. `Nanoscale` maps to
@@ -28,6 +28,13 @@ Choose **Infer from optional acquisition YAML** only when providing a supported
 Navigate YAML. Otherwise select a named profile and enter the experiment's
 wavelength and Z spacing. The workflow fails before processing when either of
 those two values cannot be resolved.
+
+Choose **Custom — provide deconvolution parameters YAML** (the final dropdown
+option) to use the legacy flat YAML schema instead of a microscope profile.
+That YAML can provide optical, acquisition, output, and advanced tuning values,
+such as `wavelength`, `dxy`, `dz`, `detection_na`, `ni`, and `iter`.
+`image_aggressiveness`, `blind_backend`, `cupy_fft_engine`, and
+`decon_backend` remain controlled by the form's image-aggressiveness setting.
 
 | Profile | Detection NA | Illumination NA | Magnification | Pixel size (µm) | RI | Light-sheet angle | Notes |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
