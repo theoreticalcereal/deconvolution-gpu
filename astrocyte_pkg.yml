@@ -86,7 +86,7 @@ workflow_parameters:
     regex: ".*(\\.yml|\\.yaml|\\.YML|\\.YAML)$"
 
   - id: wavelength
-    type: number
+    type: real
     required: false
     min: 0.001
     description: |
@@ -94,7 +94,7 @@ workflow_parameters:
       channel when a Navigate acquisition YAML is uploaded.
 
   - id: dz
-    type: number
+    type: real
     required: false
     min: 0.001
     description: |
