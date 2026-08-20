@@ -9,9 +9,9 @@
 
 ## Astrocyte Inputs
 
-The launch form has six fields: image file(s), a complete microscope profile,
+The launch form has seven fields: image file(s), a complete microscope profile,
 an optional acquisition YAML, optional wavelength and Z-spacing inputs, and an
-`image-aggressiveness` mode. Selecting a profile sets detection and illumination
+`image-aggressiveness` mode, plus an output selector. Selecting a profile sets detection and illumination
 NA, magnification, lateral pixel size, refractive index, and light-sheet
 angle. No separate optical-parameter form entry is required.
 
@@ -31,10 +31,14 @@ those two values cannot be resolved.
 
 Choose **Custom — provide deconvolution parameters YAML** (the final dropdown
 option) to use the legacy flat YAML schema instead of a microscope profile.
-That YAML can provide optical, acquisition, output, and advanced tuning values,
+That YAML can provide optical, acquisition, and advanced tuning values,
 such as `wavelength`, `dxy`, `dz`, `detection_na`, `ni`, and `iter`.
-`image_aggressiveness`, `blind_backend`, `cupy_fft_engine`, and
-`decon_backend` remain controlled by the form's image-aggressiveness setting.
+`output_format`, `image_aggressiveness`, `blind_backend`, `cupy_fft_engine`,
+and `decon_backend` remain controlled by form selections.
+
+The final **Output** dropdown selects either an OZX output with a maximum XY
+pyramid level of `1x`, `2x`, `4x`, `8x`, or `16x`, or **TIFF (1x)**. Its default
+is `1x`; selecting TIFF produces a TIFF only and does not generate pyramids.
 
 | Profile | Detection NA | Illumination NA | Magnification | Pixel size (µm) | RI | Light-sheet angle | Notes |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |

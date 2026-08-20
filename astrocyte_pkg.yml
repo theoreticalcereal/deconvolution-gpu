@@ -112,3 +112,18 @@ workflow_parameters:
       - [ 'low', 'Low — fastest GPU processing' ]
       - [ 'medium', 'Medium — balanced GPU processing' ]
       - [ 'high', 'High — maximum-accuracy CPU processing' ]
+
+  - id: output_selection
+    type: select
+    required: true
+    default: 'ozx_1x'
+    description: |
+      Select the maximum OME-Zarr XY pyramid level, or TIFF for a single-level
+      TIFF output.
+    choices:
+      - [ 'ozx_1x', '1x' ]
+      - [ 'ozx_2x', '2x' ]
+      - [ 'ozx_4x', '4x' ]
+      - [ 'ozx_8x', '8x' ]
+      - [ 'ozx_16x', '16x' ]
+      - [ 'tiff', 'TIFF (1x)' ]

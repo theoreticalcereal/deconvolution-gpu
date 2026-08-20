@@ -244,7 +244,6 @@ SOLVENT_REFRACTIVE_INDICES = {"BABB": 1.56}
 
 CUSTOM_YAML_PARAMETER_KEYS = frozenset(
     {
-        "output_format",
         "blind_iters",
         "chunk_xy",
         "blind_max_tiles",

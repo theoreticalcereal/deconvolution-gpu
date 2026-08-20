@@ -46,6 +46,7 @@ class AstrocyteParameterIntakeTests(unittest.TestCase):
                 "wavelength",
                 "dz",
                 "image_aggressiveness",
+                "output_selection",
             ],
         )
         self.assertEqual(parameters[1]["type"], "select")
@@ -83,6 +84,19 @@ class AstrocyteParameterIntakeTests(unittest.TestCase):
                 ["low", "Low — fastest GPU processing"],
                 ["medium", "Medium — balanced GPU processing"],
                 ["high", "High — maximum-accuracy CPU processing"],
+            ],
+        )
+        self.assertEqual(parameters[6]["type"], "select")
+        self.assertEqual(parameters[6]["default"], "ozx_1x")
+        self.assertEqual(
+            parameters[6]["choices"],
+            [
+                ["ozx_1x", "1x"],
+                ["ozx_2x", "2x"],
+                ["ozx_4x", "4x"],
+                ["ozx_8x", "8x"],
+                ["ozx_16x", "16x"],
+                ["tiff", "TIFF (1x)"],
             ],
         )
 
@@ -213,6 +227,27 @@ class AstrocyteParameterIntakeTests(unittest.TestCase):
         self.assertEqual(args.blind_backend, "matlab")
         self.assertEqual(args.decon_backend, "petakit")
         self.assertIsNone(args.vram_gb)
+
+    def test_custom_yaml_cannot_override_the_output_dropdown(self):
+        wrapper = load_module("decon_wrapper_custom_output_policy", WRAPPER_PATH)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            config_path = tmp_path / "custom.yml"
+            config_path.write_text("output_format: tiff\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "output_format"):
+                wrapper.parse_workflow_arguments(
+                    [
+                        "--image_path",
+                        str(tmp_path / "image_input"),
+                        "--config_file",
+                        str(config_path),
+                        "--microscope_profile",
+                        "custom",
+                        "--image_aggressiveness",
+                        "medium",
+                    ]
+                )
 
     def test_mode_resolver_maps_each_aggressiveness_level_to_its_required_engines(self):
         wrapper = load_module("decon_wrapper_mode_resolver", WRAPPER_PATH)

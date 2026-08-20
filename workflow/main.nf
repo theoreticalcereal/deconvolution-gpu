@@ -53,8 +53,25 @@ def isTiffInputPattern(inputPattern) {
     return text.endsWith('.tif') || text.endsWith('.tiff')
 }
 
+def resolveOutputSelection(selection) {
+    def selections = [
+        ozx_1x : [output_format: 'ozx',  pyramid_max_downsample: 1],
+        ozx_2x : [output_format: 'ozx',  pyramid_max_downsample: 2],
+        ozx_4x : [output_format: 'ozx',  pyramid_max_downsample: 4],
+        ozx_8x : [output_format: 'ozx',  pyramid_max_downsample: 8],
+        ozx_16x: [output_format: 'ozx',  pyramid_max_downsample: 16],
+        tiff   : [output_format: 'tiff', pyramid_max_downsample: 1],
+    ]
+    def resolved = selections[selection?.toString() ?: 'ozx_1x']
+    if (resolved == null) {
+        error "output_selection must be one of ${selections.keySet().join(', ')}"
+    }
+    return resolved
+}
+
 workflow {
     input_patterns = normalizeInputPatterns(params.input, workflow.commandLine)
+    output_settings = resolveOutputSelection(params.output_selection)
     config_patterns = normalizeInputPatterns(params.config_file)
     if (config_patterns.size() > 1) {
         error "Select no more than one acquisition metadata YAML file."
@@ -89,10 +106,11 @@ workflow {
         config_file_ch,
         params.image_aggressiveness,
         params.output_dir,
-        params.output_formats
+        output_settings.output_format,
+        output_settings.pyramid_max_downsample
     )
 
-    if (params.output_formats == 'tiff') {
-        EXPORT_OUTPUT_FORMAT(DECON.out.decon_output, params.output_formats)
+    if (output_settings.output_format == 'tiff') {
+        EXPORT_OUTPUT_FORMAT(DECON.out.decon_output, output_settings.output_format)
     }
 }

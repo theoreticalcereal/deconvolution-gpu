@@ -1,8 +1,7 @@
 input:
   - /work/bioinformatics/s249154/deconvolution-gpu/1_CH00_000000.tif
 
-output_formats: tiff
-pyramid_max_downsample: 1
+output_selection: ozx_1x
 
 iter: 5
 background: 0

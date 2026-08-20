@@ -225,8 +225,10 @@ class DeconvolutionWiringTest(unittest.TestCase):
         modules_text = (ROOT / "workflow/modules.nf").read_text(encoding="utf-8")
         wrapper_text = SCRIPT_PATH.read_text(encoding="utf-8")
 
-        self.assertIn("params.output_formats", main_text)
+        self.assertIn("def resolveOutputSelection", main_text)
+        self.assertIn("output_settings.output_format", main_text)
         self.assertIn('val  output_format', modules_text)
+        self.assertIn('val  pyramid_max_downsample', modules_text)
         self.assertIn('path "DB2_*.{ozx,tif,tiff}", emit: decon_output', modules_text)
         self.assertIn("output_format_flag = flag('output_format', output_format)", modules_text)
         self.assertIn("${output_format_flag}", modules_text)
@@ -568,6 +570,7 @@ class DeconvolutionWiringTest(unittest.TestCase):
                 "wavelength",
                 "dz",
                 "image_aggressiveness",
+                "output_selection",
             ],
         )
 
@@ -1192,12 +1195,17 @@ class DeconvolutionWiringTest(unittest.TestCase):
     def test_downsampling_parameter_is_exposed_and_forwarded(self):
         config_text = (ROOT / "workflow/configs/nextflow.config").read_text(encoding="utf-8")
         package_text = (ROOT / "astrocyte_pkg.yml").read_text(encoding="utf-8")
+        main_text = (ROOT / "workflow/main.nf").read_text(encoding="utf-8")
         modules_text = (ROOT / "workflow/modules.nf").read_text(encoding="utf-8")
         script_text = (ROOT / "workflow/scripts/decon_wrapper.py").read_text(encoding="utf-8")
 
-        self.assertIn("pyramid_max_downsample = 16", config_text)
-        self.assertNotIn("id: pyramid_max_downsample", package_text)
-        self.assertIn("pyramid_max_downsample_flag = flag('pyramid_max_downsample', params.pyramid_max_downsample)", modules_text)
+        self.assertIn("output_selection = 'ozx_1x'", config_text)
+        self.assertIn("pyramid_max_downsample = 1", config_text)
+        self.assertIn("id: output_selection", package_text)
+        self.assertIn("[ 'tiff', 'TIFF (1x)' ]", package_text)
+        self.assertIn("def resolveOutputSelection", main_text)
+        self.assertIn("output_settings.pyramid_max_downsample", main_text)
+        self.assertIn("pyramid_max_downsample_flag = flag('pyramid_max_downsample', pyramid_max_downsample)", modules_text)
         self.assertIn("${pyramid_max_downsample_flag}", modules_text)
         self.assertIn('parser.add_argument("--pyramid_max_downsample"', script_text)
         self.assertIn("max_downsample=args.pyramid_max_downsample", script_text)
