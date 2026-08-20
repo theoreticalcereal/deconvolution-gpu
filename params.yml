@@ -1,26 +1,19 @@
 input:
-  - /work/bioinformatics/s249154/deskew-gpu/workflow/output/deskewed_ozx/fused_488.ozx
+  - /work/bioinformatics/s249154/deconvolution-gpu/1_CH00_000000.tif
 
-output_formats: ozx
+output_formats: tiff
 pyramid_max_downsample: 1
 
-iter: 20
+iter: 5
 background: 0
+
+microscope_profile: ctaslm_v3_50x_ri_1_56
 
 psf_mode: single
 psf_model: vectorial
 
-wavelength: 0.515
-na: 0.18
-detection_na: 0.18
-illumination_na: -1
-ni: 1.333
-ns: 1.333
-dxy: 1.068
-dz: 10
-camera_pixel_size: -1
-magnification: -1
-light_sheet_angle: 90
+wavelength: 0.610
+dz: 0.3
 
 # GPU blind PSF backend. Use "matlab" for the CPU/MATLAB backend.
 blind_backend: cupy

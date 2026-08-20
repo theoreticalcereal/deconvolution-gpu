@@ -7,54 +7,57 @@
 | `wide_frame` | Uses a single-detection PSF seed. |
 | `light_sheet` | Uses light-sheet PSF seed settings for already deskewed light-sheet data. |
 
-## Required Inputs
+## Astrocyte Inputs
 
-| Parameter | Description |
-| --- | --- |
-| `input` | Selected ready-to-deconvolve image volumes. |
-| `pyramid_max_downsample` | Required OME-Zarr pyramid depth selection. Default `16` preserves the full `1x, 2x, 4x, 8x, 16x` multiscale output. |
-| `wavelength` | Emission wavelength in microns. |
-| `na` | Detection numerical aperture fallback. |
-| `ni` | Immersion refractive index. |
-| `ns` | Specimen/sample refractive index. |
-| `dz` | Z pixel size in microns. |
+The launch form has six fields: image file(s), a complete microscope profile,
+an optional acquisition YAML, optional wavelength and Z-spacing inputs, and an
+`image-aggressiveness` mode. Selecting a profile sets detection and illumination
+NA, magnification, lateral pixel size, refractive index, and light-sheet
+angle. No separate optical-parameter form entry is required.
 
-Use `dxy` directly or provide `camera_pixel_size` and `magnification` so the
-wrapper can derive X/Y pixel size.
+The optional acquisition file is a Navigate `.yml`/`.yaml` configuration, not
+a general workflow-tuning file. When a value was not entered in the form, it
+can infer the profile from `MicroscopeState.microscope_name`, `Saving.prefix`,
+and `Saving.solvent`; wavelength from the one selected laser channel; and Z
+spacing from the absolute `MicroscopeState.step_size`. `Nanoscale` maps to
+`Multiscale - High Res`; `Macroscale` maps to `Multiscale - Low Res`. BABB is
+recognized as RI 1.56. Explicit profile, wavelength, and Z-spacing entries
+always take precedence over inferred values.
 
-## Optional Outputs
+Choose **Infer from optional acquisition YAML** only when providing a supported
+Navigate YAML. Otherwise select a named profile and enter the experiment's
+wavelength and Z spacing. The workflow fails before processing when either of
+those two values cannot be resolved.
 
-`output_formats = ozx` writes native zipped OME-Zarr outputs. Set
-`output_formats = tiff` to also publish TIFF stacks under `deconvolved_tiff/`.
+| Profile | Detection NA | Illumination NA | Magnification | Pixel size (µm) | RI | Light-sheet angle | Notes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Upright ASLM | 0.643 | 0.643 | 36x | 0.181 | 1.33 | 45 | |
+| BenchTop MesoSPIM | 0.25 | 0.1 | 4x | 1.609 | 1.56 | 0 | |
+| BenchTop MesoSPIM | 0.431 | 0.1 | 10x | 0.65 | 1.56 | 0 | Immersion objective |
+| BenchTop MesoSPIM | 0.42 | 0.1 | 10x | 0.65 | 1.52 | 0 | Immersion objective |
+| ctASLM v3 | 1.2 | 0.7 | 50x | 0.128 | 1.56 | 0 | |
+| ctASLM v3 | 1.2 | 0.7 | 50x | 0.128 | 1.52 | 0 | |
+| Multiscale - Low Res | 0.25 | 0.1 | 0.63x | 9.7 | 1.56 | 0 | |
+| Multiscale - Low Res | 0.25 | 0.1 | 1x | 6.38 | 1.56 | 0 | |
+| Multiscale - Low Res | 0.25 | 0.1 | 2x | 3.14 | 1.56 | 0 | |
+| Multiscale - Low Res | 0.25 | 0.1 | 3x | 2.12 | 1.56 | 0 | |
+| Multiscale - Low Res | 0.25 | 0.1 | 4x | 1.609 | 1.56 | 0 | |
+| Multiscale - Low Res | 0.25 | 0.1 | 5x | 1.255 | 1.56 | 0 | |
+| Multiscale - Low Res | 0.25 | 0.1 | 6x | 1.044 | 1.56 | 0 | |
+| Multiscale - High Res | 0.753 | 0.753 | 38x | 0.171 | 1.56 | 0 | |
+| Multiscale - High Res | 0.734 | 0.734 | 37x | 0.171 | 1.52 | 0 | |
 
-`pyramid_max_downsample` controls the maximum XY pyramid level written for
-the OME-Zarr data inside each OZX archive. Lower values reduce pyramid
-generation time and disk usage; Z is preserved at full resolution for every
-level.
+The supplied table leaves NA blank for the 1x–6x Multiscale low-resolution
+rows. Those profiles inherit the stated Multiscale low-resolution 0.25
+detection NA and 0.1 illumination NA values.
 
-## Blind PSF Backend
+## Image Aggressiveness
 
-| Parameter | Default | Description |
-| --- | --- | --- |
-| `blind_backend` | `cupy` | Native CuPy blind RL. Use `matlab` for compatibility comparisons. |
-| `cupy_fft_engine` | `scout` | CuPy PSF estimation mode. `scout` runs a short filtering pass and refines the most consistent tile PSFs; `cupyx` runs every selected tile directly. |
+| Mode | Queue | PSF estimation | Deconvolution |
+| --- | --- | --- | --- |
+| `low` | `GPUp40` | CuPy scout mode | CuPy |
+| `medium` | `GPUp40` | CuPy direct mode over every blind chunk | CuPy |
+| `high` | `256GBv1` | MATLAB `deconvblind` | CPU Petakit-compatible RL |
 
-Advanced defaults are kept in `workflow/configs/nextflow.config` instead of
-the Astrocyte parameter form. This includes blind iteration count, tile sizing,
-scout filtering details, MATLAB compatibility settings, worker counts, cache
-controls, and VRAM sizing. Override them from a custom Nextflow params file only
-for method-development or comparison runs.
-
-Slurm controls physical GPU placement. Spawned workers use logical device zero
-from `CUDA_VISIBLE_DEVICES`; do not place a physical GPU ID in `params.yml`.
-
-## MATLAB Compatibility Controls
-
-`matlab_workers`, `matlab_threads`, and `matlab_timeout` apply only when
-`blind_backend = matlab`.
-
-## Final Deconvolution Controls
-
-| Parameter | Default | Description |
-| --- | --- | --- |
-| `decon_chunk_xy` | `0` | Full-Z core XY tile size; zero enables VRAM-based sizing. Hidden from the Astrocyte form by default. |
+The `high` preset deliberately receives no GPU allocation. The lightweight
+input-staging and export processes continue to use the general queue.

@@ -50,11 +50,8 @@ nextflow run main.nf \
   -profile light_sheet \
   --input '/path/to/deskewed/*.ome.zarr' \
   --output_dir ./output \
+  --microscope_profile ctaslm_v3_50x_ri_1_56 \
   --wavelength 0.561 \
-  --na 1.0 \
-  --ni 1.33 \
-  --ns 1.33 \
-  --dxy 0.108 \
   --dz 0.3 \
   --blind_backend cupy \
   --blind_workers 1

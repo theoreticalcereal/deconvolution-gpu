@@ -70,21 +70,18 @@ process DECON {
     tag "decon"
     module 'singularity/3.9.9:matlab/2024a'
     container WORKFLOW_CONTAINER_IMAGE
-    containerOptions = '--nv -B /home1/apps/MATLAB:/home1/apps/MATLAB'
+    containerOptions = { params.image_aggressiveness == 'high' ? '-B /home1/apps/MATLAB:/home1/apps/MATLAB' : '--nv -B /home1/apps/MATLAB:/home1/apps/MATLAB' }
 
     publishDir "${params.output_dir}", mode: 'copy', pattern: 'estimated_psf.tif'
-    publishDir "${params.output_dir}", mode: 'copy', pattern: 'DB2_*.ozx'
+    publishDir "${params.output_dir}", mode: 'copy', pattern: 'DB2_*.{ozx,tif,tiff}'
 
     maxForks 8
-    cpus 72
-    memory '256 GB'
-    clusterOptions '--gres=gpu:1'
     scratch true
 
     input:
     path deskewed_dir
-    val  background
-    val  iter
+    path config_file
+    val  image_aggressiveness
     val  output_dir
     val  output_format
 
@@ -104,9 +101,8 @@ process DECON {
     }
     def flag = { name, value -> is_supplied(value) ? "--${name} ${value}" : "" }
 
-    def background_flag  = flag('background', background)
-    def iter_flag        = flag('iter', iter)
     def output_format_flag = flag('output_format', output_format)
+    def microscope_profile_flag = flag('microscope_profile', params.microscope_profile)
     def na_flag          = flag('na', params.na)
     def detection_na_flag = flag('detection_na', params.detection_na)
     def illumination_na_flag = flag('illumination_na', params.illumination_na)
@@ -200,10 +196,11 @@ process DECON {
 
     python3 ${projectDir}/scripts/decon_wrapper.py \\
         --image_path "${deskewed_dir}" \\
+        --config_file "${config_file}" \\
+        --image_aggressiveness "${image_aggressiveness}" \\
         --script_dir "${projectDir}/scripts" \\
         ${output_format_flag} \\
-        ${background_flag} \\
-        ${iter_flag} \\
+        ${microscope_profile_flag} \\
         ${na_flag} \\
         ${detection_na_flag} \\
         ${illumination_na_flag} \\
@@ -267,6 +264,10 @@ process DECON {
     for output_archive in DB2_*.ozx; do
         [ -e "\$output_archive" ] || continue
         cp -f "\$output_archive" ${shell_quote(publishRoot)}/
+    done
+    for output_tiff in DB2_*.tif DB2_*.tiff; do
+        [ -e "\$output_tiff" ] || continue
+        cp -f "\$output_tiff" ${shell_quote(publishRoot)}/
     done
     rm -rf DB2_*.ome.zarr
     """

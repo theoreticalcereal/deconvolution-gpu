@@ -46,154 +46,67 @@ workflow_parameters:
       Select deskewed or otherwise ready-to-deconvolve image volumes.
     regex: ".*(\\.tif|\\.tiff|\\.czi|\\.nd2|\\.lif|\\.h5|\\.hdf5|\\.ome\\.zarr|\\.ozx|\\.TIF|\\.TIFF|\\.CZI|\\.ND2|\\.LIF|\\.H5|\\.HDF5|\\.OME\\.ZARR|\\.OZX)$"
 
-  - id: output_formats
-    type: select
-    required: false
-    default: 'ozx'
-    description: |
-      Final image output format to publish. OZX is the native zipped OME-Zarr
-      workflow output. Choose TIFF to also export final deconvolved volumes as
-      TIFF stacks.
-    choices:
-      - [ 'ozx', 'OZX zipped OME-Zarr output' ]
-      - [ 'tiff', 'TIFF stack export' ]
-
-  - id: pyramid_max_downsample
+  - id: microscope_profile
     type: select
     required: true
-    default: '16'
+    default: 'auto'
     description: |
-      Maximum XY downsampling level for OME-Zarr multiscale pyramid output.
-      Level 0 is full resolution; higher levels downsample rows and columns by
-      the selected factor while preserving Z resolution.
+      Select the complete microscope, magnification, and refractive-index
+      profile. Choose automatic inference only when uploading a supported
+      Navigate acquisition YAML.
     choices:
-      - [ '1', 'Full resolution only' ]
-      - [ '2', 'Build 2x pyramid level' ]
-      - [ '4', 'Build up to 4x pyramid levels' ]
-      - [ '8', 'Build up to 8x pyramid levels' ]
-      - [ '16', 'Build up to 16x pyramid levels' ]
+      - [ 'auto', 'Infer from optional acquisition YAML' ]
+      - [ 'upright_aslm_36x_ri_1_33', 'Upright ASLM — 36x — RI 1.33' ]
+      - [ 'benchtop_mesospim_4x_ri_1_56', 'BenchTop MesoSPIM — 4x — RI 1.56' ]
+      - [ 'benchtop_mesospim_10x_ri_1_56', 'BenchTop MesoSPIM — 10x — RI 1.56' ]
+      - [ 'benchtop_mesospim_10x_ri_1_52', 'BenchTop MesoSPIM — 10x — RI 1.52' ]
+      - [ 'ctaslm_v3_50x_ri_1_56', 'ctASLM v3 — 50x — RI 1.56' ]
+      - [ 'ctaslm_v3_50x_ri_1_52', 'ctASLM v3 — 50x — RI 1.52' ]
+      - [ 'multiscale_low_res_0_63x_ri_1_56', 'Multiscale - Low Res — 0.63x — RI 1.56' ]
+      - [ 'multiscale_low_res_1x_ri_1_56', 'Multiscale - Low Res — 1x — RI 1.56' ]
+      - [ 'multiscale_low_res_2x_ri_1_56', 'Multiscale - Low Res — 2x — RI 1.56' ]
+      - [ 'multiscale_low_res_3x_ri_1_56', 'Multiscale - Low Res — 3x — RI 1.56' ]
+      - [ 'multiscale_low_res_4x_ri_1_56', 'Multiscale - Low Res — 4x — RI 1.56' ]
+      - [ 'multiscale_low_res_5x_ri_1_56', 'Multiscale - Low Res — 5x — RI 1.56' ]
+      - [ 'multiscale_low_res_6x_ri_1_56', 'Multiscale - Low Res — 6x — RI 1.56' ]
+      - [ 'multiscale_high_res_38x_ri_1_56', 'Multiscale - High Res — 38x — RI 1.56' ]
+      - [ 'multiscale_high_res_37x_ri_1_52', 'Multiscale - High Res — 37x — RI 1.52' ]
 
-  - id: iter
-    type: integer
+  - id: config_file
+    type: files
     required: false
-    default: 10
     min: 1
-    description: Richardson-Lucy iteration count for CUDA deconvolution.
-
-  - id: background
-    type: real
-    required: false
-    default: 0
-    description: Constant background subtraction value.
-
-  - id: psf_mode
-    type: select
-    required: false
-    default: 'single'
-    description: Seed PSF mode used before blind PSF estimation.
-    choices:
-      - [ 'single', 'Single detection PSF' ]
-      - [ 'light_sheet', 'Detection PSF times rotated illumination PSF' ]
-
-  - id: psf_model
-    type: select
-    required: false
-    default: 'vectorial'
-    description: Theoretical PSF model used as the blind-estimation seed.
-    choices:
-      - [ 'vectorial', 'Vectorial Gibson-Lanni model' ]
-      - [ 'scalar', 'Scalar Gibson-Lanni model' ]
-      - [ 'gaussian', 'Gaussian approximation' ]
+    max: 1
+    description: |
+      Optional Navigate acquisition YAML. The workflow uses it only to infer
+      the microscope profile, wavelength, and Z spacing when those are not
+      selected or entered below.
+    regex: ".*(\\.yml|\\.yaml|\\.YML|\\.YAML)$"
 
   - id: wavelength
-    type: real
-    required: true
-    min: 0
-    description: Emission wavelength in microns.
-
-  - id: na
-    type: real
-    required: true
-    min: 0
-    description: Backward-compatible detection numerical aperture.
-
-  - id: detection_na
-    type: real
+    type: number
     required: false
-    default: -1
-    min: -1
-    description: Detection objective numerical aperture; -1 falls back to Backward-compatible numerical aperture.
-
-  - id: illumination_na
-    type: real
-    required: false
-    default: -1
-    min: -1
-    description: Illumination objective numerical aperture for light-sheet PSF metadata; -1 falls back to Backward-compatible numerical aperture.
-
-  - id: ni
-    type: real
-    required: true 
-    min: -1
-    description: Immersion refractive index for PSF generation.
-
-  - id: ns
-    type: real
-    required: true
-    default: -1
-    min: -1
-    description: Specimen/sample refractive index; -1 falls back to immersion refractive index.
-
-  - id: dxy
-    type: real
-    required: false
-    default: -1
-    min: -1
-    description: Final sample pixel size in X/Y, in microns.
+    min: 0.001
+    description: |
+      Optional emission wavelength in µm. It is inferred from the selected
+      channel when a Navigate acquisition YAML is uploaded.
 
   - id: dz
-    type: real
-    required: true
-    min: 0
-    description: Sample pixel size in Z, in microns.
-
-  - id: camera_pixel_size
-    type: real
+    type: number
     required: false
-    default: -1
-    min: -1
-    description: Camera pixel size in microns; with magnification this can derive dxy.
-
-  - id: magnification
-    type: real
-    required: false
-    default: -1
-    min: -1
-    description: Objective/tube magnification; with camera_pixel_size this can derive dxy.
-
-  - id: light_sheet_angle
-    type: real
-    required: false
-    default: 90
-    description: Illumination PSF rotation angle for light-sheet PSF mode.
-
-  - id: blind_backend
-    type: select
-    required: false
-    default: 'cupy'
-    description: Backend for blind PSF estimation.
-    choices:
-      - [ 'cupy', 'Native CuPy blind RL in isolated GPU processes (default)' ]
-      - [ 'matlab', 'MATLAB deconvblind compatibility backend' ]
-
-  - id: cupy_fft_engine
-    type: select
-    required: false
-    default: 'scout'
+    min: 0.001
     description: |
-      CuPy blind PSF estimation mode. Scout runs a short pass, filters
-      inconsistent tile PSFs, and finishes only the strongest candidates.
-      Direct CuPy processes every selected tile for the full iteration count.
+      Optional axial Z spacing in µm. It is inferred from the absolute
+      MicroscopeState.step_size when a Navigate acquisition YAML is uploaded.
+
+  - id: image_aggressiveness
+    type: select
+    required: true
+    default: 'medium'
+    description: |
+      Select the speed/accuracy preset. Processing engines and queue placement
+      are fixed by this choice.
     choices:
-      - [ 'scout', 'Scout then refine the best tile PSFs' ]
-      - [ 'cupyx', 'Direct CuPy processing of every selected tile' ]
+      - [ 'low', 'Low — fastest GPU processing' ]
+      - [ 'medium', 'Medium — balanced GPU processing' ]
+      - [ 'high', 'High — maximum-accuracy CPU processing' ]

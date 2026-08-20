@@ -55,6 +55,17 @@ def isTiffInputPattern(inputPattern) {
 
 workflow {
     input_patterns = normalizeInputPatterns(params.input, workflow.commandLine)
+    config_patterns = normalizeInputPatterns(params.config_file)
+    if (config_patterns.size() > 1) {
+        error "Select no more than one acquisition metadata YAML file."
+    }
+    if (config_patterns) {
+        config_file_ch = Channel.value(file(config_patterns[0], checkIfExists: true))
+    } else {
+        config_file_ch = Channel.value(
+            file("${projectDir}/configs/empty_acquisition_metadata.yml", checkIfExists: true)
+        )
+    }
     if (input_patterns) {
         log.info "Selected ${input_patterns.size()} input image(s): ${input_patterns.join(', ')}"
         input_files_ch = Channel
@@ -75,8 +86,8 @@ workflow {
 
     DECON(
         decon_input_ch,
-        params.background,
-        params.iter,
+        config_file_ch,
+        params.image_aggressiveness,
         params.output_dir,
         params.output_formats
     )

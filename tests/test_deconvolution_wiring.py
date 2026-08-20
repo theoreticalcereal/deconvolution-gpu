@@ -79,6 +79,7 @@ def load_decon_wrapper_with_fakes():
     )
     fake_petakit_rl = types.SimpleNamespace(
         restore_uint16_cupy=lambda chunk, psf, n_iters, **kwargs: chunk,
+        restore_uint16_petakit_cpu=lambda chunk, psf, n_iters, **kwargs: chunk,
     )
     fake_tifffile = types.SimpleNamespace(imwrite=lambda *args, **kwargs: None)
     fake_psf_estimation = types.SimpleNamespace(
@@ -539,10 +540,6 @@ class DeconvolutionWiringTest(unittest.TestCase):
         config_text = (ROOT / "workflow/configs/nextflow.config").read_text(encoding="utf-8")
         package_text = (ROOT / "astrocyte_pkg.yml").read_text(encoding="utf-8")
         package_data = yaml.safe_load(package_text)
-        package_params = {
-            parameter["id"]: parameter
-            for parameter in package_data["workflow_parameters"]
-        }
         modules_text = (ROOT / "workflow/modules.nf").read_text(encoding="utf-8")
         wrapper_text = SCRIPT_PATH.read_text(encoding="utf-8")
         psf_text = PSF_SCRIPT_PATH.read_text(encoding="utf-8")
@@ -559,12 +556,20 @@ class DeconvolutionWiringTest(unittest.TestCase):
         ):
             self.assertIn(expected, config_text)
 
-        exposed_param_ids = {
-            parameter["id"]
-            for parameter in package_data["workflow_parameters"]
-        }
-        self.assertIn("blind_backend", exposed_param_ids)
-        self.assertIn("cupy_fft_engine", exposed_param_ids)
+        exposed_param_ids = [
+            parameter["id"] for parameter in package_data["workflow_parameters"]
+        ]
+        self.assertEqual(
+            exposed_param_ids,
+            [
+                "input",
+                "microscope_profile",
+                "config_file",
+                "wavelength",
+                "dz",
+                "image_aggressiveness",
+            ],
+        )
 
         for param_id in (
             "cupy_fft_engine",
@@ -610,7 +615,7 @@ class DeconvolutionWiringTest(unittest.TestCase):
 
         workflow_parameters_text = package_text.split("workflow_parameters:", 1)[1]
         self.assertNotIn("title:", workflow_parameters_text)
-        self.assertIn("CuPy blind PSF estimation mode", package_params["cupy_fft_engine"]["description"])
+        self.assertIn("id: image_aggressiveness", package_text)
 
     def test_scout_defaults_are_documented_for_test_run(self):
         params_text = (ROOT / "params.yml").read_text(encoding="utf-8")
@@ -649,8 +654,8 @@ class DeconvolutionWiringTest(unittest.TestCase):
         ):
             self.assertNotIn(f"{hidden_param}:", params_text)
 
-        self.assertIn("`cupy_fft_engine`", profiles_text)
-        self.assertIn("Advanced defaults are kept in `workflow/configs/nextflow.config`", profiles_text)
+        self.assertIn("`image-aggressiveness`", profiles_text)
+        self.assertIn("acquisition YAML", profiles_text)
         self.assertIn("default scout path", process_text)
         self.assertIn("direct `cupyx`", process_text)
         self.assertIn("Advanced scout tuning", troubleshooting_text)
@@ -1104,7 +1109,8 @@ class DeconvolutionWiringTest(unittest.TestCase):
         self.assertIn("module 'singularity/3.9.9'", modules_text)
         self.assertIn("module 'singularity/3.9.9:matlab/2024a'", modules_text)
         self.assertNotIn("module 'singularity/3.9.9:cuda/11.8.0:matlab/2024a'", modules_text)
-        self.assertIn("containerOptions = '--nv -B /home1/apps/MATLAB:/home1/apps/MATLAB'", modules_text)
+        self.assertIn("containerOptions = { params.image_aggressiveness == 'high'", modules_text)
+        self.assertIn("'--nv -B /home1/apps/MATLAB:/home1/apps/MATLAB'", modules_text)
         self.assertIn('export CONDA_PREFIX="${CONTAINER_ENV_PREFIX}"', modules_text)
         self.assertIn('export PATH="${CONTAINER_ENV_PREFIX}/bin:\\${PATH}"', modules_text)
         self.assertIn('export LD_LIBRARY_PATH="${CONTAINER_ENV_PREFIX}/lib:\\${LD_LIBRARY_PATH:-}"', modules_text)
@@ -1122,7 +1128,7 @@ class DeconvolutionWiringTest(unittest.TestCase):
     def test_decon_process_publishes_native_db2_outputs(self):
         modules_text = (ROOT / "workflow/modules.nf").read_text(encoding="utf-8")
 
-        self.assertIn('publishDir "${params.output_dir}", mode: \'copy\', pattern: \'DB2_*.ozx\'', modules_text)
+        self.assertIn('publishDir "${params.output_dir}", mode: \'copy\', pattern: \'DB2_*.{ozx,tif,tiff}\'', modules_text)
         self.assertIn(
             'path "DB2_*.{ozx,tif,tiff}", emit: decon_output',
             modules_text,
@@ -1131,6 +1137,7 @@ class DeconvolutionWiringTest(unittest.TestCase):
         self.assertIn("mkdir -p ${shell_quote(publishRoot)}", modules_text)
         self.assertIn('cp -f "estimated_psf.tif" ${shell_quote(publishRoot)}/', modules_text)
         self.assertIn('cp -f "\\$output_archive" ${shell_quote(publishRoot)}/', modules_text)
+        self.assertIn('cp -f "\\$output_tiff" ${shell_quote(publishRoot)}/', modules_text)
         self.assertLess(
             modules_text.index('cp -f "\\$output_archive" ${shell_quote(publishRoot)}/'),
             modules_text.index("rm -rf DB2_*.ome.zarr"),
@@ -1148,7 +1155,9 @@ class DeconvolutionWiringTest(unittest.TestCase):
 
         self.assertIn("def slurmChdirOption = \"--chdir=${baseDir}\"", config_text)
         self.assertIn("clusterOptions = slurmChdirOption", config_text)
-        self.assertIn("clusterOptions = \"${slurmChdirOption} --gres=gpu:1\"", config_text)
+        self.assertIn("queue = { params.image_aggressiveness == 'high' ? '256GBv1' : 'GPUp40' }", config_text)
+        self.assertIn("clusterOptions = { params.image_aggressiveness == 'high'", config_text)
+        self.assertIn("--gres=gpu:1", config_text)
 
     def test_stage_decon_input_uses_super_queue(self):
         config_text = (ROOT / "workflow/configs/nextflow.config").read_text(encoding="utf-8")
@@ -1170,8 +1179,7 @@ class DeconvolutionWiringTest(unittest.TestCase):
         self.assertIn("output_formats = 'ozx'", config_text)
         self.assertIn("output_dir = './output'", config_text)
         self.assertIn("\\.ozx", package_text)
-        self.assertIn("default: 'ozx'", package_text)
-        self.assertIn("[ 'ozx', 'OZX zipped OME-Zarr output' ]", package_text)
+        self.assertNotIn("id: output_formats", package_text)
 
     def test_ome_zarr_deconvolution_streams_directly_to_zarr_output(self):
         script_text = (ROOT / "workflow/scripts/decon_wrapper.py").read_text(encoding="utf-8")
@@ -1188,10 +1196,7 @@ class DeconvolutionWiringTest(unittest.TestCase):
         script_text = (ROOT / "workflow/scripts/decon_wrapper.py").read_text(encoding="utf-8")
 
         self.assertIn("pyramid_max_downsample = 16", config_text)
-        self.assertIn("id: pyramid_max_downsample", package_text)
-        self.assertIn("type: select", package_text)
-        self.assertIn("required: true", package_text)
-        self.assertIn("default: '16'", package_text)
+        self.assertNotIn("id: pyramid_max_downsample", package_text)
         self.assertIn("pyramid_max_downsample_flag = flag('pyramid_max_downsample', params.pyramid_max_downsample)", modules_text)
         self.assertIn("${pyramid_max_downsample_flag}", modules_text)
         self.assertIn('parser.add_argument("--pyramid_max_downsample"', script_text)

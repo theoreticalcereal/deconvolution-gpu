@@ -22,9 +22,10 @@ from pathlib import Path
 
 import dask.array as da
 import numpy as np
+import yaml
 from tifffile import imwrite
 
-from petakit_rl import restore_uint16_cupy
+from petakit_rl import restore_uint16_cupy, restore_uint16_petakit_cpu
 
 from psf_estimation import (
     DEFAULT_BLIND_CHUNK_XY,
@@ -76,6 +77,320 @@ except ModuleNotFoundError:
 # ---------------------------------------------------------------------------
 
 CHANNEL_TIMEPOINT_RE = re.compile(r"^CH(?P<channel>\d+)_(?P<timepoint>\d+)(?:_registered_consistent)?$")
+
+IMAGE_AGGRESSIVENESS_PRESETS = {
+    "low": {
+        "blind_backend": "cupy",
+        "cupy_fft_engine": "scout",
+        "decon_backend": "cupy",
+    },
+    "medium": {
+        "blind_backend": "cupy",
+        "cupy_fft_engine": "cupyx",
+        "decon_backend": "cupy",
+        "blind_max_tiles": 0,
+    },
+    "high": {
+        "blind_backend": "matlab",
+        "cupy_fft_engine": "scout",
+        "decon_backend": "petakit",
+    },
+}
+
+MICROSCOPE_PROFILES = {
+    "upright_aslm_36x_ri_1_33": {
+        "label": "Upright ASLM — 36x — RI 1.33",
+        "detection_na": 0.643,
+        "illumination_na": 0.643,
+        "magnification": 36.0,
+        "dxy": 0.181,
+        "ri": 1.33,
+        "light_sheet_angle": 45.0,
+    },
+    "benchtop_mesospim_4x_ri_1_56": {
+        "label": "BenchTop MesoSPIM — 4x — RI 1.56",
+        "detection_na": 0.25,
+        "illumination_na": 0.1,
+        "magnification": 4.0,
+        "dxy": 1.609,
+        "ri": 1.56,
+        "light_sheet_angle": 0.0,
+    },
+    "benchtop_mesospim_10x_ri_1_56": {
+        "label": "BenchTop MesoSPIM — 10x — RI 1.56",
+        "detection_na": 0.431,
+        "illumination_na": 0.1,
+        "magnification": 10.0,
+        "dxy": 0.65,
+        "ri": 1.56,
+        "light_sheet_angle": 0.0,
+    },
+    "benchtop_mesospim_10x_ri_1_52": {
+        "label": "BenchTop MesoSPIM — 10x — RI 1.52",
+        "detection_na": 0.42,
+        "illumination_na": 0.1,
+        "magnification": 10.0,
+        "dxy": 0.65,
+        "ri": 1.52,
+        "light_sheet_angle": 0.0,
+    },
+    "ctaslm_v3_50x_ri_1_56": {
+        "label": "ctASLM v3 — 50x — RI 1.56",
+        "detection_na": 1.2,
+        "illumination_na": 0.7,
+        "magnification": 50.0,
+        "dxy": 0.128,
+        "ri": 1.56,
+        "light_sheet_angle": 0.0,
+    },
+    "ctaslm_v3_50x_ri_1_52": {
+        "label": "ctASLM v3 — 50x — RI 1.52",
+        "detection_na": 1.2,
+        "illumination_na": 0.7,
+        "magnification": 50.0,
+        "dxy": 0.128,
+        "ri": 1.52,
+        "light_sheet_angle": 0.0,
+    },
+    "multiscale_low_res_0_63x_ri_1_56": {
+        "label": "Multiscale - Low Res — 0.63x — RI 1.56",
+        "detection_na": 0.25,
+        "illumination_na": 0.1,
+        "magnification": 0.63,
+        "dxy": 9.7,
+        "ri": 1.56,
+        "light_sheet_angle": 0.0,
+    },
+    "multiscale_low_res_1x_ri_1_56": {
+        "label": "Multiscale - Low Res — 1x — RI 1.56",
+        "detection_na": 0.25,
+        "illumination_na": 0.1,
+        "magnification": 1.0,
+        "dxy": 6.38,
+        "ri": 1.56,
+        "light_sheet_angle": 0.0,
+    },
+    "multiscale_low_res_2x_ri_1_56": {
+        "label": "Multiscale - Low Res — 2x — RI 1.56",
+        "detection_na": 0.25,
+        "illumination_na": 0.1,
+        "magnification": 2.0,
+        "dxy": 3.14,
+        "ri": 1.56,
+        "light_sheet_angle": 0.0,
+    },
+    "multiscale_low_res_3x_ri_1_56": {
+        "label": "Multiscale - Low Res — 3x — RI 1.56",
+        "detection_na": 0.25,
+        "illumination_na": 0.1,
+        "magnification": 3.0,
+        "dxy": 2.12,
+        "ri": 1.56,
+        "light_sheet_angle": 0.0,
+    },
+    "multiscale_low_res_4x_ri_1_56": {
+        "label": "Multiscale - Low Res — 4x — RI 1.56",
+        "detection_na": 0.25,
+        "illumination_na": 0.1,
+        "magnification": 4.0,
+        "dxy": 1.609,
+        "ri": 1.56,
+        "light_sheet_angle": 0.0,
+    },
+    "multiscale_low_res_5x_ri_1_56": {
+        "label": "Multiscale - Low Res — 5x — RI 1.56",
+        "detection_na": 0.25,
+        "illumination_na": 0.1,
+        "magnification": 5.0,
+        "dxy": 1.255,
+        "ri": 1.56,
+        "light_sheet_angle": 0.0,
+    },
+    "multiscale_low_res_6x_ri_1_56": {
+        "label": "Multiscale - Low Res — 6x — RI 1.56",
+        "detection_na": 0.25,
+        "illumination_na": 0.1,
+        "magnification": 6.0,
+        "dxy": 1.044,
+        "ri": 1.56,
+        "light_sheet_angle": 0.0,
+    },
+    "multiscale_high_res_38x_ri_1_56": {
+        "label": "Multiscale - High Res — 38x — RI 1.56",
+        "detection_na": 0.753,
+        "illumination_na": 0.753,
+        "magnification": 38.0,
+        "dxy": 0.171,
+        "ri": 1.56,
+        "light_sheet_angle": 0.0,
+    },
+    "multiscale_high_res_37x_ri_1_52": {
+        "label": "Multiscale - High Res — 37x — RI 1.52",
+        "detection_na": 0.734,
+        "illumination_na": 0.734,
+        "magnification": 37.0,
+        "dxy": 0.171,
+        "ri": 1.52,
+        "light_sheet_angle": 0.0,
+    },
+}
+
+ACQUISITION_MICROSCOPE_NAMES = {
+    "Nanoscale": "Multiscale - High Res",
+    "Macroscale": "Multiscale - Low Res",
+}
+
+SOLVENT_REFRACTIVE_INDICES = {"BABB": 1.56}
+
+
+def resolve_image_aggressiveness(mode: str) -> dict[str, object]:
+    """Return the non-overridable processing policy for an Astrocyte mode."""
+    try:
+        return dict(IMAGE_AGGRESSIVENESS_PRESETS[str(mode).lower()])
+    except KeyError as exc:
+        choices = ", ".join(IMAGE_AGGRESSIVENESS_PRESETS)
+        raise ValueError(f"image_aggressiveness must be one of {choices}, got {mode!r}") from exc
+
+
+def _read_acquisition_metadata(config_file: str | Path) -> dict[str, object]:
+    """Read the optional Navigate acquisition YAML used for inference only."""
+    path = Path(config_file)
+    suffix = path.suffix.lower()
+    if suffix not in {".yml", ".yaml"}:
+        raise ValueError("Acquisition metadata file must have a .yml or .yaml extension")
+
+    with path.open(encoding="utf-8") as handle:
+        values = yaml.safe_load(handle)
+    if not isinstance(values, dict):
+        raise ValueError("Acquisition metadata file must contain a top-level mapping")
+    return values
+
+
+def _required_mapping(parent: dict[str, object], key: str) -> dict[str, object]:
+    value = parent.get(key)
+    if not isinstance(value, dict):
+        raise ValueError(f"Acquisition metadata is missing mapping {key!r}")
+    return value
+
+
+def _infer_profile_from_acquisition(metadata: dict[str, object]) -> str:
+    saving = _required_mapping(metadata, "Saving")
+    state = _required_mapping(metadata, "MicroscopeState")
+    microscope_name = state.get("microscope_name")
+    microscope = ACQUISITION_MICROSCOPE_NAMES.get(str(microscope_name))
+    if microscope is None:
+        supported = ", ".join(ACQUISITION_MICROSCOPE_NAMES)
+        raise ValueError(
+            f"Cannot infer a microscope profile from microscope_name={microscope_name!r}; "
+            f"supported values are {supported}"
+        )
+
+    prefix = str(saving.get("prefix", ""))
+    match = re.search(r"(?<![0-9.])(\d+(?:\.\d+)?)\s*x", prefix, re.IGNORECASE)
+    if match is None:
+        raise ValueError("Cannot infer magnification: Saving.prefix must contain a value such as '38x_'")
+    magnification = float(match.group(1))
+    candidates = [
+        profile_id
+        for profile_id, profile in MICROSCOPE_PROFILES.items()
+        if profile["label"].startswith(microscope)
+        and math.isclose(profile["magnification"], magnification)
+    ]
+
+    solvent = str(saving.get("solvent", "")).strip().upper()
+    ri = SOLVENT_REFRACTIVE_INDICES.get(solvent)
+    if ri is not None:
+        candidates = [
+            profile_id
+            for profile_id in candidates
+            if math.isclose(MICROSCOPE_PROFILES[profile_id]["ri"], ri)
+        ]
+    if len(candidates) != 1:
+        raise ValueError(
+            "Cannot infer a unique microscope profile from acquisition metadata; "
+            "select a microscope profile explicitly."
+        )
+    return candidates[0]
+
+
+def _infer_wavelength_from_acquisition(metadata: dict[str, object]) -> float:
+    state = _required_mapping(metadata, "MicroscopeState")
+    channels = _required_mapping(state, "channels")
+    selected_lasers = [
+        channel.get("laser")
+        for channel in channels.values()
+        if isinstance(channel, dict) and channel.get("is_selected") is True
+    ]
+    if len(selected_lasers) != 1:
+        raise ValueError(
+            "Cannot infer wavelength: acquisition metadata must select exactly one channel"
+        )
+    match = re.search(r"(\d+(?:\.\d+)?)\s*nm", str(selected_lasers[0]), re.IGNORECASE)
+    if match is None:
+        raise ValueError("Cannot infer wavelength from the selected channel laser")
+    return float(match.group(1)) / 1000.0
+
+
+def _infer_dz_from_acquisition(metadata: dict[str, object]) -> float:
+    state = _required_mapping(metadata, "MicroscopeState")
+    try:
+        dz = abs(float(state["step_size"]))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("Cannot infer dz from MicroscopeState.step_size") from exc
+    if dz <= 0:
+        raise ValueError("MicroscopeState.step_size must be non-zero to infer dz")
+    return dz
+
+
+def apply_acquisition_settings(args: argparse.Namespace) -> argparse.Namespace:
+    """Resolve a profile and optional Navigate-derived wavelength/Z spacing."""
+    metadata = _read_acquisition_metadata(args.config_file) if args.config_file else None
+    profile_id = args.microscope_profile
+    profile = None
+    if profile_id == "auto":
+        if metadata is not None:
+            profile_id = _infer_profile_from_acquisition(metadata)
+    if profile_id != "auto":
+        try:
+            profile = MICROSCOPE_PROFILES[profile_id]
+        except KeyError as exc:
+            raise ValueError(f"Unsupported microscope profile: {profile_id!r}") from exc
+
+        args.microscope_profile = profile_id
+        args.na = profile["detection_na"]
+        args.detection_na = profile["detection_na"]
+        args.illumination_na = profile["illumination_na"]
+        args.magnification = profile["magnification"]
+        args.dxy = profile["dxy"]
+        args.ni = profile["ri"]
+        args.ns = profile["ri"]
+        args.light_sheet_angle = profile["light_sheet_angle"]
+    if args.wavelength is None and metadata is not None:
+        args.wavelength = _infer_wavelength_from_acquisition(metadata)
+    if args.dz is None and metadata is not None:
+        args.dz = _infer_dz_from_acquisition(metadata)
+    for key, value in resolve_image_aggressiveness(args.image_aggressiveness).items():
+        setattr(args, key, value)
+    if args.decon_backend == "petakit":
+        args.vram_gb = None
+    return args
+
+
+def parse_workflow_arguments(argv: list[str]) -> argparse.Namespace:
+    """Parse Astrocyte's public inputs for parameter-intake contract tests."""
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--image_path", required=True)
+    parser.add_argument("--config_file", default="")
+    parser.add_argument("--microscope_profile", choices=("auto", *MICROSCOPE_PROFILES), required=True)
+    parser.add_argument("--wavelength", type=float, default=None)
+    parser.add_argument("--dz", type=float, default=None)
+    parser.add_argument(
+        "--image_aggressiveness",
+        choices=tuple(IMAGE_AGGRESSIVENESS_PRESETS),
+        required=True,
+    )
+    args = parser.parse_args(argv)
+    return apply_acquisition_settings(args)
 
 
 def _tiff_stem(filename: str) -> str:
@@ -261,9 +576,10 @@ def _decon_chunk(
     n_iters: int,
     background: float,
     total_chunks: int,
+    decon_backend: str = "cupy",
     block_info: dict | None = None,
 ) -> np.ndarray:
-    """Process one spatial chunk with Petakit-compatible CuPy RL."""
+    """Process one spatial chunk with the selected Petakit-compatible backend."""
     _, chunk_label = _chunk_progress(block_info, total_chunks)
     if chunk.size == 0:
         return chunk
@@ -274,12 +590,22 @@ def _decon_chunk(
     )
 
     start = time.perf_counter()
-    result = restore_uint16_cupy(
-        chunk,
-        psf,
-        n_iters,
-        background=background,
-    )
+    if decon_backend == "cupy":
+        result = restore_uint16_cupy(
+            chunk,
+            psf,
+            n_iters,
+            background=background,
+        )
+    elif decon_backend == "petakit":
+        result = restore_uint16_petakit_cpu(
+            chunk,
+            psf,
+            n_iters,
+            background=background,
+        )
+    else:
+        raise ValueError(f"Unsupported deconvolution backend {decon_backend!r}")
     elapsed = time.perf_counter() - start
     avg_iter = elapsed / n_iters if n_iters > 0 else elapsed
 
@@ -432,6 +758,7 @@ def _build_deconvolution_graph(
     vram_gb: float | None = None,
     decon_workers: int = 1,
     overlap_xy: int = 0,
+    decon_backend: str = "cupy",
 ) -> tuple[da.Array, int]:
     """
     Build a lazy deconvolution graph for a single 3-D volume.
@@ -447,12 +774,13 @@ def _build_deconvolution_graph(
     if overlap_xy > 0:
         halo_y = max(halo_y, int(overlap_xy))
         halo_x = max(halo_x, int(overlap_xy))
-    if decon_workers != 1:
+    if decon_backend == "cupy" and decon_workers != 1:
         log_progress(
             f"  CuPy restoration uses one GPU worker per allocation; "
             f"clamping decon_workers={decon_workers} to 1"
         )
-    decon_workers = 1
+    if decon_backend == "cupy":
+        decon_workers = 1
     nz, ny, nx = (int(size) for size in volume.shape)
     halo_z = min(halo_z, max(0, nz - 1))
     halo_y = min(halo_y, max(0, ny - 1))
@@ -534,6 +862,7 @@ def _build_deconvolution_graph(
         "n_iters": n_iters,
         "background": background,
         "total_chunks": total_chunks,
+        "decon_backend": decon_backend,
     }
     if total_chunks == 1:
         return da.map_blocks(
@@ -571,6 +900,7 @@ def deconvolve_volume(
     vram_gb: float | None = None,
     decon_workers: int = 1,
     overlap_xy: int = 0,
+    decon_backend: str = "cupy",
 ) -> np.ndarray:
     del dz, dxy, wavelength, na, ni
     processed, decon_workers = _build_deconvolution_graph(
@@ -583,10 +913,11 @@ def deconvolve_volume(
         vram_gb=vram_gb,
         decon_workers=decon_workers,
         overlap_xy=overlap_xy,
+        decon_backend=decon_backend,
     )
     scheduler = _deconvolution_scheduler(decon_workers)
     log_progress(
-        f"Computing Petakit-compatible CuPy deconvolution graph for {image_name}: "
+        f"Computing {decon_backend} Petakit-compatible deconvolution graph for {image_name}: "
         f"scheduler={scheduler}, workers={decon_workers}"
     )
     return processed.compute(scheduler=scheduler, num_workers=decon_workers)
@@ -606,6 +937,7 @@ def deconvolve_tiff(
     vram_gb: float | None = None,
     decon_workers: int = 1,
     overlap_xy: int = 0,
+    decon_backend: str = "cupy",
 ) -> np.ndarray:
     log_progress(f"Opening TIFF for deconvolution: {image_path}")
     volume = open_tiff_memmap(image_path)
@@ -624,6 +956,7 @@ def deconvolve_tiff(
         vram_gb=vram_gb,
         decon_workers=decon_workers,
         overlap_xy=overlap_xy,
+        decon_backend=decon_backend,
     )
 
 
@@ -693,6 +1026,7 @@ def deconvolve_ome_zarr_to_zarr(
     decon_workers: int = 1,
     overlap_xy: int = 0,
     max_downsample: int = 16,
+    decon_backend: str = "cupy",
 ) -> Path:
     log_progress(f"Opening OME-Zarr for streaming deconvolution: {image_path}")
     volume = open_ome_zarr_array(image_path, mode="r")
@@ -711,6 +1045,7 @@ def deconvolve_ome_zarr_to_zarr(
         vram_gb=vram_gb,
         decon_workers=decon_workers,
         overlap_xy=overlap_xy,
+        decon_backend=decon_backend,
     )
     scheduler = _deconvolution_scheduler(decon_workers)
     final_array = create_ome_zarr_array(
@@ -745,6 +1080,14 @@ def main() -> None:
     # Required options
     parser.add_argument("--image_path", required=True,
                         help="Directory containing normalized OME-Zarr or TIFF image volumes.")
+    parser.add_argument("--config_file", default="",
+                        help="Optional Navigate acquisition YAML used to infer profile, wavelength, and dz.")
+    parser.add_argument("--microscope_profile", default="auto",
+                        choices=("auto", *MICROSCOPE_PROFILES),
+                        help="Complete microscope/magnification/RI profile, or auto to infer it from acquisition YAML.")
+    parser.add_argument("--image_aggressiveness", default="medium",
+                        choices=tuple(IMAGE_AGGRESSIVENESS_PRESETS),
+                        help="Astrocyte speed/accuracy preset that fixes processing engines and queue policy.")
     parser.add_argument("--output_format", choices=("ozx", "tiff"), default="ozx",
                         help="Final output representation requested by the workflow.")
 
@@ -814,6 +1157,8 @@ def main() -> None:
                         help="Disable reuse of cached blind PSF estimates.")
 
     # Deconvolution options
+    parser.add_argument("--decon_backend", choices=("cupy", "petakit"), default="cupy",
+                        help="Deconvolution backend; controlled by image_aggressiveness in Astrocyte runs.")
     parser.add_argument("--iter",       type=int,   default=10,
                         help="RL deconvolution iterations.")
     parser.add_argument("--background", type=float, default=0.0,
@@ -874,6 +1219,10 @@ def main() -> None:
                         help="Directory containing readtiffstack.m / writetiffstack.m.")
 
     args = parser.parse_args()
+    try:
+        args = apply_acquisition_settings(args)
+    except ValueError as exc:
+        parser.error(str(exc))
     args.blind_backend, args.cupy_fft_engine = normalize_blind_backend(
         args.blind_backend,
         args.cupy_fft_engine,
@@ -1044,6 +1393,7 @@ def main() -> None:
                 decon_workers=args.decon_workers,
                 overlap_xy=args.overlap_xy,
                 max_downsample=args.pyramid_max_downsample,
+                decon_backend=args.decon_backend,
             )
         else:
             output = deconvolve_tiff(
@@ -1060,6 +1410,7 @@ def main() -> None:
                 vram_gb=args.vram_gb,
                 decon_workers=args.decon_workers,
                 overlap_xy=args.overlap_xy,
+                decon_backend=args.decon_backend,
             )
             out_name = _write_materialized_decon_output(
                 output,
