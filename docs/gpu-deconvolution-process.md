@@ -1,6 +1,7 @@
 # GPU Deconvolution Process
 
-`DECON` runs chunkwise Richardson-Lucy deconvolution on GPU with cuCIM. It is
+`DECON` runs chunkwise Richardson-Lucy deconvolution through the generic CuPy
+backend for low/medium presets and MATLAB for the high preset. It is
 orchestrated by `workflow/scripts/decon_wrapper.py`.
 
 The current workflow uses OME-Zarr internally and OZX for published native
@@ -43,9 +44,9 @@ OME-Zarr inputs are opened directly at level 0 for PSF tiling; only temporary
 tile inputs, seed PSFs, tile PSF outputs, and merged `estimated_psf.tif` are
 written as TIFFs. Native CuPy workers read and write those files in isolated
 spawned processes. MATLAB mode passes the same files to `deconvblind`. The
-wrapper normalizes the merged PSF and passes it directly to
-`cucim.skimage.restoration.richardson_lucy`. No temporary OTF or legacy CUDA
-Decon conversion is required.
+wrapper normalizes the merged PSF. Low and medium presets pass it directly to
+the generic CuPy implementation; high mode gives it to MATLAB `deconvlucy`.
+No external Petakit installation is required.
 
 Temporary PSF files are removed after processing. The published
 `estimated_psf.tif` is retained as the reproducible PSF artifact for the run.
@@ -83,12 +84,12 @@ overlap_xy = min(48, max(16, ceil(max(psf_y, psf_x) / 4)))
 The overlap is capped so it cannot exceed half of the smallest image XY
 dimension.
 
-## Per-Chunk GPU Work
+## Per-Chunk Restoration Work
 
-For each overlapped chunk, `_decon_chunk`:
+For low/medium presets, each overlapped chunk, `_decon_chunk`:
 
 1. Transfers the chunk and normalized PSF to CuPy.
-2. Runs cuCIM Richardson-Lucy with `n_iters = iter` and `clip=False`.
+2. Runs generic accelerated CuPy Richardson-Lucy with `n_iters = iter`.
 3. Copies the restored chunk back to host memory.
 4. Synchronizes the device, clears the cuFFT plan cache, and releases all
    cached blocks from CuPy's default device-memory pool, including on errors.
@@ -100,13 +101,19 @@ each chunk, but prevents completed chunks from reserving most of an 8 GiB GPU
 and starving the next FFT allocation.
 
 The deconvolution worker count is clamped to one because the Nextflow process
-owns one GPU. Dask sequences chunks through that GPU without concurrent cuCIM
+owns one GPU. Dask sequences chunks through that GPU without concurrent CuPy
 contexts competing for device memory.
 
 This is independent of `blind_workers`, which controls PSF tile tasks and
 launches one spawned process per active CuPy tile. For a one-GPU Slurm
 allocation, keep both values at `1` unless memory and throughput have been
 measured on the target GPU.
+
+For the high preset, the same chunk/halo handoff writes temporary TIFF inputs,
+invokes MATLAB `deconvlucy`, and reads the uint16 result back into Dask. The
+high preset already binds the host MATLAB installation into Singularity and has
+no GPU allocation; it uses MATLAB for both blind PSF estimation and final
+deconvolution.
 
 ## Intensity Rescaling
 

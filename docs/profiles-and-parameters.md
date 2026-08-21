@@ -68,7 +68,7 @@ detection NA and 0.1 illumination NA values.
 | --- | --- | --- | --- |
 | `low` | `GPUp40` | CuPy scout mode | CuPy |
 | `medium` | `GPUp40` | CuPy direct mode over every blind chunk | CuPy |
-| `high` | `256GBv1` | MATLAB `deconvblind` | CPU Petakit-compatible RL |
+| `high` | `256GBv1` | MATLAB `deconvblind` | MATLAB `deconvlucy` |
 
 The `high` preset deliberately receives no GPU allocation. The lightweight
 input-staging and export processes continue to use the general queue.

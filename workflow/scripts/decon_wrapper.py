@@ -7,8 +7,9 @@
 #   recovered per-chunk blind PSFs with SNR weighting and save estimated_psf.tif.
 #
 # Deconvolution:
-#   Petakit-compatible accelerated Richardson-Lucy runs as one whole-volume
-#   CuPy FFT when VRAM permits, with PSF-sized 3-D overlap as a fallback.
+#   Generic accelerated Richardson-Lucy runs as one whole-volume CuPy FFT when
+#   VRAM permits, with PSF-sized 3-D overlap as a fallback. The CPU accuracy
+#   preset delegates both PSF estimation and restoration to MATLAB.
 
 from __future__ import annotations
 
@@ -25,7 +26,8 @@ import numpy as np
 import yaml
 from tifffile import imwrite
 
-from petakit_rl import restore_uint16_cupy, restore_uint16_petakit_cpu
+from matlab_deconvolution import restore_uint16_matlab
+from richardson_lucy import restore_uint16_cupy
 
 from psf_estimation import (
     DEFAULT_BLIND_CHUNK_XY,
@@ -93,7 +95,7 @@ IMAGE_AGGRESSIVENESS_PRESETS = {
     "high": {
         "blind_backend": "matlab",
         "cupy_fft_engine": "scout",
-        "decon_backend": "petakit",
+        "decon_backend": "matlab",
     },
 }
 
@@ -461,7 +463,7 @@ def apply_acquisition_settings(args: argparse.Namespace) -> argparse.Namespace:
         args.dz = _infer_dz_from_acquisition(metadata)
     for key, value in resolve_image_aggressiveness(args.image_aggressiveness).items():
         setattr(args, key, value)
-    if args.decon_backend == "petakit":
+    if args.decon_backend == "matlab":
         args.vram_gb = None
     return args
 
@@ -667,9 +669,12 @@ def _decon_chunk(
     background: float,
     total_chunks: int,
     decon_backend: str = "cupy",
+    matlab_bin: str = "matlab",
+    matlab_threads: int = 1,
+    matlab_timeout: int = 1800,
     block_info: dict | None = None,
 ) -> np.ndarray:
-    """Process one spatial chunk with the selected Petakit-compatible backend."""
+    """Process one spatial chunk with the selected deconvolution backend."""
     _, chunk_label = _chunk_progress(block_info, total_chunks)
     if chunk.size == 0:
         return chunk
@@ -687,12 +692,15 @@ def _decon_chunk(
             n_iters,
             background=background,
         )
-    elif decon_backend == "petakit":
-        result = restore_uint16_petakit_cpu(
+    elif decon_backend == "matlab":
+        result = restore_uint16_matlab(
             chunk,
             psf,
             n_iters,
             background=background,
+            matlab_bin=matlab_bin,
+            matlab_threads=matlab_threads,
+            matlab_timeout=matlab_timeout,
         )
     else:
         raise ValueError(f"Unsupported deconvolution backend {decon_backend!r}")
@@ -716,7 +724,7 @@ DECON_WORKSPACE_BYTES_PER_VOXEL = 80.0
 
 
 def _psf_halo(psf_shape: tuple[int, int, int]) -> tuple[int, int, int]:
-    """Return Petakit's large-file border size for each PSF axis."""
+    """Return a conservative large-file border size for each PSF axis."""
     if len(psf_shape) != 3 or any(int(size) <= 0 for size in psf_shape):
         raise ValueError(f"PSF shape must contain three positive axes, got {psf_shape}")
     return tuple((int(size) + 11) // 2 for size in psf_shape)
@@ -849,6 +857,9 @@ def _build_deconvolution_graph(
     decon_workers: int = 1,
     overlap_xy: int = 0,
     decon_backend: str = "cupy",
+    matlab_bin: str = "matlab",
+    matlab_threads: int = 1,
+    matlab_timeout: int = 1800,
 ) -> tuple[da.Array, int]:
     """
     Build a lazy deconvolution graph for a single 3-D volume.
@@ -953,6 +964,9 @@ def _build_deconvolution_graph(
         "background": background,
         "total_chunks": total_chunks,
         "decon_backend": decon_backend,
+        "matlab_bin": matlab_bin,
+        "matlab_threads": matlab_threads,
+        "matlab_timeout": matlab_timeout,
     }
     if total_chunks == 1:
         return da.map_blocks(
@@ -991,6 +1005,9 @@ def deconvolve_volume(
     decon_workers: int = 1,
     overlap_xy: int = 0,
     decon_backend: str = "cupy",
+    matlab_bin: str = "matlab",
+    matlab_threads: int = 1,
+    matlab_timeout: int = 1800,
 ) -> np.ndarray:
     del dz, dxy, wavelength, na, ni
     processed, decon_workers = _build_deconvolution_graph(
@@ -1004,10 +1021,13 @@ def deconvolve_volume(
         decon_workers=decon_workers,
         overlap_xy=overlap_xy,
         decon_backend=decon_backend,
+        matlab_bin=matlab_bin,
+        matlab_threads=matlab_threads,
+        matlab_timeout=matlab_timeout,
     )
     scheduler = _deconvolution_scheduler(decon_workers)
     log_progress(
-        f"Computing {decon_backend} Petakit-compatible deconvolution graph for {image_name}: "
+        f"Computing {decon_backend} deconvolution graph for {image_name}: "
         f"scheduler={scheduler}, workers={decon_workers}"
     )
     return processed.compute(scheduler=scheduler, num_workers=decon_workers)
@@ -1028,6 +1048,9 @@ def deconvolve_tiff(
     decon_workers: int = 1,
     overlap_xy: int = 0,
     decon_backend: str = "cupy",
+    matlab_bin: str = "matlab",
+    matlab_threads: int = 1,
+    matlab_timeout: int = 1800,
 ) -> np.ndarray:
     log_progress(f"Opening TIFF for deconvolution: {image_path}")
     volume = open_tiff_memmap(image_path)
@@ -1047,6 +1070,9 @@ def deconvolve_tiff(
         decon_workers=decon_workers,
         overlap_xy=overlap_xy,
         decon_backend=decon_backend,
+        matlab_bin=matlab_bin,
+        matlab_threads=matlab_threads,
+        matlab_timeout=matlab_timeout,
     )
 
 
@@ -1064,6 +1090,10 @@ def deconvolve_ome_zarr(
     vram_gb: float | None = None,
     decon_workers: int = 1,
     overlap_xy: int = 0,
+    decon_backend: str = "cupy",
+    matlab_bin: str = "matlab",
+    matlab_threads: int = 1,
+    matlab_timeout: int = 1800,
 ) -> np.ndarray:
     log_progress(f"Opening OME-Zarr for deconvolution: {image_path}")
     volume = open_ome_zarr_array(image_path, mode="r")
@@ -1082,6 +1112,10 @@ def deconvolve_ome_zarr(
         vram_gb=vram_gb,
         decon_workers=decon_workers,
         overlap_xy=overlap_xy,
+        decon_backend=decon_backend,
+        matlab_bin=matlab_bin,
+        matlab_threads=matlab_threads,
+        matlab_timeout=matlab_timeout,
     )
 
 
@@ -1117,6 +1151,9 @@ def deconvolve_ome_zarr_to_zarr(
     overlap_xy: int = 0,
     max_downsample: int = 16,
     decon_backend: str = "cupy",
+    matlab_bin: str = "matlab",
+    matlab_threads: int = 1,
+    matlab_timeout: int = 1800,
 ) -> Path:
     log_progress(f"Opening OME-Zarr for streaming deconvolution: {image_path}")
     volume = open_ome_zarr_array(image_path, mode="r")
@@ -1136,6 +1173,9 @@ def deconvolve_ome_zarr_to_zarr(
         decon_workers=decon_workers,
         overlap_xy=overlap_xy,
         decon_backend=decon_backend,
+        matlab_bin=matlab_bin,
+        matlab_threads=matlab_threads,
+        matlab_timeout=matlab_timeout,
     )
     scheduler = _deconvolution_scheduler(decon_workers)
     final_array = create_ome_zarr_array(
@@ -1247,7 +1287,7 @@ def main() -> None:
                         help="Disable reuse of cached blind PSF estimates.")
 
     # Deconvolution options
-    parser.add_argument("--decon_backend", choices=("cupy", "petakit"), default="cupy",
+    parser.add_argument("--decon_backend", choices=("cupy", "matlab"), default="cupy",
                         help="Deconvolution backend; controlled by image_aggressiveness in Astrocyte runs.")
     parser.add_argument("--iter",       type=int,   default=10,
                         help="RL deconvolution iterations.")
@@ -1484,6 +1524,9 @@ def main() -> None:
                 overlap_xy=args.overlap_xy,
                 max_downsample=args.pyramid_max_downsample,
                 decon_backend=args.decon_backend,
+                matlab_bin=args.matlab_bin,
+                matlab_threads=args.matlab_threads,
+                matlab_timeout=args.matlab_timeout,
             )
         else:
             output = deconvolve_tiff(
@@ -1501,6 +1544,9 @@ def main() -> None:
                 decon_workers=args.decon_workers,
                 overlap_xy=args.overlap_xy,
                 decon_backend=args.decon_backend,
+                matlab_bin=args.matlab_bin,
+                matlab_threads=args.matlab_threads,
+                matlab_timeout=args.matlab_timeout,
             )
             out_name = _write_materialized_decon_output(
                 output,
