@@ -73,7 +73,7 @@ process DECON {
     containerOptions = { params.image_aggressiveness == 'high' ? '-B /home1/apps/MATLAB:/home1/apps/MATLAB' : '--nv -B /home1/apps/MATLAB:/home1/apps/MATLAB' }
 
     publishDir "${params.output_dir}", mode: 'copy', pattern: 'estimated_psf.tif'
-    publishDir "${params.output_dir}", mode: 'copy', pattern: 'DB2_*.{ozx,tif,tiff}'
+    publishDir "${params.output_dir}", mode: 'copy', pattern: 'DB2_*'
 
     maxForks 8
     scratch true
@@ -87,7 +87,7 @@ process DECON {
     val  pyramid_max_downsample
 
     output:
-    path "DB2_*.{ozx,tif,tiff}", emit: decon_output
+    path "DB2_*", emit: decon_output
     path "estimated_psf.tif", emit: psf_output
 
     script:
