@@ -49,28 +49,38 @@ class AstrocyteParameterIntakeTests(unittest.TestCase):
                 "output_selection",
             ],
         )
+        select_labels = [
+            choice[1]
+            for parameter in parameters
+            if parameter["type"] == "select"
+            for choice in parameter["choices"]
+        ]
+        self.assertFalse(
+            any("—" in label for label in select_labels),
+            "Profile selection labels should avoid em dashes for Astrocyte display",
+        )
         self.assertEqual(parameters[1]["type"], "select")
         self.assertTrue(parameters[1]["required"])
         self.assertEqual(
             parameters[1]["choices"],
             [
                 ["auto", "Infer from optional acquisition YAML"],
-                ["upright_aslm_36x_ri_1_33", "Upright ASLM — 36x — RI 1.33"],
-                ["benchtop_mesospim_4x_ri_1_56", "BenchTop MesoSPIM — 4x — RI 1.56"],
-                ["benchtop_mesospim_10x_ri_1_56", "BenchTop MesoSPIM — 10x — RI 1.56"],
-                ["benchtop_mesospim_10x_ri_1_52", "BenchTop MesoSPIM — 10x — RI 1.52"],
-                ["ctaslm_v3_50x_ri_1_56", "ctASLM v3 — 50x — RI 1.56"],
-                ["ctaslm_v3_50x_ri_1_52", "ctASLM v3 — 50x — RI 1.52"],
-                ["multiscale_low_res_0_63x_ri_1_56", "Multiscale - Low Res — 0.63x — RI 1.56"],
-                ["multiscale_low_res_1x_ri_1_56", "Multiscale - Low Res — 1x — RI 1.56"],
-                ["multiscale_low_res_2x_ri_1_56", "Multiscale - Low Res — 2x — RI 1.56"],
-                ["multiscale_low_res_3x_ri_1_56", "Multiscale - Low Res — 3x — RI 1.56"],
-                ["multiscale_low_res_4x_ri_1_56", "Multiscale - Low Res — 4x — RI 1.56"],
-                ["multiscale_low_res_5x_ri_1_56", "Multiscale - Low Res — 5x — RI 1.56"],
-                ["multiscale_low_res_6x_ri_1_56", "Multiscale - Low Res — 6x — RI 1.56"],
-                ["multiscale_high_res_38x_ri_1_56", "Multiscale - High Res — 38x — RI 1.56"],
-                ["multiscale_high_res_37x_ri_1_52", "Multiscale - High Res — 37x — RI 1.52"],
-                ["custom", "Custom — provide deconvolution parameters YAML"],
+                ["upright_aslm_36x_ri_1_33", "Upright ASLM - 36x - RI 1.33"],
+                ["benchtop_mesospim_4x_ri_1_56", "BenchTop MesoSPIM - 4x - RI 1.56"],
+                ["benchtop_mesospim_10x_ri_1_56", "BenchTop MesoSPIM - 10x - RI 1.56"],
+                ["benchtop_mesospim_10x_ri_1_52", "BenchTop MesoSPIM - 10x - RI 1.52"],
+                ["ctaslm_v3_50x_ri_1_56", "ctASLM v3 - 50x - RI 1.56"],
+                ["ctaslm_v3_50x_ri_1_52", "ctASLM v3 - 50x - RI 1.52"],
+                ["multiscale_low_res_0_63x_ri_1_56", "Multiscale - Low Res - 0.63x - RI 1.56"],
+                ["multiscale_low_res_1x_ri_1_56", "Multiscale - Low Res - 1x - RI 1.56"],
+                ["multiscale_low_res_2x_ri_1_56", "Multiscale - Low Res - 2x - RI 1.56"],
+                ["multiscale_low_res_3x_ri_1_56", "Multiscale - Low Res - 3x - RI 1.56"],
+                ["multiscale_low_res_4x_ri_1_56", "Multiscale - Low Res - 4x - RI 1.56"],
+                ["multiscale_low_res_5x_ri_1_56", "Multiscale - Low Res - 5x - RI 1.56"],
+                ["multiscale_low_res_6x_ri_1_56", "Multiscale - Low Res - 6x - RI 1.56"],
+                ["multiscale_high_res_38x_ri_1_56", "Multiscale - High Res - 38x - RI 1.56"],
+                ["multiscale_high_res_37x_ri_1_52", "Multiscale - High Res - 37x - RI 1.52"],
+                ["custom", "Custom - provide deconvolution parameters YAML"],
             ],
         )
         self.assertEqual(parameters[2]["type"], "files")
@@ -81,9 +91,9 @@ class AstrocyteParameterIntakeTests(unittest.TestCase):
         self.assertEqual(
             parameters[5]["choices"],
             [
-                ["low", "Low — fastest GPU processing"],
-                ["medium", "Medium — balanced GPU processing"],
-                ["high", "High — maximum-accuracy CPU processing"],
+                ["low", "Low - fastest GPU processing"],
+                ["medium", "Medium - balanced GPU processing"],
+                ["high", "High - maximum-accuracy CPU processing"],
             ],
         )
         self.assertEqual(parameters[6]["type"], "select")

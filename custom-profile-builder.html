@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>3D Deconvolution Custom Profile Builder</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1f2933;
+      --muted: #5f6f7f;
+      --line: #c8d3df;
+      --panel: #f7f9fb;
+      --accent: #0f766e;
+      --accent-dark: #0b5f59;
+      --warn: #8a4b0f;
+      --white: #ffffff;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #eef3f7;
+      font-family: Arial, Helvetica, sans-serif;
+      line-height: 1.45;
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      background: var(--white);
+    }
+
+    .wrap {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+    }
+
+    header .wrap {
+      padding: 24px 0 20px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(1.6rem, 3vw, 2.4rem);
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    main.wrap {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+      gap: 24px;
+      padding: 24px 0 32px;
+    }
+
+    form,
+    aside {
+      background: var(--white);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    section {
+      padding: 20px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    section:last-child {
+      border-bottom: 0;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 1rem;
+      letter-spacing: 0;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    label {
+      display: grid;
+      gap: 6px;
+      font-size: 0.88rem;
+      font-weight: 700;
+    }
+
+    .hint {
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 400;
+    }
+
+    input,
+    select {
+      width: 100%;
+      min-height: 38px;
+      padding: 8px 10px;
+      border: 1px solid #aebdca;
+      border-radius: 6px;
+      color: var(--ink);
+      background: var(--white);
+      font: inherit;
+    }
+
+    input:focus,
+    select:focus,
+    button:focus-visible {
+      outline: 3px solid rgba(15, 118, 110, 0.22);
+      outline-offset: 1px;
+      border-color: var(--accent);
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding: 20px;
+      background: var(--panel);
+      border-top: 1px solid var(--line);
+      border-radius: 0 0 8px 8px;
+    }
+
+    button {
+      min-height: 40px;
+      padding: 9px 14px;
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      color: var(--white);
+      background: var(--accent);
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    button.secondary {
+      color: var(--accent-dark);
+      background: var(--white);
+    }
+
+    button:hover {
+      background: var(--accent-dark);
+      border-color: var(--accent-dark);
+    }
+
+    button.secondary:hover {
+      color: var(--white);
+    }
+
+    aside {
+      position: sticky;
+      top: 16px;
+      align-self: start;
+      overflow: hidden;
+    }
+
+    .preview-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    .preview-head h2 {
+      margin: 0;
+    }
+
+    .status {
+      color: var(--warn);
+      font-size: 0.8rem;
+      font-weight: 700;
+    }
+
+    pre {
+      min-height: 420px;
+      max-height: 70vh;
+      margin: 0;
+      padding: 18px;
+      overflow: auto;
+      color: #102a43;
+      background: #fbfdff;
+      font: 0.88rem/1.5 "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    @media (max-width: 860px) {
+      main.wrap {
+        grid-template-columns: 1fr;
+      }
+
+      aside {
+        position: static;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>3D Deconvolution Custom Profile Builder</h1>
+      <p>Export a flat YAML parameter file for the Astrocyte Custom profile.</p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <form id="profile-form">
+      <section>
+        <h2>Core Optics</h2>
+        <div class="grid" id="core-fields"></div>
+      </section>
+
+      <section>
+        <h2>PSF And Deconvolution</h2>
+        <div class="grid" id="processing-fields"></div>
+      </section>
+
+      <section>
+        <h2>Advanced Tuning</h2>
+        <div class="grid" id="advanced-fields"></div>
+      </section>
+
+      <div class="actions">
+        <button type="button" id="download-button">Download YAML</button>
+        <button type="button" class="secondary" id="copy-button">Copy YAML</button>
+        <button type="reset" class="secondary">Reset</button>
+      </div>
+    </form>
+
+    <aside aria-live="polite">
+      <div class="preview-head">
+        <h2>YAML Preview</h2>
+        <span class="status" id="status">Ready</span>
+      </div>
+      <pre id="yaml-preview"></pre>
+    </aside>
+  </main>
+
+  <script>
+    const CUSTOM_YAML_FIELDS = [
+      { key: "wavelength", label: "Emission wavelength", section: "core", type: "number", step: "0.001", min: "0.001", value: "0.561", hint: "Micrometers." },
+      { key: "dxy", label: "XY pixel size", section: "core", type: "number", step: "0.001", min: "0.001", value: "0.128", hint: "Micrometers per pixel." },
+      { key: "dz", label: "Z spacing", section: "core", type: "number", step: "0.001", min: "0.001", value: "0.300", hint: "Micrometers between planes." },
+      { key: "detection_na", label: "Detection NA", section: "core", type: "number", step: "0.001", min: "0", value: "1.2" },
+      { key: "illumination_na", label: "Illumination NA", section: "core", type: "number", step: "0.001", min: "0", value: "0.7" },
+      { key: "ni", label: "Immersion RI", section: "core", type: "number", step: "0.001", min: "1", value: "1.56" },
+      { key: "ns", label: "Sample RI", section: "core", type: "number", step: "0.001", min: "1", value: "1.56" },
+      { key: "magnification", label: "Magnification", section: "core", type: "number", step: "0.01", min: "0.01", value: "50" },
+      { key: "light_sheet_angle", label: "Light-sheet angle", section: "core", type: "number", step: "0.1", min: "0", value: "0", hint: "Degrees." },
+      { key: "camera_pixel_size", label: "Camera pixel size", section: "core", type: "number", step: "0.001", min: "0.001", value: "", hint: "Leave blank unless magnification should resolve dxy." },
+
+      { key: "iter", label: "RL iterations", section: "processing", type: "number", step: "1", min: "1", value: "10" },
+      { key: "background", label: "Background", section: "processing", type: "number", step: "0.1", min: "0", value: "0" },
+      { key: "psf_model", label: "PSF model", section: "processing", type: "select", value: "vectorial", options: ["vectorial", "scalar", "gaussian"] },
+      { key: "psf_mode", label: "PSF mode", section: "processing", type: "select", value: "single", options: ["single", "light_sheet"] },
+      { key: "psf_size_z", label: "PSF size Z", section: "processing", type: "number", step: "1", min: "1", value: "61" },
+      { key: "psf_size_xy", label: "PSF size XY", section: "processing", type: "number", step: "1", min: "1", value: "129" },
+      { key: "oversample_factor", label: "Oversample factor", section: "processing", type: "number", step: "1", min: "1", value: "3" },
+      { key: "psf_seed_path", label: "PSF seed path", section: "processing", type: "text", value: "", hint: "Optional path visible to the workflow run." },
+      { key: "fixed_psf_path", label: "Fixed PSF path", section: "processing", type: "text", value: "", hint: "Optional path visible to the workflow run." },
+
+      { key: "blind_iters", label: "Blind PSF iterations", section: "advanced", type: "number", step: "1", min: "1", value: "8" },
+      { key: "chunk_xy", label: "Blind chunk XY", section: "advanced", type: "number", step: "1", min: "1", value: "256" },
+      { key: "blind_max_tiles", label: "Blind max tiles", section: "advanced", type: "number", step: "1", min: "0", value: "16" },
+      { key: "decon_chunk_xy", label: "Decon chunk XY", section: "advanced", type: "number", step: "1", min: "0", value: "0" },
+      { key: "pad_xy", label: "XY padding", section: "advanced", type: "number", step: "1", min: "0", value: "32" },
+      { key: "pad_z", label: "Z padding", section: "advanced", type: "number", step: "1", min: "0", value: "20" },
+      { key: "blind_workers", label: "Blind workers", section: "advanced", type: "number", step: "1", min: "1", value: "1" },
+      { key: "decon_workers", label: "Decon workers", section: "advanced", type: "number", step: "1", min: "1", value: "1" },
+      { key: "matlab_threads", label: "MATLAB threads", section: "advanced", type: "number", step: "1", min: "1", value: "1" },
+      { key: "matlab_workers", label: "MATLAB workers", section: "advanced", type: "number", step: "1", min: "1", value: "1" },
+      { key: "matlab_timeout", label: "MATLAB timeout", section: "advanced", type: "number", step: "1", min: "1", value: "1800" },
+      { key: "blind_z_slices", label: "Blind Z slices", section: "advanced", type: "number", step: "1", min: "1", value: "128" },
+      { key: "snr_weight_cap", label: "SNR weight cap", section: "advanced", type: "number", step: "0.1", min: "0", value: "100" },
+      { key: "pyramid_max_downsample", label: "Pyramid max downsample", section: "advanced", type: "select", value: "16", options: ["1", "2", "4", "8", "16"] }
+    ];
+
+    const sectionTargets = {
+      core: document.getElementById("core-fields"),
+      processing: document.getElementById("processing-fields"),
+      advanced: document.getElementById("advanced-fields")
+    };
+    const form = document.getElementById("profile-form");
+    const preview = document.getElementById("yaml-preview");
+    const status = document.getElementById("status");
+
+    function renderFields() {
+      for (const field of CUSTOM_YAML_FIELDS) {
+        const label = document.createElement("label");
+        label.textContent = field.label;
+
+        const control = field.type === "select"
+          ? document.createElement("select")
+          : document.createElement("input");
+        control.id = field.key;
+        control.name = field.key;
+        control.dataset.valueType = field.type === "number" ? "number" : "string";
+
+        if (field.type === "select") {
+          for (const optionValue of field.options) {
+            const option = document.createElement("option");
+            option.value = optionValue;
+            option.textContent = optionValue;
+            control.appendChild(option);
+          }
+        } else {
+          control.type = field.type;
+          if (field.step) control.step = field.step;
+          if (field.min) control.min = field.min;
+        }
+        control.value = field.value;
+
+        label.appendChild(control);
+        if (field.hint) {
+          const hint = document.createElement("span");
+          hint.className = "hint";
+          hint.textContent = field.hint;
+          label.appendChild(hint);
+        }
+        sectionTargets[field.section].appendChild(label);
+      }
+    }
+
+    function yamlScalar(value, valueType) {
+      if (valueType === "number") {
+        const numberValue = Number(value);
+        return Number.isInteger(numberValue) ? String(numberValue) : String(numberValue);
+      }
+      if (/^[A-Za-z0-9_./:-]+$/.test(value)) {
+        return value;
+      }
+      return JSON.stringify(value);
+    }
+
+    function collectYaml() {
+      const lines = [];
+      for (const field of CUSTOM_YAML_FIELDS) {
+        const control = form.elements[field.key];
+        const value = String(control.value).trim();
+        if (value === "") continue;
+        lines.push(`${field.key}: ${yamlScalar(value, control.dataset.valueType)}`);
+      }
+      return `${lines.join("\n")}\n`;
+    }
+
+    function updatePreview() {
+      preview.textContent = collectYaml();
+      status.textContent = "Ready";
+    }
+
+    function downloadYaml() {
+      const blob = new Blob([collectYaml()], { type: "application/x-yaml" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "deconvolution-custom-profile.yml";
+      link.click();
+      URL.revokeObjectURL(link.href);
+      status.textContent = "Downloaded";
+    }
+
+    async function copyYaml() {
+      await navigator.clipboard.writeText(collectYaml());
+      status.textContent = "Copied";
+    }
+
+    renderFields();
+    updatePreview();
+    form.addEventListener("input", updatePreview);
+    form.addEventListener("reset", () => window.setTimeout(updatePreview, 0));
+    document.getElementById("download-button").addEventListener("click", downloadYaml);
+    document.getElementById("copy-button").addEventListener("click", copyYaml);
+  </script>
+</body>
+</html>
