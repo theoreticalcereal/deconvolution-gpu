@@ -47,6 +47,13 @@ class CustomProfileBuilderTests(unittest.TestCase):
         ]:
             self.assertIsNone(re.search(rf'key:\s*"{blocked_key}"', html))
 
+    def test_psf_and_advanced_sections_are_collapsed_disclosures(self):
+        html = CUSTOM_PROFILE_BUILDER_PATH.read_text(encoding="utf-8")
+
+        self.assertRegex(html, r"<details>\s*<summary>\s*PSF And Deconvolution\s*</summary>")
+        self.assertRegex(html, r"<details>\s*<summary>\s*Advanced Tuning\s*</summary>")
+        self.assertNotRegex(html, r"<details[^>]*\sopen(?:\s|>)")
+
 
 if __name__ == "__main__":
     unittest.main()
