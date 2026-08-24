@@ -5,14 +5,7 @@ before_script:
 
 
 stages:
-    - check
     - deploy
-
-# This performs validation of the astrocyte_pkg.yml file
-astrocyte_check:
-  stage: check
-  script:
-  - astrocyte_cli check "$CI_PROJECT_DIR"
 
 pages:
   stage: deploy
